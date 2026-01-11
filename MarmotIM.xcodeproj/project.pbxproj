@@ -1,0 +1,534 @@
+// !$*UTF8*$!
+{
+    archiveVersion = 1;
+    classes = {
+    };
+    objectVersion = 56;
+    objects = {
+
+/* Begin PBXBuildFile section */
+        MAIN_SWIFT /* main.swift in Sources */ = {isa = PBXBuildFile; fileRef = MAIN_SWIFT_REF /* main.swift */; };
+        APPDELEGATE_SWIFT /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = APPDELEGATE_SWIFT_REF /* AppDelegate.swift */; };
+        INPUTCONTROLLER_SWIFT /* InputController.swift in Sources */ = {isa = PBXBuildFile; fileRef = INPUTCONTROLLER_SWIFT_REF /* InputController.swift */; };
+        DICTENTRY_SWIFT /* DictionaryEntry.swift in Sources */ = {isa = PBXBuildFile; fileRef = DICTENTRY_SWIFT_REF /* DictionaryEntry.swift */; };
+        DICTENGINE_SWIFT /* DictionaryEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = DICTENGINE_SWIFT_REF /* DictionaryEngine.swift */; };
+        PREFIXTRIE_SWIFT /* PrefixTrie.swift in Sources */ = {isa = PBXBuildFile; fileRef = PREFIXTRIE_SWIFT_REF /* PrefixTrie.swift */; };
+        VOCABDB_SWIFT /* VocabularyDatabase.swift in Sources */ = {isa = PBXBuildFile; fileRef = VOCABDB_SWIFT_REF /* VocabularyDatabase.swift */; };
+        PRELOAD_SWIFT /* DictionaryPreloadService.swift in Sources */ = {isa = PBXBuildFile; fileRef = PRELOAD_SWIFT_REF /* DictionaryPreloadService.swift */; };
+        FRECENCY_SWIFT /* FrecencyScore.swift in Sources */ = {isa = PBXBuildFile; fileRef = FRECENCY_SWIFT_REF /* FrecencyScore.swift */; };
+        RANKER_SWIFT /* CandidateRanker.swift in Sources */ = {isa = PBXBuildFile; fileRef = RANKER_SWIFT_REF /* CandidateRanker.swift */; };
+        USERDATA_SWIFT /* UserDataStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = USERDATA_SWIFT_REF /* UserDataStore.swift */; };
+        CANDIDATEWIN_SWIFT /* CandidateWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = CANDIDATEWIN_SWIFT_REF /* CandidateWindow.swift */; };
+        APPCONFIG_SWIFT /* AppConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = APPCONFIG_SWIFT_REF /* AppConfig.swift */; };
+        MODEINDICATOR_SWIFT /* ModeIndicator.swift in Sources */ = {isa = PBXBuildFile; fileRef = MODEINDICATOR_SWIFT_REF /* ModeIndicator.swift */; };
+        SETTINGSWINDOW_SWIFT /* SettingsWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = SETTINGSWINDOW_SWIFT_REF /* SettingsWindowController.swift */; };
+        BASICSETTINGS_SWIFT /* BasicSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BASICSETTINGS_SWIFT_REF /* BasicSettingsView.swift */; };
+        USERDICT_SWIFT /* UserDictView.swift in Sources */ = {isa = PBXBuildFile; fileRef = USERDICT_SWIFT_REF /* UserDictView.swift */; };
+        PUNCTUATION_SWIFT /* PunctuationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = PUNCTUATION_SWIFT_REF /* PunctuationView.swift */; };
+        THEMESETTINGS_SWIFT /* ThemeSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = THEMESETTINGS_SWIFT_REF /* ThemeSettingsView.swift */; };
+        IMPORTEXPORT_SWIFT /* ImportExportView.swift in Sources */ = {isa = PBXBuildFile; fileRef = IMPORTEXPORT_SWIFT_REF /* ImportExportView.swift */; };
+        ABOUTVIEW_SWIFT /* AboutView.swift in Sources */ = {isa = PBXBuildFile; fileRef = ABOUTVIEW_SWIFT_REF /* AboutView.swift */; };
+        REVERSELOOKUP_SWIFT /* ReverseLookupTable.swift in Sources */ = {isa = PBXBuildFile; fileRef = REVERSELOOKUP_SWIFT_REF /* ReverseLookupTable.swift */; };
+        SELECTIONCAPTURE_SWIFT /* SelectionCapture.swift in Sources */ = {isa = PBXBuildFile; fileRef = SELECTIONCAPTURE_SWIFT_REF /* SelectionCapture.swift */; };
+        CHARTOWUBI_JSON /* char_to_wubi.json in Resources */ = {isa = PBXBuildFile; fileRef = CHARTOWUBI_JSON_REF /* char_to_wubi.json */; };
+        CHARTOPINYIN_JSON /* char_to_pinyin.json in Resources */ = {isa = PBXBuildFile; fileRef = CHARTOPINYIN_JSON_REF /* char_to_pinyin.json */; };
+        POLYPHONEWORDS_JSON /* polyphone_words.json in Resources */ = {isa = PBXBuildFile; fileRef = POLYPHONEWORDS_JSON_REF /* polyphone_words.json */; };
+        INPUTMETHOD_FW /* InputMethodKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = INPUTMETHOD_FW_REF /* InputMethodKit.framework */; };
+        SQLITE_LIB /* libsqlite3.tbd in Frameworks */ = {isa = PBXBuildFile; fileRef = SQLITE_LIB_REF /* libsqlite3.tbd */; };
+        INFOPLIST_STRINGS /* InfoPlist.strings in Resources */ = {isa = PBXBuildFile; fileRef = INFOPLIST_STRINGS_REF /* InfoPlist.strings */; };
+        ASSETS_BUILD /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = ASSETS_REF /* Assets.xcassets */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+        APP_REF /* MarmotIM.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = MarmotIM.app; sourceTree = BUILT_PRODUCTS_DIR; };
+        MAIN_SWIFT_REF /* main.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = main.swift; sourceTree = "<group>"; };
+        APPDELEGATE_SWIFT_REF /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
+        INPUTCONTROLLER_SWIFT_REF /* InputController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InputController.swift; sourceTree = "<group>"; };
+        DICTENTRY_SWIFT_REF /* DictionaryEntry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DictionaryEntry.swift; sourceTree = "<group>"; };
+        DICTENGINE_SWIFT_REF /* DictionaryEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DictionaryEngine.swift; sourceTree = "<group>"; };
+        PREFIXTRIE_SWIFT_REF /* PrefixTrie.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrefixTrie.swift; sourceTree = "<group>"; };
+        VOCABDB_SWIFT_REF /* VocabularyDatabase.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VocabularyDatabase.swift; sourceTree = "<group>"; };
+        PRELOAD_SWIFT_REF /* DictionaryPreloadService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DictionaryPreloadService.swift; sourceTree = "<group>"; };
+        FRECENCY_SWIFT_REF /* FrecencyScore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FrecencyScore.swift; sourceTree = "<group>"; };
+        RANKER_SWIFT_REF /* CandidateRanker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CandidateRanker.swift; sourceTree = "<group>"; };
+        USERDATA_SWIFT_REF /* UserDataStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UserDataStore.swift; sourceTree = "<group>"; };
+        CANDIDATEWIN_SWIFT_REF /* CandidateWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CandidateWindow.swift; sourceTree = "<group>"; };
+        APPCONFIG_SWIFT_REF /* AppConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppConfig.swift; sourceTree = "<group>"; };
+        MODEINDICATOR_SWIFT_REF /* ModeIndicator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModeIndicator.swift; sourceTree = "<group>"; };
+        SETTINGSWINDOW_SWIFT_REF /* SettingsWindowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsWindowController.swift; sourceTree = "<group>"; };
+        BASICSETTINGS_SWIFT_REF /* BasicSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BasicSettingsView.swift; sourceTree = "<group>"; };
+        USERDICT_SWIFT_REF /* UserDictView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UserDictView.swift; sourceTree = "<group>"; };
+        PUNCTUATION_SWIFT_REF /* PunctuationView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PunctuationView.swift; sourceTree = "<group>"; };
+        THEMESETTINGS_SWIFT_REF /* ThemeSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThemeSettingsView.swift; sourceTree = "<group>"; };
+        IMPORTEXPORT_SWIFT_REF /* ImportExportView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImportExportView.swift; sourceTree = "<group>"; };
+        ABOUTVIEW_SWIFT_REF /* AboutView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AboutView.swift; sourceTree = "<group>"; };
+        REVERSELOOKUP_SWIFT_REF /* ReverseLookupTable.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReverseLookupTable.swift; sourceTree = "<group>"; };
+        SELECTIONCAPTURE_SWIFT_REF /* SelectionCapture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SelectionCapture.swift; sourceTree = "<group>"; };
+        CHARTOWUBI_JSON_REF /* char_to_wubi.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = char_to_wubi.json; sourceTree = "<group>"; };
+        CHARTOPINYIN_JSON_REF /* char_to_pinyin.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = char_to_pinyin.json; sourceTree = "<group>"; };
+        POLYPHONEWORDS_JSON_REF /* polyphone_words.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = polyphone_words.json; sourceTree = "<group>"; };
+        INFO_PLIST_REF /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+        INPUTMETHOD_FW_REF /* InputMethodKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = InputMethodKit.framework; path = System/Library/Frameworks/InputMethodKit.framework; sourceTree = SDKROOT; };
+        SQLITE_LIB_REF /* libsqlite3.tbd */ = {isa = PBXFileReference; lastKnownFileType = "sourcecode.text-based-dylib-definition"; name = libsqlite3.tbd; path = usr/lib/libsqlite3.tbd; sourceTree = SDKROOT; };
+        INFOPLIST_EN_REF /* en */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = en; path = "en.lproj/InfoPlist.strings"; sourceTree = "<group>"; };
+        INFOPLIST_ZH_REF /* zh-Hans */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = "zh-Hans"; path = "zh-Hans.lproj/InfoPlist.strings"; sourceTree = "<group>"; };
+        ASSETS_REF /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXVariantGroup section */
+        INFOPLIST_STRINGS_REF /* InfoPlist.strings */ = {
+            isa = PBXVariantGroup;
+            children = (
+                INFOPLIST_EN_REF /* en */,
+                INFOPLIST_ZH_REF /* zh-Hans */,
+            );
+            name = InfoPlist.strings;
+            sourceTree = "<group>";
+        };
+/* End PBXVariantGroup section */
+
+/* Begin PBXFrameworksBuildPhase section */
+        FRAMEWORKS_PHASE /* Frameworks */ = {
+            isa = PBXFrameworksBuildPhase;
+            buildActionMask = 2147483647;
+            files = (
+                INPUTMETHOD_FW /* InputMethodKit.framework in Frameworks */,
+                SQLITE_LIB /* libsqlite3.tbd in Frameworks */,
+            );
+            runOnlyForDeploymentPostprocessing = 0;
+        };
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+        ROOT_GROUP = {
+            isa = PBXGroup;
+            children = (
+                SOURCE_GROUP /* MarmotIM */,
+                PRODUCTS_GROUP /* Products */,
+                FRAMEWORKS_GROUP /* Frameworks */,
+            );
+            sourceTree = "<group>";
+        };
+        PRODUCTS_GROUP /* Products */ = {
+            isa = PBXGroup;
+            children = (
+                APP_REF /* MarmotIM.app */,
+            );
+            name = Products;
+            sourceTree = "<group>";
+        };
+        SOURCE_GROUP /* MarmotIM */ = {
+            isa = PBXGroup;
+            children = (
+                MAIN_SWIFT_REF /* main.swift */,
+                APPDELEGATE_SWIFT_REF /* AppDelegate.swift */,
+                INPUTCONTROLLER_SWIFT_REF /* InputController.swift */,
+                DICTIONARY_GROUP /* Dictionary */,
+                RANKING_GROUP /* Ranking */,
+                STORAGE_GROUP /* Storage */,
+                UI_GROUP /* UI */,
+                CONFIG_GROUP /* Config */,
+                SETTINGS_GROUP /* Settings */,
+                SERVICES_GROUP /* Services */,
+                RESOURCES_JSON_GROUP /* Resources */,
+                INFO_PLIST_REF /* Info.plist */,
+                INFOPLIST_STRINGS_REF /* InfoPlist.strings */,
+                ASSETS_REF /* Assets.xcassets */,
+            );
+            path = MarmotIM;
+            sourceTree = "<group>";
+        };
+        DICTIONARY_GROUP /* Dictionary */ = {
+            isa = PBXGroup;
+            children = (
+                DICTENTRY_SWIFT_REF /* DictionaryEntry.swift */,
+                DICTENGINE_SWIFT_REF /* DictionaryEngine.swift */,
+                PREFIXTRIE_SWIFT_REF /* PrefixTrie.swift */,
+                VOCABDB_SWIFT_REF /* VocabularyDatabase.swift */,
+                PRELOAD_SWIFT_REF /* DictionaryPreloadService.swift */,
+                REVERSELOOKUP_SWIFT_REF /* ReverseLookupTable.swift */,
+            );
+            path = Dictionary;
+            sourceTree = "<group>";
+        };
+        SERVICES_GROUP /* Services */ = {
+            isa = PBXGroup;
+            children = (
+                SELECTIONCAPTURE_SWIFT_REF /* SelectionCapture.swift */,
+            );
+            path = Services;
+            sourceTree = "<group>";
+        };
+        RESOURCES_JSON_GROUP /* Resources */ = {
+            isa = PBXGroup;
+            children = (
+                CHARTOWUBI_JSON_REF /* char_to_wubi.json */,
+                CHARTOPINYIN_JSON_REF /* char_to_pinyin.json */,
+                POLYPHONEWORDS_JSON_REF /* polyphone_words.json */,
+            );
+            path = Resources;
+            sourceTree = "<group>";
+        };
+        RANKING_GROUP /* Ranking */ = {
+            isa = PBXGroup;
+            children = (
+                FRECENCY_SWIFT_REF /* FrecencyScore.swift */,
+                RANKER_SWIFT_REF /* CandidateRanker.swift */,
+            );
+            path = Ranking;
+            sourceTree = "<group>";
+        };
+        STORAGE_GROUP /* Storage */ = {
+            isa = PBXGroup;
+            children = (
+                USERDATA_SWIFT_REF /* UserDataStore.swift */,
+            );
+            path = Storage;
+            sourceTree = "<group>";
+        };
+        UI_GROUP /* UI */ = {
+            isa = PBXGroup;
+            children = (
+                CANDIDATEWIN_SWIFT_REF /* CandidateWindow.swift */,
+                MODEINDICATOR_SWIFT_REF /* ModeIndicator.swift */,
+            );
+            path = UI;
+            sourceTree = "<group>";
+        };
+        CONFIG_GROUP /* Config */ = {
+            isa = PBXGroup;
+            children = (
+                APPCONFIG_SWIFT_REF /* AppConfig.swift */,
+            );
+            path = Config;
+            sourceTree = "<group>";
+        };
+        SETTINGS_GROUP /* Settings */ = {
+            isa = PBXGroup;
+            children = (
+                SETTINGSWINDOW_SWIFT_REF /* SettingsWindowController.swift */,
+                SETTINGS_TABS_GROUP /* Tabs */,
+            );
+            path = Settings;
+            sourceTree = "<group>";
+        };
+        SETTINGS_TABS_GROUP /* Tabs */ = {
+            isa = PBXGroup;
+            children = (
+                BASICSETTINGS_SWIFT_REF /* BasicSettingsView.swift */,
+                USERDICT_SWIFT_REF /* UserDictView.swift */,
+                PUNCTUATION_SWIFT_REF /* PunctuationView.swift */,
+                THEMESETTINGS_SWIFT_REF /* ThemeSettingsView.swift */,
+                IMPORTEXPORT_SWIFT_REF /* ImportExportView.swift */,
+                ABOUTVIEW_SWIFT_REF /* AboutView.swift */,
+            );
+            path = Tabs;
+            sourceTree = "<group>";
+        };
+        FRAMEWORKS_GROUP /* Frameworks */ = {
+            isa = PBXGroup;
+            children = (
+                INPUTMETHOD_FW_REF /* InputMethodKit.framework */,
+                SQLITE_LIB_REF /* libsqlite3.tbd */,
+            );
+            name = Frameworks;
+            sourceTree = "<group>";
+        };
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+        APP_TARGET /* MarmotIM */ = {
+            isa = PBXNativeTarget;
+            buildConfigurationList = BUILD_CONFIG_LIST /* Build configuration list for PBXNativeTarget "MarmotIM" */;
+            buildPhases = (
+                SOURCES_PHASE /* Sources */,
+                FRAMEWORKS_PHASE /* Frameworks */,
+                RESOURCES_PHASE /* Resources */,
+            );
+            buildRules = (
+            );
+            dependencies = (
+            );
+            name = MarmotIM;
+            productName = MarmotIM;
+            productReference = APP_REF /* MarmotIM.app */;
+            productType = "com.apple.product-type.application";
+        };
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+        PROJECT_ROOT /* Project object */ = {
+            isa = PBXProject;
+            attributes = {
+                BuildIndependentTargetsInParallel = 1;
+                LastSwiftUpdateCheck = 1500;
+                LastUpgradeCheck = 1500;
+                TargetAttributes = {
+                    APP_TARGET = {
+                        CreatedOnToolsVersion = 15.0;
+                    };
+                };
+            };
+            buildConfigurationList = PROJECT_CONFIG_LIST /* Build configuration list for PBXProject "MarmotIM" */;
+            compatibilityVersion = "Xcode 14.0";
+            developmentRegion = en;
+            hasScannedForEncodings = 0;
+            knownRegions = (
+                en,
+                Base,
+                "zh-Hans",
+            );
+            mainGroup = ROOT_GROUP;
+            productRefGroup = PRODUCTS_GROUP /* Products */;
+            projectDirPath = "";
+            projectRoot = "";
+            targets = (
+                APP_TARGET /* MarmotIM */,
+            );
+        };
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+        RESOURCES_PHASE /* Resources */ = {
+            isa = PBXResourcesBuildPhase;
+            buildActionMask = 2147483647;
+            files = (
+                INFOPLIST_STRINGS /* InfoPlist.strings in Resources */,
+                ASSETS_BUILD /* Assets.xcassets in Resources */,
+                CHARTOWUBI_JSON /* char_to_wubi.json in Resources */,
+                CHARTOPINYIN_JSON /* char_to_pinyin.json in Resources */,
+                POLYPHONEWORDS_JSON /* polyphone_words.json in Resources */,
+            );
+            runOnlyForDeploymentPostprocessing = 0;
+        };
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+        SOURCES_PHASE /* Sources */ = {
+            isa = PBXSourcesBuildPhase;
+            buildActionMask = 2147483647;
+            files = (
+                MAIN_SWIFT /* main.swift in Sources */,
+                APPDELEGATE_SWIFT /* AppDelegate.swift in Sources */,
+                INPUTCONTROLLER_SWIFT /* InputController.swift in Sources */,
+                DICTENTRY_SWIFT /* DictionaryEntry.swift in Sources */,
+                DICTENGINE_SWIFT /* DictionaryEngine.swift in Sources */,
+                PREFIXTRIE_SWIFT /* PrefixTrie.swift in Sources */,
+                VOCABDB_SWIFT /* VocabularyDatabase.swift in Sources */,
+                PRELOAD_SWIFT /* DictionaryPreloadService.swift in Sources */,
+                FRECENCY_SWIFT /* FrecencyScore.swift in Sources */,
+                RANKER_SWIFT /* CandidateRanker.swift in Sources */,
+                USERDATA_SWIFT /* UserDataStore.swift in Sources */,
+                CANDIDATEWIN_SWIFT /* CandidateWindow.swift in Sources */,
+                APPCONFIG_SWIFT /* AppConfig.swift in Sources */,
+                MODEINDICATOR_SWIFT /* ModeIndicator.swift in Sources */,
+                SETTINGSWINDOW_SWIFT /* SettingsWindowController.swift in Sources */,
+                BASICSETTINGS_SWIFT /* BasicSettingsView.swift in Sources */,
+                USERDICT_SWIFT /* UserDictView.swift in Sources */,
+                PUNCTUATION_SWIFT /* PunctuationView.swift in Sources */,
+                THEMESETTINGS_SWIFT /* ThemeSettingsView.swift in Sources */,
+                IMPORTEXPORT_SWIFT /* ImportExportView.swift in Sources */,
+                ABOUTVIEW_SWIFT /* AboutView.swift in Sources */,
+                REVERSELOOKUP_SWIFT /* ReverseLookupTable.swift in Sources */,
+                SELECTIONCAPTURE_SWIFT /* SelectionCapture.swift in Sources */,
+            );
+            runOnlyForDeploymentPostprocessing = 0;
+        };
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+        DEBUG_CONFIG /* Debug */ = {
+            isa = XCBuildConfiguration;
+            buildSettings = {
+                ALWAYS_SEARCH_USER_PATHS = NO;
+                ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+                CLANG_ANALYZER_NONNULL = YES;
+                CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+                CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+                CLANG_ENABLE_MODULES = YES;
+                CLANG_ENABLE_OBJC_ARC = YES;
+                CLANG_ENABLE_OBJC_WEAK = YES;
+                CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+                CLANG_WARN_BOOL_CONVERSION = YES;
+                CLANG_WARN_COMMA = YES;
+                CLANG_WARN_CONSTANT_CONVERSION = YES;
+                CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+                CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+                CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+                CLANG_WARN_EMPTY_BODY = YES;
+                CLANG_WARN_ENUM_CONVERSION = YES;
+                CLANG_WARN_INFINITE_RECURSION = YES;
+                CLANG_WARN_INT_CONVERSION = YES;
+                CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+                CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+                CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+                CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+                CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+                CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+                CLANG_WARN_STRICT_PROTOTYPES = YES;
+                CLANG_WARN_SUSPICIOUS_MOVE = YES;
+                CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+                CLANG_WARN_UNREACHABLE_CODE = YES;
+                CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+                COPY_PHASE_STRIP = NO;
+                DEBUG_INFORMATION_FORMAT = dwarf;
+                ENABLE_STRICT_OBJC_MSGSEND = YES;
+                ENABLE_TESTABILITY = YES;
+                ENABLE_USER_SCRIPT_SANDBOXING = YES;
+                GCC_C_LANGUAGE_STANDARD = gnu17;
+                GCC_DYNAMIC_NO_PIC = NO;
+                GCC_NO_COMMON_BLOCKS = YES;
+                GCC_OPTIMIZATION_LEVEL = 0;
+                GCC_PREPROCESSOR_DEFINITIONS = (
+                    "DEBUG=1",
+                    "$(inherited)",
+                );
+                GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+                GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+                GCC_WARN_UNDECLARED_SELECTOR = YES;
+                GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+                GCC_WARN_UNUSED_FUNCTION = YES;
+                GCC_WARN_UNUSED_VARIABLE = YES;
+                LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+                MACOSX_DEPLOYMENT_TARGET = 13.0;
+                MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+                MTL_FAST_MATH = YES;
+                ONLY_ACTIVE_ARCH = YES;
+                SDKROOT = macosx;
+                SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+                SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+            };
+            name = Debug;
+        };
+        RELEASE_CONFIG /* Release */ = {
+            isa = XCBuildConfiguration;
+            buildSettings = {
+                ALWAYS_SEARCH_USER_PATHS = NO;
+                ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+                CLANG_ANALYZER_NONNULL = YES;
+                CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+                CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+                CLANG_ENABLE_MODULES = YES;
+                CLANG_ENABLE_OBJC_ARC = YES;
+                CLANG_ENABLE_OBJC_WEAK = YES;
+                CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+                CLANG_WARN_BOOL_CONVERSION = YES;
+                CLANG_WARN_COMMA = YES;
+                CLANG_WARN_CONSTANT_CONVERSION = YES;
+                CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+                CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+                CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+                CLANG_WARN_EMPTY_BODY = YES;
+                CLANG_WARN_ENUM_CONVERSION = YES;
+                CLANG_WARN_INFINITE_RECURSION = YES;
+                CLANG_WARN_INT_CONVERSION = YES;
+                CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+                CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+                CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+                CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+                CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+                CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+                CLANG_WARN_STRICT_PROTOTYPES = YES;
+                CLANG_WARN_SUSPICIOUS_MOVE = YES;
+                CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+                CLANG_WARN_UNREACHABLE_CODE = YES;
+                CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+                COPY_PHASE_STRIP = NO;
+                DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+                ENABLE_NS_ASSERTIONS = NO;
+                ENABLE_STRICT_OBJC_MSGSEND = YES;
+                ENABLE_USER_SCRIPT_SANDBOXING = YES;
+                GCC_C_LANGUAGE_STANDARD = gnu17;
+                GCC_NO_COMMON_BLOCKS = YES;
+                GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+                GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+                GCC_WARN_UNDECLARED_SELECTOR = YES;
+                GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+                GCC_WARN_UNUSED_FUNCTION = YES;
+                GCC_WARN_UNUSED_VARIABLE = YES;
+                LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+                MACOSX_DEPLOYMENT_TARGET = 13.0;
+                MTL_ENABLE_DEBUG_INFO = NO;
+                MTL_FAST_MATH = YES;
+                SDKROOT = macosx;
+                SWIFT_COMPILATION_MODE = wholemodule;
+            };
+            name = Release;
+        };
+        TARGET_DEBUG_CONFIG /* Debug */ = {
+            isa = XCBuildConfiguration;
+            buildSettings = {
+                ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+                CODE_SIGN_ENTITLEMENTS = "";
+                CODE_SIGN_STYLE = Automatic;
+                COMBINE_HIDPI_IMAGES = YES;
+                CURRENT_PROJECT_VERSION = 1;
+                DEVELOPMENT_TEAM = "";
+                ENABLE_HARDENED_RUNTIME = YES;
+                GENERATE_INFOPLIST_FILE = NO;
+                INFOPLIST_FILE = MarmotIM/Info.plist;
+                INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
+                INFOPLIST_KEY_NSHumanReadableCopyright = "Copyright 2026. All rights reserved.";
+                LD_RUNPATH_SEARCH_PATHS = (
+                    "$(inherited)",
+                    "@executable_path/../Frameworks",
+                );
+                MARKETING_VERSION = 1.0.0;
+                PRODUCT_BUNDLE_IDENTIFIER = com.marmotim.inputmethod.MarmotIM;
+                PRODUCT_NAME = "$(TARGET_NAME)";
+                SWIFT_EMIT_LOC_STRINGS = YES;
+                SWIFT_VERSION = 5.0;
+            };
+            name = Debug;
+        };
+        TARGET_RELEASE_CONFIG /* Release */ = {
+            isa = XCBuildConfiguration;
+            buildSettings = {
+                ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+                CODE_SIGN_ENTITLEMENTS = "";
+                CODE_SIGN_STYLE = Automatic;
+                COMBINE_HIDPI_IMAGES = YES;
+                CURRENT_PROJECT_VERSION = 1;
+                DEVELOPMENT_TEAM = "";
+                ENABLE_HARDENED_RUNTIME = YES;
+                GENERATE_INFOPLIST_FILE = NO;
+                INFOPLIST_FILE = MarmotIM/Info.plist;
+                INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
+                INFOPLIST_KEY_NSHumanReadableCopyright = "Copyright 2026. All rights reserved.";
+                LD_RUNPATH_SEARCH_PATHS = (
+                    "$(inherited)",
+                    "@executable_path/../Frameworks",
+                );
+                MARKETING_VERSION = 1.0.0;
+                PRODUCT_BUNDLE_IDENTIFIER = com.marmotim.inputmethod.MarmotIM;
+                PRODUCT_NAME = "$(TARGET_NAME)";
+                SWIFT_EMIT_LOC_STRINGS = YES;
+                SWIFT_VERSION = 5.0;
+            };
+            name = Release;
+        };
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+        PROJECT_CONFIG_LIST /* Build configuration list for PBXProject "MarmotIM" */ = {
+            isa = XCConfigurationList;
+            buildConfigurations = (
+                DEBUG_CONFIG /* Debug */,
+                RELEASE_CONFIG /* Release */,
+            );
+            defaultConfigurationIsVisible = 0;
+            defaultConfigurationName = Release;
+        };
+        BUILD_CONFIG_LIST /* Build configuration list for PBXNativeTarget "MarmotIM" */ = {
+            isa = XCConfigurationList;
+            buildConfigurations = (
+                TARGET_DEBUG_CONFIG /* Debug */,
+                TARGET_RELEASE_CONFIG /* Release */,
+            );
+            defaultConfigurationIsVisible = 0;
+            defaultConfigurationName = Release;
+        };
+/* End XCConfigurationList section */
+    };
+    rootObject = PROJECT_ROOT /* Project object */;
+}

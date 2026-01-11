@@ -1,0 +1,5 @@
+/* Localized versions of Info.plist keys */
+
+CFBundleDisplayName = "土拨鼠输入法";
+CFBundleName = "MarmotIM";
+"com.marmotim.inputmethod.MarmotIM" = "土拨鼠输入法";

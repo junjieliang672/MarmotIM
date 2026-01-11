@@ -1,0 +1,26 @@
+<svg width="18" height="18" viewBox="0 0 18 18" xmlns="http://www.w3.org/2000/svg">
+  <!-- Option 3: Simple flat marmot - menu bar friendly -->
+  <!-- Background circle -->
+  <circle cx="9" cy="9" r="8" fill="#B8860B"/>
+  <!-- Face -->
+  <ellipse cx="9" cy="10" rx="5.5" ry="5" fill="#DEB887"/>
+  <!-- Ears -->
+  <ellipse cx="4" cy="4.5" rx="2" ry="1.8" fill="#B8860B"/>
+  <ellipse cx="14" cy="4.5" rx="2" ry="1.8" fill="#B8860B"/>
+  <!-- Eyes - simple dots -->
+  <circle cx="6.5" cy="8.5" r="1" fill="#2C1810"/>
+  <circle cx="11.5" cy="8.5" r="1" fill="#2C1810"/>
+  <!-- Eye highlights -->
+  <circle cx="6.8" cy="8.2" r="0.4" fill="#FFF"/>
+  <circle cx="11.8" cy="8.2" r="0.4" fill="#FFF"/>
+  <!-- Nose -->
+  <circle cx="9" cy="11" r="1.2" fill="#5C4033"/>
+  <!-- Whisker dots -->
+  <circle cx="5" cy="11" r="0.3" fill="#5C4033"/>
+  <circle cx="4" cy="12" r="0.3" fill="#5C4033"/>
+  <circle cx="13" cy="11" r="0.3" fill="#5C4033"/>
+  <circle cx="14" cy="12" r="0.3" fill="#5C4033"/>
+  <!-- Teeth -->
+  <rect x="7.8" y="12.5" width="1" height="1.5" rx="0.3" fill="#FFFEF0"/>
+  <rect x="9.2" y="12.5" width="1" height="1.5" rx="0.3" fill="#FFFEF0"/>
+</svg>

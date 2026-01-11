@@ -1,0 +1,5 @@
+/* Localized versions of Info.plist keys */
+
+CFBundleDisplayName = "MarmotIM";
+CFBundleName = "MarmotIM";
+"com.marmotim.inputmethod.MarmotIM" = "MarmotIM";

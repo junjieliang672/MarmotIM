@@ -1,0 +1,20 @@
+<svg width="18" height="18" viewBox="0 0 18 18" xmlns="http://www.w3.org/2000/svg">
+  <!-- Option 1: Cute round marmot face -->
+  <!-- Head -->
+  <ellipse cx="9" cy="10" rx="7" ry="6.5" fill="#8B6914"/>
+  <!-- Cheeks -->
+  <circle cx="4" cy="11" r="2.5" fill="#C4A44A"/>
+  <circle cx="14" cy="11" r="2.5" fill="#C4A44A"/>
+  <!-- Ears -->
+  <ellipse cx="4" cy="5" rx="2" ry="1.5" fill="#8B6914"/>
+  <ellipse cx="14" cy="5" rx="2" ry="1.5" fill="#8B6914"/>
+  <!-- Eyes -->
+  <circle cx="6.5" cy="9" r="1.5" fill="#000"/>
+  <circle cx="11.5" cy="9" r="1.5" fill="#000"/>
+  <circle cx="7" cy="8.5" r="0.5" fill="#FFF"/>
+  <circle cx="12" cy="8.5" r="0.5" fill="#FFF"/>
+  <!-- Nose -->
+  <ellipse cx="9" cy="12" rx="1.5" ry="1" fill="#5C4A0E"/>
+  <!-- Teeth -->
+  <rect x="8" y="13.5" width="2" height="2" rx="0.3" fill="#FFF"/>
+</svg>
