@@ -408,6 +408,12 @@ class DictionaryEngine {
             }
         }
 
+        // 3. 记录到 user_favorites 表（用于在设置中显示用户入库的词条）
+        if result.success {
+            _ = db.addUserFavorite(text: text, wubiCode: wubiCode, pinyinCode: pinyinCode)
+            NSLog("MarmotIM: addDualEntry - added to user_favorites")
+        }
+
         NSLog("MarmotIM: addDualEntry complete - %@", result.description)
         return result
     }
@@ -518,6 +524,10 @@ class DictionaryEngine {
                 NSLog("MarmotIM: removeDualEntry - pinyin entry not found for code '%@'", code)
             }
         }
+
+        // 从 user_favorites 表中也删除
+        _ = db.removeUserFavorite(text: text)
+        NSLog("MarmotIM: removeDualEntry - removed from user_favorites")
 
         NSLog("MarmotIM: removeDualEntry complete - %@", result.description)
         return result

@@ -542,16 +542,36 @@ def save_sqlite(entries: List[dict], pinyin_index: Dict, wubi_index: Dict, filep
             FOREIGN KEY (entry_id) REFERENCES entries(id) ON DELETE CASCADE
         );
 
+        -- User favorites table (tracks entries added via control+=)
+        CREATE TABLE user_favorites (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            text TEXT NOT NULL,
+            wubi_code TEXT,
+            pinyin_code TEXT,
+            added_timestamp INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
+            UNIQUE(text, wubi_code, pinyin_code)
+        );
+
+        -- Schema version table
+        CREATE TABLE schema_version (
+            version INTEGER PRIMARY KEY
+        );
+
         -- Create indexes for fast prefix queries
         CREATE INDEX idx_pinyin_prefix ON pinyin_index(code);
         CREATE INDEX idx_wubi_prefix ON wubi_index(code);
         CREATE INDEX idx_user_learning_score ON user_learning(total_score DESC);
         CREATE INDEX idx_entries_source ON entries(source);
+        CREATE INDEX idx_user_favorites_text ON user_favorites(text);
     ''')
 
-    # Insert entries
+    # Set schema version
+    cursor.execute("INSERT INTO schema_version (version) VALUES (1)")
+    conn.commit()
+
+    # Insert entries in a single transaction for performance
     print("    Inserting entries...")
-    cursor.execute("BEGIN TRANSACTION")
+    conn.execute("BEGIN TRANSACTION")
 
     entry_data = [
         (
@@ -598,12 +618,16 @@ def save_sqlite(entries: List[dict], pinyin_index: Dict, wubi_index: Dict, filep
     )
     print(f"    Inserted {len(wubi_data)} wubi index entries")
 
-    cursor.execute("COMMIT")
+    conn.commit()
 
     # Optimize database
     print("    Optimizing database...")
     cursor.execute("ANALYZE")
     cursor.execute("VACUUM")
+
+    # Configure database for durability
+    cursor.execute("PRAGMA journal_mode=WAL")
+    cursor.execute("PRAGMA synchronous=FULL")
 
     conn.close()
 

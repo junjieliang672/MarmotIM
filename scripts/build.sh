@@ -53,8 +53,23 @@ echo ""
 # ========================================
 echo "[2/4] Stopping old process..."
 
-pkill -f "$APP_NAME" 2>/dev/null || true
-sleep 1
+# Graceful shutdown: send SIGTERM first to allow proper cleanup (WAL checkpoint, etc.)
+if pgrep -f "$APP_NAME" > /dev/null 2>&1; then
+    killall -TERM "$APP_NAME" 2>/dev/null || true
+    # Wait for graceful shutdown (up to 3 seconds)
+    for i in {1..6}; do
+        if ! pgrep -f "$APP_NAME" > /dev/null 2>&1; then
+            break
+        fi
+        sleep 0.5
+    done
+    # Force kill if still running
+    if pgrep -f "$APP_NAME" > /dev/null 2>&1; then
+        echo "  Force stopping..."
+        killall -KILL "$APP_NAME" 2>/dev/null || true
+        sleep 0.5
+    fi
+fi
 
 echo "Done."
 echo ""

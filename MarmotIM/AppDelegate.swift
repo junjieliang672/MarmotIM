@@ -57,6 +57,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Save configuration
         try? Self.config.save()
+
+        // Force WAL checkpoint to ensure all data is written to disk
+        // This prevents data loss when process is killed by pkill
+        VocabularyDatabase.shared.checkpoint()
     }
 
     // MARK: - Initialization

@@ -97,13 +97,22 @@ final class VocabularyDatabase {
         // Enable WAL mode for better concurrent read/write performance
         executeSQL("PRAGMA journal_mode=WAL")
 
-        // Optimize for read-heavy workload
-        executeSQL("PRAGMA synchronous=NORMAL")
+        // Use FULL synchronous to ensure data survives process termination (pkill)
+        // This is critical because quick_update.sh uses pkill to stop the app
+        executeSQL("PRAGMA synchronous=FULL")
         executeSQL("PRAGMA cache_size=-64000")  // 64MB cache
         executeSQL("PRAGMA temp_store=MEMORY")
 
         // Enable foreign keys
         executeSQL("PRAGMA foreign_keys=ON")
+    }
+
+    /// Force checkpoint WAL file - call this before app termination
+    func checkpoint() {
+        lock.lock()
+        defer { lock.unlock() }
+        executeSQL("PRAGMA wal_checkpoint(TRUNCATE)")
+        NSLog("MarmotIM: WAL checkpoint completed")
     }
 
     private func createTables() {
@@ -153,6 +162,19 @@ final class VocabularyDatabase {
             )
         """
 
+        // User favorites table - tracks entries added via control+=
+        // This allows showing "user added" entries in settings even if they exist in system dict
+        let userFavoritesSQL = """
+            CREATE TABLE IF NOT EXISTS user_favorites (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                text TEXT NOT NULL,
+                wubi_code TEXT,
+                pinyin_code TEXT,
+                added_timestamp INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
+                UNIQUE(text, wubi_code, pinyin_code)
+            )
+        """
+
         // Schema version table
         let schemaVersionSQL = """
             CREATE TABLE IF NOT EXISTS schema_version (
@@ -164,6 +186,7 @@ final class VocabularyDatabase {
         executeSQL(pinyinIndexSQL)
         executeSQL(wubiIndexSQL)
         executeSQL(userLearningSQL)
+        executeSQL(userFavoritesSQL)
         executeSQL(schemaVersionSQL)
 
         // Create indexes for fast prefix queries
@@ -171,6 +194,7 @@ final class VocabularyDatabase {
         executeSQL("CREATE INDEX IF NOT EXISTS idx_wubi_prefix ON wubi_index(code)")
         executeSQL("CREATE INDEX IF NOT EXISTS idx_user_learning_score ON user_learning(total_score DESC)")
         executeSQL("CREATE INDEX IF NOT EXISTS idx_entries_source ON entries(source)")
+        executeSQL("CREATE INDEX IF NOT EXISTS idx_user_favorites_text ON user_favorites(text)")
     }
 
     // MARK: - Entry Operations
@@ -729,6 +753,97 @@ final class VocabularyDatabase {
         executeSQL("DELETE FROM wubi_index")
 
         NSLog("MarmotIM: Dictionary entries cleared (user learning preserved)")
+    }
+
+    // MARK: - User Favorites (control+= added entries)
+
+    /// Add a user favorite entry (called when user adds via control+=)
+    func addUserFavorite(text: String, wubiCode: String?, pinyinCode: String?) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+
+        let sql = """
+            INSERT OR REPLACE INTO user_favorites (text, wubi_code, pinyin_code, added_timestamp)
+            VALUES (?, ?, ?, strftime('%s', 'now'))
+        """
+
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
+            return false
+        }
+        defer { sqlite3_finalize(statement) }
+
+        sqlite3_bind_text(statement, 1, text, -1, SQLITE_TRANSIENT)
+        if let wubi = wubiCode {
+            sqlite3_bind_text(statement, 2, wubi, -1, SQLITE_TRANSIENT)
+        } else {
+            sqlite3_bind_null(statement, 2)
+        }
+        if let pinyin = pinyinCode {
+            sqlite3_bind_text(statement, 3, pinyin, -1, SQLITE_TRANSIENT)
+        } else {
+            sqlite3_bind_null(statement, 3)
+        }
+
+        return sqlite3_step(statement) == SQLITE_DONE
+    }
+
+    /// Remove a user favorite entry
+    func removeUserFavorite(text: String) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+
+        return executeSQL("DELETE FROM user_favorites WHERE text = '\(text.replacingOccurrences(of: "'", with: "''"))'")
+    }
+
+    /// Get all user favorites
+    func getUserFavorites() -> [(id: Int, text: String, wubiCode: String?, pinyinCode: String?, timestamp: Int)] {
+        lock.lock()
+        defer { lock.unlock() }
+
+        var results: [(Int, String, String?, String?, Int)] = []
+
+        let sql = "SELECT id, text, wubi_code, pinyin_code, added_timestamp FROM user_favorites ORDER BY added_timestamp DESC"
+        var statement: OpaquePointer?
+
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
+            return []
+        }
+        defer { sqlite3_finalize(statement) }
+
+        while sqlite3_step(statement) == SQLITE_ROW {
+            let id = Int(sqlite3_column_int(statement, 0))
+            let textPtr = sqlite3_column_text(statement, 1)
+            let text = textPtr != nil ? String(cString: textPtr!) : ""
+
+            let wubiCode: String?
+            if let ptr = sqlite3_column_text(statement, 2) {
+                wubiCode = String(cString: ptr)
+            } else {
+                wubiCode = nil
+            }
+
+            let pinyinCode: String?
+            if let ptr = sqlite3_column_text(statement, 3) {
+                pinyinCode = String(cString: ptr)
+            } else {
+                pinyinCode = nil
+            }
+
+            let timestamp = Int(sqlite3_column_int(statement, 4))
+            results.append((id, text, wubiCode, pinyinCode, timestamp))
+        }
+
+        NSLog("MarmotIM: getUserFavorites - found %d entries", results.count)
+        return results
+    }
+
+    /// Remove a user favorite by ID
+    func removeUserFavoriteById(_ id: Int) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+
+        return executeSQL("DELETE FROM user_favorites WHERE id = \(id)")
     }
 
     // MARK: - Migration

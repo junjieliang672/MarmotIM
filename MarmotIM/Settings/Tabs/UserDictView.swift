@@ -1,14 +1,23 @@
 import SwiftUI
 
+/// User favorite entry (from user_favorites table)
+struct UserFavoriteEntry: Identifiable {
+    let id: Int
+    let text: String
+    let wubiCode: String?
+    let pinyinCode: String?
+    let timestamp: Int
+}
+
 /// User dictionary management view
-/// macOS native style with +/- buttons and search
+/// Shows entries added via control+= (user_favorites table)
 struct UserDictView: View {
     @ObservedObject var viewModel: SettingsViewModel
-    @State private var userEntries: [DictionaryEntry] = []
+    @State private var userFavorites: [UserFavoriteEntry] = []
     @State private var isLoading: Bool = true
     @State private var showingAddSheet: Bool = false
     @State private var searchText: String = ""
-    @State private var selectedEntryIds: Set<UInt32> = []
+    @State private var selectedIds: Set<Int> = []
     @State private var statusMessage: String = ""
     @State private var showStatus: Bool = false
 
@@ -17,15 +26,15 @@ struct UserDictView: View {
     @State private var newWords: String = ""
     @State private var isWubiCode: Bool = false
 
-    private var filteredEntries: [DictionaryEntry] {
+    private var filteredEntries: [UserFavoriteEntry] {
         if searchText.isEmpty {
-            return userEntries
+            return userFavorites
         }
         let query = searchText.lowercased()
-        return userEntries.filter { entry in
+        return userFavorites.filter { entry in
             entry.text.lowercased().contains(query) ||
-            entry.pinyin.lowercased().contains(query) ||
-            (entry.wubi?.lowercased().contains(query) ?? false)
+            (entry.pinyinCode?.lowercased().contains(query) ?? false) ||
+            (entry.wubiCode?.lowercased().contains(query) ?? false)
         }
     }
 
@@ -60,7 +69,7 @@ struct UserDictView: View {
                         ProgressView()
                         Spacer()
                     }
-                } else if userEntries.isEmpty {
+                } else if userFavorites.isEmpty {
                     VStack {
                         Spacer()
                         VStack(spacing: 8) {
@@ -69,7 +78,7 @@ struct UserDictView: View {
                                 .foregroundColor(.secondary)
                             Text("暂无用户词条")
                                 .foregroundColor(.secondary)
-                            Text("点击下方 + 添加词条")
+                            Text("使用 Control+= 划词入库")
                                 .font(.caption)
                                 .foregroundColor(.secondary)
                         }
@@ -88,8 +97,8 @@ struct UserDictView: View {
                         Spacer()
                     }
                 } else {
-                    List(filteredEntries, id: \.id, selection: $selectedEntryIds) { entry in
-                        UserEntryRow(entry: entry)
+                    List(filteredEntries, id: \.id, selection: $selectedIds) { entry in
+                        UserFavoriteRow(entry: entry)
                             .tag(entry.id)
                     }
                     .listStyle(.inset(alternatesRowBackgrounds: true))
@@ -99,7 +108,7 @@ struct UserDictView: View {
 
             Divider()
 
-            // Bottom toolbar with +/- buttons
+            // Bottom toolbar
             HStack(spacing: 0) {
                 Button(action: { showingAddSheet = true }) {
                     Image(systemName: "plus")
@@ -116,7 +125,7 @@ struct UserDictView: View {
                         .frame(width: 24, height: 20)
                 }
                 .buttonStyle(.borderless)
-                .disabled(selectedEntryIds.isEmpty)
+                .disabled(selectedIds.isEmpty)
                 .help("删除选中的词条")
 
                 Spacer()
@@ -129,7 +138,7 @@ struct UserDictView: View {
                         .padding(.trailing, 8)
                 }
 
-                Text("添加后立即生效")
+                Text("Control+= 划词入库 | Control+- 划词删除")
                     .font(.caption)
                     .foregroundColor(.secondary)
             }
@@ -138,7 +147,7 @@ struct UserDictView: View {
             .background(Color(NSColor.windowBackgroundColor))
         }
         .onAppear {
-            loadUserEntries()
+            loadUserFavorites()
         }
         .sheet(isPresented: $showingAddSheet) {
             AddWordSheet(
@@ -156,14 +165,13 @@ struct UserDictView: View {
 
     // MARK: - Actions
 
-    private func loadUserEntries() {
+    private func loadUserFavorites() {
         isLoading = true
         DispatchQueue.global(qos: .userInitiated).async {
-            // Query directly from database
-            let entries = VocabularyDatabase.shared.getUserEntries()
-            NSLog("MarmotIM: UserDictView loaded %d user entries", entries.count)
+            let favorites = VocabularyDatabase.shared.getUserFavorites()
+            let entries = favorites.map { UserFavoriteEntry(id: $0.id, text: $0.text, wubiCode: $0.wubiCode, pinyinCode: $0.pinyinCode, timestamp: $0.timestamp) }
             DispatchQueue.main.async {
-                self.userEntries = entries
+                self.userFavorites = entries
                 self.isLoading = false
             }
         }
@@ -179,33 +187,30 @@ struct UserDictView: View {
             return
         }
 
-        // Try to use DictionaryEngine first, fall back to direct DB access
         let words = newWords.split(separator: " ")
         var addedCount = 0
+        let db = VocabularyDatabase.shared
 
-        if let engine = AppDelegate.shared?.dictionaryEngine {
-            for word in words {
-                let text = String(word).trimmingCharacters(in: .whitespaces)
-                guard !text.isEmpty else { continue }
-                if engine.addUserEntry(code: code, text: text, isWubi: isWubiCode) != nil {
-                    addedCount += 1
-                }
+        for word in words {
+            let text = String(word).trimmingCharacters(in: .whitespaces)
+            guard !text.isEmpty else { continue }
+
+            // Add to user_favorites
+            let wubiCode = isWubiCode ? code : nil
+            let pinyinCode = isWubiCode ? nil : code
+            if db.addUserFavorite(text: text, wubiCode: wubiCode, pinyinCode: pinyinCode) {
+                addedCount += 1
             }
-        } else {
-            // Direct database access when engine is not available
-            let db = VocabularyDatabase.shared
-            for word in words {
-                let text = String(word).trimmingCharacters(in: .whitespaces)
-                guard !text.isEmpty else { continue }
-                if db.addUserEntryDirect(code: code, text: text, isWubi: isWubiCode) {
-                    addedCount += 1
-                }
+
+            // Also try to add via engine if available (for immediate use)
+            if let engine = AppDelegate.shared?.dictionaryEngine {
+                _ = engine.addUserEntry(code: code, text: text, isWubi: isWubiCode)
             }
         }
 
         if addedCount > 0 {
             showStatusMessage("已添加 \(addedCount) 个词条")
-            loadUserEntries()
+            loadUserFavorites()
             clearInputs()
             showingAddSheet = false
         } else {
@@ -214,19 +219,19 @@ struct UserDictView: View {
     }
 
     private func deleteSelectedEntries() {
-        guard !selectedEntryIds.isEmpty else { return }
+        guard !selectedIds.isEmpty else { return }
 
         var deletedCount = 0
         let db = VocabularyDatabase.shared
 
-        for id in selectedEntryIds {
-            if db.deleteIndexesForEntry(entryId: id) && db.deleteEntry(id: id) {
+        for id in selectedIds {
+            if db.removeUserFavoriteById(id) {
                 deletedCount += 1
             }
         }
 
-        selectedEntryIds.removeAll()
-        loadUserEntries()
+        selectedIds.removeAll()
+        loadUserFavorites()
 
         if deletedCount > 0 {
             showStatusMessage("已删除 \(deletedCount) 个词条")
@@ -252,10 +257,10 @@ struct UserDictView: View {
     }
 }
 
-// MARK: - User Entry Row
+// MARK: - User Favorite Row
 
-struct UserEntryRow: View {
-    let entry: DictionaryEntry
+struct UserFavoriteRow: View {
+    let entry: UserFavoriteEntry
 
     var body: some View {
         HStack(spacing: 12) {
@@ -265,7 +270,7 @@ struct UserEntryRow: View {
             Spacer()
 
             HStack(spacing: 8) {
-                if let wubi = entry.wubi, !wubi.isEmpty {
+                if let wubi = entry.wubiCode, !wubi.isEmpty {
                     Text(wubi)
                         .font(.caption)
                         .padding(.horizontal, 6)
@@ -274,8 +279,8 @@ struct UserEntryRow: View {
                         .foregroundColor(.blue)
                         .cornerRadius(4)
                 }
-                if !entry.pinyin.isEmpty {
-                    Text(entry.pinyin)
+                if let pinyin = entry.pinyinCode, !pinyin.isEmpty {
+                    Text(pinyin)
                         .font(.caption)
                         .padding(.horizontal, 6)
                         .padding(.vertical, 2)

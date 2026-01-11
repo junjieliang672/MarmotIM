@@ -7,11 +7,25 @@ set -e
 echo "=== MarmotIM Clean Installation ==="
 echo ""
 
-# Step 1: Kill processes
-echo "Step 1: Killing related processes..."
-pkill -f MarmotIM 2>/dev/null || true
-pkill -f MarmotIM 2>/dev/null || true
-sleep 1
+# Step 1: Graceful shutdown
+echo "Step 1: Stopping MarmotIM gracefully..."
+# Send SIGTERM first to allow proper cleanup (WAL checkpoint, etc.)
+if pgrep -f MarmotIM > /dev/null 2>&1; then
+    killall -TERM MarmotIM 2>/dev/null || true
+    # Wait for graceful shutdown (up to 3 seconds)
+    for i in {1..6}; do
+        if ! pgrep -f MarmotIM > /dev/null 2>&1; then
+            break
+        fi
+        sleep 0.5
+    done
+    # Force kill if still running
+    if pgrep -f MarmotIM > /dev/null 2>&1; then
+        echo "   Force stopping..."
+        killall -KILL MarmotIM 2>/dev/null || true
+        sleep 0.5
+    fi
+fi
 
 # Step 2: Remove all installations
 echo "Step 2: Removing old installations..."
