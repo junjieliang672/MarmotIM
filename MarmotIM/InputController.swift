@@ -735,11 +735,12 @@ class InputController: IMKInputController {
 
     private func updateMarkedText(client sender: Any!) {
         if let client = sender as? IMKTextInput {
-            // Use empty string to hide marked text from input field
-            // The input code is already shown in the candidate window
+            // Set inputBuffer as marked text so the client knows there's composing text
+            // This fixes backspace issues in Chrome/Electron where empty marked text
+            // causes backspace to delete both the composing character and committed text
             client.setMarkedText(
-                "",
-                selectionRange: NSRange(location: 0, length: 0),
+                inputBuffer,
+                selectionRange: NSRange(location: inputBuffer.count, length: 0),
                 replacementRange: NSRange(location: NSNotFound, length: 0)
             )
         }
