@@ -195,6 +195,53 @@ final class VocabularyDatabase {
         executeSQL("CREATE INDEX IF NOT EXISTS idx_user_learning_score ON user_learning(total_score DESC)")
         executeSQL("CREATE INDEX IF NOT EXISTS idx_entries_source ON entries(source)")
         executeSQL("CREATE INDEX IF NOT EXISTS idx_user_favorites_text ON user_favorites(text)")
+
+        // Filter mode tables
+        executeSQL("""
+            CREATE TABLE IF NOT EXISTS emoji_index (
+                id INTEGER PRIMARY KEY,
+                code TEXT NOT NULL,
+                code_type TEXT NOT NULL,
+                emoji TEXT NOT NULL,
+                frequency INTEGER DEFAULT 0
+            )
+        """)
+        executeSQL("CREATE INDEX IF NOT EXISTS idx_emoji_code ON emoji_index(code)")
+
+        executeSQL("""
+            CREATE TABLE IF NOT EXISTS fuzzy_pinyin (
+                id INTEGER PRIMARY KEY,
+                fuzzy_code TEXT NOT NULL,
+                original_code TEXT NOT NULL,
+                word TEXT NOT NULL,
+                fuzzy_type TEXT NOT NULL
+            )
+        """)
+        executeSQL("CREATE INDEX IF NOT EXISTS idx_fuzzy_code ON fuzzy_pinyin(fuzzy_code)")
+
+        executeSQL("""
+            CREATE TABLE IF NOT EXISTS symbol_index (
+                id INTEGER PRIMARY KEY,
+                code TEXT NOT NULL,
+                symbol TEXT NOT NULL,
+                category TEXT,
+                description TEXT
+            )
+        """)
+        executeSQL("CREATE INDEX IF NOT EXISTS idx_symbol_code ON symbol_index(code)")
+
+        // Filter mode user frequency (isolated from normal mode)
+        executeSQL("""
+            CREATE TABLE IF NOT EXISTS filter_user_freq (
+                filter_type TEXT NOT NULL,
+                code TEXT NOT NULL,
+                word TEXT NOT NULL,
+                frequency INTEGER DEFAULT 1,
+                last_used REAL,
+                PRIMARY KEY (filter_type, code, word)
+            )
+        """)
+        executeSQL("CREATE INDEX IF NOT EXISTS idx_filter_freq ON filter_user_freq(filter_type, code)")
     }
 
     // MARK: - Entry Operations
