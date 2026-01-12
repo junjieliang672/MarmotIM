@@ -50,10 +50,19 @@ cat > release/README.txt << 'RELEASE_EOF'
 4. 输入密码完成安装
 
 方法二：手动安装
-1. 将 MarmotIM.app 复制到 /Library/Input Methods/
-2. 注销并重新登录
-3. 打开「系统设置 → 键盘 → 输入源」
-4. 点击「+」添加「土拨鼠输入法」
+1. 移除安全限制：
+   xattr -cr MarmotIM.app
+
+2. 将 MarmotIM.app 复制到 /Library/Input Methods/：
+   sudo cp -r MarmotIM.app /Library/Input\ Methods/
+
+3. 如果提示没有执行权限，运行：
+   sudo chmod +x /Library/Input\ Methods/MarmotIM.app/Contents/MacOS/MarmotIM
+
+4. 注销并重新登录
+
+5. 打开「系统设置 → 键盘 → 输入源」
+   点击「+」添加「土拨鼠输入法」
 
 第二步：构建词库（必须）
 --------------------
