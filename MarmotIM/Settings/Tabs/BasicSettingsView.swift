@@ -21,7 +21,7 @@ struct BasicSettingsView: View {
                         .labelsHidden()
                         .frame(width: 150)
                         .onChange(of: viewModel.config.emptyCodeBehavior) { _ in
-                            viewModel.markDirty()
+                            viewModel.save()
                         }
                         Spacer()
                     }
@@ -38,7 +38,7 @@ struct BasicSettingsView: View {
                         .labelsHidden()
                         .frame(width: 150)
                         .onChange(of: viewModel.config.enterKeyBehavior) { _ in
-                            viewModel.markDirty()
+                            viewModel.save()  // Save immediately for critical settings
                         }
                         Spacer()
                     }
@@ -55,7 +55,7 @@ struct BasicSettingsView: View {
                                 get: { Double(viewModel.config.candidateCount) },
                                 set: {
                                     viewModel.config.candidateCount = Int($0)
-                                    viewModel.markDirty()
+                                    viewModel.save()
                                 }
                             ),
                             in: 3...9,
@@ -78,7 +78,7 @@ struct BasicSettingsView: View {
                                 isSelected: viewModel.config.pageKeys == option,
                                 action: {
                                     viewModel.config.pageKeys = option
-                                    viewModel.markDirty()
+                                    viewModel.save()
                                 }
                             )
                         }
@@ -95,7 +95,7 @@ struct BasicSettingsView: View {
                                 isSelected: viewModel.config.modeSwitchKey == key,
                                 action: {
                                     viewModel.config.modeSwitchKey = key
-                                    viewModel.markDirty()
+                                    viewModel.save()
                                 }
                             )
                         }
@@ -109,14 +109,14 @@ struct BasicSettingsView: View {
                         Text("在状态栏显示额外图标，以提示中英文状态")
                     }
                     .onChange(of: viewModel.config.showStatusBarIcon) { _ in
-                        viewModel.markDirty()
+                        viewModel.save()
                     }
 
                     Toggle(isOn: $viewModel.config.showModeIndicator) {
                         Text("切换状态时，在光标处提示中英文状态")
                     }
                     .onChange(of: viewModel.config.showModeIndicator) { _ in
-                        viewModel.markDirty()
+                        viewModel.save()
                     }
                 }
 

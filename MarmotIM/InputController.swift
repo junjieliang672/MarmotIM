@@ -173,7 +173,8 @@ class InputController: IMKInputController {
 
         // Handle letter input
         if let char = characters.first, char.isLetter && char.isASCII {
-            return handleLetterInput(String(char).lowercased(), client: sender)
+            // Pass original character - handleLetterInput will handle uppercase detection
+            return handleLetterInput(String(char), client: sender)
         }
 
         // Handle punctuation - convert based on config
@@ -258,15 +259,15 @@ class InputController: IMKInputController {
     // MARK: - Input Handling
 
     private func handleLetterInput(_ char: String, client sender: Any!) -> Bool {
-        // Check for temporary English mode (capital letter)
+        // Check for uppercase letter - pass through as English input
         if char.first?.isUppercase == true && inputBuffer.isEmpty {
-            // Pass through for English input
+            // Pass through for English input (preserves uppercase)
             return false
         }
 
         // 'z' is now a regular letter - no auto-commit behavior
-        // Add to input buffer
-        inputBuffer.append(char)
+        // Add to input buffer (always lowercase for Chinese input codes)
+        inputBuffer.append(char.lowercased())
         isComposing = true
 
         // Update marked text
@@ -609,13 +610,13 @@ class InputController: IMKInputController {
                 shiftPressedTime = Date()
                 shiftUsedAsModifier = false
             } else {
-                // Shift released - check if it was a quick tap (< 100ms) AND not used as modifier
+                // Shift released - check if it was a quick tap (< 150ms) AND not used as modifier
                 if let pressedTime = shiftPressedTime {
                     let elapsed = Date().timeIntervalSince(pressedTime)
                     // Only toggle mode if:
-                    // 1. Quick tap (< 100ms)
+                    // 1. Quick tap (< 150ms)
                     // 2. Shift was NOT used as a modifier (with another key)
-                    if elapsed < 0.1 && !shiftUsedAsModifier {
+                    if elapsed < 0.15 && !shiftUsedAsModifier {
                         // Quick tap detected - toggle mode
                         toggleInputMode(client: sender)
                     }
