@@ -318,7 +318,40 @@ class InputController: IMKInputController {
         return true
     }
 
+    /// Exit filter mode
+    /// - Parameter commit: If true, commit selected candidate; if false, cancel
+    private func exitFilterMode(commit: Bool, client sender: Any!) {
+        NSLog("MarmotIM: Exiting filter mode (commit: \(commit))")
+
+        if commit && !allCandidates.isEmpty {
+            // Commit the first candidate
+            let candidate = allCandidates[0]
+            commitText(candidate.text, client: sender)
+
+            // Record selection for filter ranking (will be implemented in Task 7)
+            // recordFilterSelection(code: filterBuffer, word: candidate.text)
+        }
+
+        // Reset filter state
+        filterMode = .none
+        filterBuffer = ""
+
+        // Reset normal state
+        reset()
+        hideCandidateWindow()
+
+        if let client = sender as? IMKTextInput {
+            client.setMarkedText("", selectionRange: NSRange(location: 0, length: 0), replacementRange: NSRange(location: NSNotFound, length: 0))
+        }
+    }
+
     private func handleSpace(client sender: Any!) -> Bool {
+        // Handle filter mode space - commit first candidate
+        if filterMode != .none && !allCandidates.isEmpty {
+            exitFilterMode(commit: true, client: sender)
+            return true
+        }
+
         guard isComposing else { return false }
 
         // If we have candidates, select the first one
@@ -335,6 +368,12 @@ class InputController: IMKInputController {
     private func handleReturn(client sender: Any!) -> Bool {
         NSLog("MarmotIM: handleReturn - isComposing=%d, inputBuffer='%@', enterKeyBehavior=%@",
               isComposing ? 1 : 0, inputBuffer, AppDelegate.config.enterKeyBehavior.rawValue)
+
+        // Handle filter mode return - commit first candidate
+        if filterMode != .none && !allCandidates.isEmpty {
+            exitFilterMode(commit: true, client: sender)
+            return true
+        }
 
         guard isComposing else { return false }
 
@@ -358,6 +397,12 @@ class InputController: IMKInputController {
     }
 
     private func handleEscape(client sender: Any!) -> Bool {
+        // Handle filter mode escape
+        if filterMode != .none {
+            exitFilterMode(commit: false, client: sender)
+            return true
+        }
+
         guard isComposing else { return false }
 
         reset()
@@ -378,11 +423,7 @@ class InputController: IMKInputController {
         if filterMode != .none {
             guard !filterBuffer.isEmpty else {
                 // Exit filter mode when buffer is empty
-                reset()
-                hideCandidateWindow()
-                if let client = sender as? IMKTextInput {
-                    client.setMarkedText("", selectionRange: NSRange(location: 0, length: 0), replacementRange: NSRange(location: NSNotFound, length: 0))
-                }
+                exitFilterMode(commit: false, client: sender)
                 return true
             }
 
@@ -790,6 +831,14 @@ class InputController: IMKInputController {
         NSLog("MarmotIM: selectCandidate - text='%@', entryId=%u, baseFreq=%u, inputCode='%@'",
               candidate.text, candidate.entryId, candidate.baseFrequency, inputBuffer)
         commitText(candidate.text, client: sender)
+
+        // If in filter mode, exit after selection
+        if filterMode != .none {
+            // Record selection for filter ranking (Task 7)
+            // recordFilterSelection(code: filterBuffer, word: candidate.text)
+            filterMode = .none
+            filterBuffer = ""
+        }
 
         // Update user data (learning) - uses new DictionaryEngine API
         // CRITICAL: Use explicit guard to detect when engine is nil (bug detection)
