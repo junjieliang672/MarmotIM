@@ -18,9 +18,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     /// Shared configuration
     static var config: AppConfig = AppConfig.default
 
-    /// Status bar item for the input method menu
-    private var statusItem: NSStatusItem?
-
     // MARK: - Application Lifecycle
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -39,9 +36,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Load configuration
         loadConfiguration()
-
-        // Setup status bar menu
-        setupStatusBarMenu()
 
         // Setup notification observers
         setupNotificationObservers()
@@ -110,59 +104,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         do {
             Self.config = try AppConfig.load()
             Self.config.validate()
-            NSLog("MarmotIM: Configuration loaded")
+            NSLog("MarmotIM: Configuration loaded - enterKeyBehavior=%@, modeSwitchKey=%@",
+                  Self.config.enterKeyBehavior.rawValue, Self.config.modeSwitchKey.rawValue)
         } catch {
             NSLog("MarmotIM: Using default configuration: \(error)")
             Self.config = .default
         }
-    }
-
-    // MARK: - Status Bar Menu
-
-    private func setupStatusBarMenu() {
-        // Create status bar item
-        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
-
-        if let button = statusItem?.button {
-            button.image = NSImage(systemSymbolName: "keyboard", accessibilityDescription: "MarmotIM")
-            button.image?.isTemplate = true
-        }
-
-        // Create menu
-        let menu = NSMenu()
-
-        // Settings item
-        let settingsItem = NSMenuItem(title: "设置...", action: #selector(openSettings), keyEquivalent: ",")
-        settingsItem.target = self
-        menu.addItem(settingsItem)
-
-        menu.addItem(NSMenuItem.separator())
-
-        // Preload status item
-        let statusItem = NSMenuItem(title: "词库状态: 加载中...", action: nil, keyEquivalent: "")
-        statusItem.tag = 100  // Tag for updating later
-        menu.addItem(statusItem)
-
-        // Observe preload completion to update status
-        NotificationCenter.default.addObserver(
-            forName: .dictionaryPreloadComplete,
-            object: nil,
-            queue: .main
-        ) { [weak menu] notification in
-            if let item = menu?.item(withTag: 100),
-               let time = notification.userInfo?["preloadTime"] as? Double {
-                item.title = String(format: "词库状态: 已就绪 (%.1fs)", time)
-            }
-        }
-
-        menu.addItem(NSMenuItem.separator())
-
-        // About item
-        let aboutItem = NSMenuItem(title: "关于土拨鼠输入法", action: #selector(openAbout), keyEquivalent: "")
-        aboutItem.target = self
-        menu.addItem(aboutItem)
-
-        self.statusItem?.menu = menu
     }
 
     // MARK: - Notification Observers

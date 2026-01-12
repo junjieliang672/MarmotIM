@@ -259,21 +259,15 @@ class InputController: IMKInputController {
     // MARK: - Input Handling
 
     private func handleLetterInput(_ char: String, client sender: Any!) -> Bool {
-        // Check for uppercase letter - pass through as English input
-        if char.first?.isUppercase == true && inputBuffer.isEmpty {
-            // Pass through for English input (preserves uppercase)
-            return false
-        }
-
-        // 'z' is now a regular letter - no auto-commit behavior
-        // Add to input buffer (always lowercase for Chinese input codes)
-        inputBuffer.append(char.lowercased())
+        // Add character to input buffer preserving original case
+        // This allows users to type "This" and see "This" in the buffer
+        inputBuffer.append(char)
         isComposing = true
 
-        // Update marked text
+        // Update marked text (shows original case)
         updateMarkedText(client: sender)
 
-        // Search for candidates
+        // Search for candidates (uses lowercased input for matching)
         searchCandidates()
 
         // Show candidate window
@@ -297,19 +291,24 @@ class InputController: IMKInputController {
     }
 
     private func handleReturn(client sender: Any!) -> Bool {
+        NSLog("MarmotIM: handleReturn - isComposing=%d, inputBuffer='%@', enterKeyBehavior=%@",
+              isComposing ? 1 : 0, inputBuffer, AppDelegate.config.enterKeyBehavior.rawValue)
+
         guard isComposing else { return false }
 
         // Check enter key behavior setting
         switch AppDelegate.config.enterKeyBehavior {
         case .clearCode:
             // Clear the input code without outputting
+            NSLog("MarmotIM: handleReturn - clearing code")
             reset()
             hideCandidateWindow()
             if let client = sender as? IMKTextInput {
                 client.setMarkedText("", selectionRange: NSRange(location: 0, length: 0), replacementRange: NSRange(location: NSNotFound, length: 0))
             }
         case .outputCode:
-            // Commit the raw input buffer
+            // Commit the raw input buffer (preserving original case)
+            NSLog("MarmotIM: handleReturn - outputting code: '%@'", inputBuffer)
             commitText(inputBuffer, client: sender)
             reset()
         }
@@ -674,13 +673,14 @@ class InputController: IMKInputController {
             return
         }
 
-        // Search for more matches to allow pagination (up to 100)
-        let matches = engine.search(code: inputBuffer, limit: 100)
+        // Search using lowercased input (codes in database are lowercase)
+        let searchCode = inputBuffer.lowercased()
+        let matches = engine.search(code: searchCode, limit: 100)
 
         // Rank candidates using Frecency (new API with engine for user learning data)
         allCandidates = CandidateRanker.rank(
             matches: matches,
-            inputCode: inputBuffer,
+            inputCode: searchCode,
             engine: engine
         )
 
