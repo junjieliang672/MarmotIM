@@ -2,10 +2,15 @@ import Foundation
 
 /// Ranks candidates using tier-based Frecency algorithm
 ///
-/// ## Tier Structure (Absolute Priority - CANNOT be overridden)
+/// ## Tier Structure
 ///
+/// ### Protected Tier (CANNOT be overridden by tierOverrideBoost):
+/// - Tier 0: Wubi 1-2级简码 (+1T) - Full Wubi match with code length 1-2
+///   These ALWAYS rank first, regardless of user selection history.
+///
+/// ### Regular Tiers (CAN be overridden by tierOverrideBoost):
 /// When input length <= 4 (Wubi-priority mode):
-/// - Tier 1: Full Wubi match (+100B) - Wubi 1-2级简码 always first
+/// - Tier 1: Full Wubi match (+100B) - 3-4 character codes
 /// - Tier 2: Full Pinyin match (+10B)
 /// - Tier 3: Prefix Wubi match (+1B)
 /// - Tier 4: Prefix Pinyin match (0)
@@ -16,25 +21,33 @@ import Foundation
 ///
 /// ## Within-Tier Ranking (Frecency)
 ///
-/// 1. **Recency Score**: Exponentially decaying boost
-///    - Immediately after selection: ~100,000,000 (guarantees #1 in tier)
-///    - Half-life: 1 day
-///    - IMPORTANT: Cannot cross tier boundaries (max ~110M < 1B tier gap)
+/// 1. **Tier Override Boost**: Short-term boost that can cross regular tiers
+///    - Initial: 500B, Half-life: 1 hour
+///    - Allows user preferences to override tier priority (except jiǎnmǎ)
 ///
-/// 2. **Frequency Score**: Permanent accumulating score
+/// 2. **Recency Score**: Exponentially decaying boost
+///    - Immediately after selection: ~1,000,000,000 (guarantees #1 in tier)
+///    - Half-life: 1 day
+///
+/// 3. **Frequency Score**: Permanent accumulating score
 ///    - 10,000 points per selection
 ///
-/// 3. **Base Score**: Dictionary frequency (0-65535)
+/// 4. **Base Score**: Dictionary frequency (0-65535)
 ///
-/// 4. **Short Word Bonus**: Prefer shorter words
+/// 5. **Short Word Bonus**: Prefer shorter words
 ///
-/// Total = TierBonus + Recency + Frequency + Base + ShortWordBonus
-/// (tierOverrideBoost is disabled to preserve absolute tier priority)
+/// Total = TierBonus + TierOverrideBoost + Recency + Frequency + Base + ShortWordBonus
 struct CandidateRanker {
 
     // MARK: - Tier Bonus Constants
 
-    /// Tier 1: Full Wubi (short) or Full (long) - highest priority
+    /// Tier 0: Wubi 1-2级简码 (Protected tier - CANNOT be overridden)
+    /// This is set to 1T (1,000,000,000,000) which is higher than:
+    /// - tier1Bonus (100B) + tierOverrideBoost (500B) = 600B
+    /// So jiǎnmǎ will ALWAYS rank first regardless of user history.
+    static let jianmaTierBonus: Double = 1_000_000_000_000
+
+    /// Tier 1: Full Wubi (short) or Full (long) - highest regular priority
     static let tier1Bonus: Double = 100_000_000_000
 
     /// Tier 2: Full Pinyin (short only)
@@ -133,10 +146,16 @@ struct CandidateRanker {
         let isFullMatch = match.matchType == .full
         let isWubiCode = match.codeType == .wubi
 
+        // Check for Wubi 1-2级简码 (protected tier)
+        // These are Full Wubi matches where the user input is 1-2 characters
+        if isFullMatch && isWubiCode && inputLength <= 2 {
+            return jianmaTierBonus  // Protected tier - cannot be overridden
+        }
+
         if inputLength <= 4 {
             // Short code mode: Wubi priority
             switch (isFullMatch, isWubiCode) {
-            case (true, true):   return tier1Bonus  // Full Wubi
+            case (true, true):   return tier1Bonus  // Full Wubi (3-4 chars)
             case (true, false):  return tier2Bonus  // Full Pinyin
             case (false, true):  return tier3Bonus  // Prefix Wubi
             case (false, false): return 0           // Prefix Pinyin
