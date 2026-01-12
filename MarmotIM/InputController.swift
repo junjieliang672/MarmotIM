@@ -328,8 +328,8 @@ class InputController: IMKInputController {
             let candidate = allCandidates[0]
             commitText(candidate.text, client: sender)
 
-            // Record selection for filter ranking (will be implemented in Task 7)
-            // recordFilterSelection(code: filterBuffer, word: candidate.text)
+            // Record selection for filter ranking (isolated from normal mode)
+            recordFilterSelection(code: filterBuffer, word: candidate.text)
         }
 
         // Reset filter state
@@ -834,8 +834,8 @@ class InputController: IMKInputController {
 
         // If in filter mode, exit after selection
         if filterMode != .none {
-            // Record selection for filter ranking (Task 7)
-            // recordFilterSelection(code: filterBuffer, word: candidate.text)
+            // Record selection for filter ranking (isolated from normal mode)
+            recordFilterSelection(code: filterBuffer, word: candidate.text)
             filterMode = .none
             filterBuffer = ""
         }
@@ -956,12 +956,63 @@ class InputController: IMKInputController {
             )
         }
 
-        // Apply filter user ranking (will be implemented in Task 7)
-        // rankFilterCandidates()
+        // Apply filter user ranking (isolated from normal mode)
+        rankFilterCandidates()
 
         currentPage = 0
         updateCurrentPageCandidates()
         showCandidateWindow(client: sender)
+    }
+
+    // MARK: - Filter Mode Ranking
+
+    /// Record filter mode selection (delegates to database)
+    private func recordFilterSelection(code: String, word: String) {
+        VocabularyDatabase.shared.recordFilterSelection(
+            filterType: filterMode.rawValue,
+            code: code,
+            word: word
+        )
+    }
+
+    /// Rank filter candidates using isolated user data
+    private func rankFilterCandidates() {
+        let userFreqs = VocabularyDatabase.shared.getFilterUserFreq(
+            filterType: filterMode.rawValue,
+            code: filterBuffer
+        )
+
+        // Create lookup for user frequency
+        var freqLookup: [String: (Int, Double)] = [:]
+        for (word, freq, lastUsed) in userFreqs {
+            freqLookup[word] = (freq, lastUsed)
+        }
+
+        // Apply user frequency to candidates
+        for i in 0..<allCandidates.count {
+            if let (freq, lastUsed) = freqLookup[allCandidates[i].text] {
+                // Boost score based on user frequency
+                let recencyBonus = calculateFilterRecencyBonus(lastUsed: lastUsed)
+                allCandidates[i].score += Double(freq) * 10000 + recencyBonus
+            }
+        }
+
+        // Re-sort by score
+        allCandidates.sort { $0.score > $1.score }
+    }
+
+    private func calculateFilterRecencyBonus(lastUsed: Double) -> Double {
+        let now = Date().timeIntervalSince1970
+        let hoursSince = (now - lastUsed) / 3600
+
+        if hoursSince < 1 {
+            return 1_000_000  // Within last hour
+        } else if hoursSince < 24 {
+            return 100_000    // Within last day
+        } else if hoursSince < 168 {
+            return 10_000     // Within last week
+        }
+        return 0
     }
 
     // MARK: - Reset

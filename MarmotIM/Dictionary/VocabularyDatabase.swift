@@ -1028,6 +1028,63 @@ final class VocabularyDatabase {
         NSLog("MarmotIM: Migrated \(migratedCount) user learning records")
     }
 
+    // MARK: - Filter Mode User Frequency
+
+    /// Record user selection in filter mode (isolated from normal mode)
+    func recordFilterSelection(filterType: String, code: String, word: String) {
+        guard let db = db else { return }
+
+        let now = Date().timeIntervalSince1970
+        let sql = """
+            INSERT INTO filter_user_freq (filter_type, code, word, frequency, last_used)
+            VALUES (?, ?, ?, 1, ?)
+            ON CONFLICT(filter_type, code, word) DO UPDATE SET
+                frequency = frequency + 1,
+                last_used = ?
+        """
+
+        var stmt: OpaquePointer?
+        if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
+            sqlite3_bind_text(stmt, 1, filterType, -1, nil)
+            sqlite3_bind_text(stmt, 2, code, -1, nil)
+            sqlite3_bind_text(stmt, 3, word, -1, nil)
+            sqlite3_bind_double(stmt, 4, now)
+            sqlite3_bind_double(stmt, 5, now)
+            sqlite3_step(stmt)
+        }
+        sqlite3_finalize(stmt)
+    }
+
+    /// Get filter user frequency data
+    func getFilterUserFreq(filterType: String, code: String) -> [(word: String, frequency: Int, lastUsed: Double)] {
+        guard let db = db else { return [] }
+
+        var results: [(String, Int, Double)] = []
+        let sql = """
+            SELECT word, frequency, last_used
+            FROM filter_user_freq
+            WHERE filter_type = ? AND code LIKE ? || '%'
+            ORDER BY frequency DESC, last_used DESC
+        """
+
+        var stmt: OpaquePointer?
+        if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
+            sqlite3_bind_text(stmt, 1, filterType, -1, nil)
+            sqlite3_bind_text(stmt, 2, code, -1, nil)
+
+            while sqlite3_step(stmt) == SQLITE_ROW {
+                guard let wordPtr = sqlite3_column_text(stmt, 0) else { continue }
+                let word = String(cString: wordPtr)
+                let freq = Int(sqlite3_column_int(stmt, 1))
+                let lastUsed = sqlite3_column_double(stmt, 2)
+                results.append((word, freq, lastUsed))
+            }
+        }
+        sqlite3_finalize(stmt)
+
+        return results
+    }
+
     // MARK: - Helpers
 
     @discardableResult
