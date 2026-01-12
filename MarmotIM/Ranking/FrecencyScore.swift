@@ -39,6 +39,30 @@ struct FrecencyScore {
         log(2.0) / recencyHalfLife
     }
 
+    // MARK: - Tier Override Boost (Short-term, 1 hour half-life)
+    //
+    // This is a separate boost that can override tier priority
+    // Use case: User repeatedly selects a pinyin word over a wubi word
+    // The tier-override boost should push the pinyin word above wubi temporarily
+
+    /// Tier override half-life in seconds (1 hour)
+    /// This decays much faster than regular recency
+    static let tierOverrideHalfLife: TimeInterval = 3600
+
+    /// Lambda for tier override decay
+    static var tierOverrideLambda: Double {
+        log(2.0) / tierOverrideHalfLife
+    }
+
+    /// Initial tier override boost
+    /// Must be large enough that a recent selection beats a less-recent selection
+    /// even accounting for tier gaps. With 500B initial and 1hr half-life:
+    /// - Just selected: 500B boost
+    /// - 30 min ago: 354B boost (500B * 0.707)
+    /// - Difference: 146B > 100B tier gap
+    /// This ensures "last selection wins" within ~30 minutes
+    static let tierOverrideInitialBoost: Double = 500_000_000_000
+
     /// Permanent frequency multiplier per access
     /// This accumulates and never decays
     static let frequencyMultiplier: Double = 10_000
@@ -89,6 +113,31 @@ struct FrecencyScore {
 
         // Exponential decay: initialBoost × e^(-λ × t)
         return recencyInitialBoost * exp(-lambda * timeSince)
+    }
+
+    /// Calculate tier override boost
+    /// This is a separate high-value boost with 1-hour half-life
+    /// It can override tier priority for recently selected entries
+    ///
+    /// - Parameter lastAccessTimestamp: Unix timestamp of last access (0 if never)
+    /// - Returns: Tier override boost (0 if never accessed or decayed)
+    static func calculateTierOverrideBoost(lastAccessTimestamp: UInt32) -> Double {
+        guard lastAccessTimestamp > 0 else { return 0 }
+
+        let now = Date().timeIntervalSince1970
+        let lastAccess = TimeInterval(lastAccessTimestamp)
+        let timeSince = now - lastAccess
+
+        // Handle edge cases
+        guard timeSince >= 0 else {
+            return tierOverrideInitialBoost
+        }
+
+        // Exponential decay with 1-hour half-life
+        let boost = tierOverrideInitialBoost * exp(-tierOverrideLambda * timeSince)
+
+        // Cut off when boost is less than 1B (no longer meaningful)
+        return boost > 1_000_000_000 ? boost : 0
     }
 
     /// Calculate frequency score only

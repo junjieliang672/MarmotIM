@@ -61,12 +61,43 @@ struct CandidateRanker {
         engine: DictionaryEngine
     ) -> [Candidate] {
         let inputLength = inputCode.count
-        var candidates: [Candidate] = []
+
+        // STEP 1: Deduplicate by text, preferring entries with user data
+        // This fixes the bug where duplicate entries for the same word have different IDs
+        var textToMatch: [String: (match: DictionaryMatch, userData: UserEntryData?)] = [:]
 
         for match in matches {
-            // Get user learning data
+            let text = match.entry.text
             let userData = engine.getUserLearning(entryId: match.entry.id)
 
+            if let existing = textToMatch[text] {
+                // Prefer entry with userData, or higher tier, or existing entry
+                let existingHasUserData = existing.userData != nil
+                let newHasUserData = userData != nil
+
+                if newHasUserData && !existingHasUserData {
+                    // New entry has userData, existing doesn't - prefer new
+                    textToMatch[text] = (match, userData)
+                } else if !newHasUserData && existingHasUserData {
+                    // Existing has userData - keep existing
+                } else {
+                    // Both have or both lack userData - prefer higher tier match
+                    let existingTier = getTierBonus(match: existing.match, inputLength: inputLength)
+                    let newTier = getTierBonus(match: match, inputLength: inputLength)
+                    if newTier > existingTier {
+                        textToMatch[text] = (match, userData)
+                    }
+                    // Otherwise keep existing
+                }
+            } else {
+                textToMatch[text] = (match, userData)
+            }
+        }
+
+        // STEP 2: Calculate scores for deduplicated matches
+        var candidates: [Candidate] = []
+
+        for (_, (match, userData)) in textToMatch {
             // Calculate score using tier-based Frecency
             let score = calculateScore(
                 match: match,
@@ -132,20 +163,25 @@ struct CandidateRanker {
         let frequencyScore = FrecencyScore.calculateFrequencyScore(accessCount: accessCount)
         let baseScore = FrecencyScore.calculateBaseScore(baseFrequency: match.entry.baseFrequency)
 
-        // 3. Short word bonus (prefer shorter words within tier)
+        // 3. Tier override boost (short-term, can override tier priority)
+        // This allows recently selected entries to temporarily rank above higher-tier entries
+        let tierOverrideBoost = FrecencyScore.calculateTierOverrideBoost(lastAccessTimestamp: timestamp)
+
+        // 4. Short word bonus (prefer shorter words within tier)
         var shortWordBonus: Double = 0
         let textLength = match.entry.textLength
         if textLength < 5 {
             shortWordBonus = Double(5 - textLength) * shortWordBonusPerChar
         }
 
-        let totalScore = tierBonus + recencyScore + frequencyScore + baseScore + shortWordBonus
+        let totalScore = tierBonus + tierOverrideBoost + recencyScore + frequencyScore + baseScore + shortWordBonus
 
         // Debug logging for top candidates
         if accessCount > 0 {
-            NSLog("MarmotIM: Score for '%@' (id=%u): tier=%.0f, recency=%.0f, freq=%.0f, base=%.0f, short=%.0f, TOTAL=%.0f (accessCount=%u, ts=%u)",
+            NSLog("MarmotIM: Score for '%@' (id=%u): tier=%.0fB, override=%.0fB, recency=%.0f, freq=%.0f, base=%.0f, short=%.0f, TOTAL=%.0f (accessCount=%u, ts=%u)",
                   match.entry.text, match.entry.id,
-                  tierBonus, recencyScore, frequencyScore, baseScore, shortWordBonus, totalScore,
+                  tierBonus / 1_000_000_000, tierOverrideBoost / 1_000_000_000,
+                  recencyScore, frequencyScore, baseScore, shortWordBonus, totalScore,
                   accessCount, timestamp)
         }
 
