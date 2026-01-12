@@ -40,6 +40,9 @@ class InputController: IMKInputController {
     /// Track if Shift was used as a modifier (with another key) rather than standalone
     private var shiftUsedAsModifier: Bool = false
 
+    /// Pending shift toggle work item (used for delayed toggle to handle Electron app timing issues)
+    private var pendingShiftToggle: DispatchWorkItem?
+
     /// Track state for paired punctuation (true = next should be closing)
     private var pairedPunctuationState: [String: Bool] = [:]
 
@@ -116,6 +119,14 @@ class InputController: IMKInputController {
         // If Shift is held while pressing another key, mark it as used as modifier (not for mode switching)
         if modifiers.contains(.shift) {
             shiftUsedAsModifier = true
+        }
+
+        // Cancel any pending shift toggle (handles race condition in Electron apps like Lark)
+        // In Electron, keyDown may arrive AFTER shift release, so we cancel the pending toggle here
+        if pendingShiftToggle != nil {
+            pendingShiftToggle?.cancel()
+            pendingShiftToggle = nil
+            NSLog("MarmotIM: Cancelled pending shift toggle due to keyDown event")
         }
 
         // Debug log for troubleshooting app-specific issues
@@ -605,9 +616,11 @@ class InputController: IMKInputController {
         // Check if Shift key state changed
         if event.keyCode == 56 || event.keyCode == 60 { // Left Shift or Right Shift
             if modifiers.contains(.shift) {
-                // Shift pressed down - record timestamp and reset modifier flag
+                // Shift pressed down - record timestamp, reset modifier flag, cancel any pending toggle
                 shiftPressedTime = Date()
                 shiftUsedAsModifier = false
+                pendingShiftToggle?.cancel()
+                pendingShiftToggle = nil
             } else {
                 // Shift released - check if it was a quick tap (< 150ms) AND not used as modifier
                 if let pressedTime = shiftPressedTime {
@@ -616,8 +629,22 @@ class InputController: IMKInputController {
                     // 1. Quick tap (< 150ms)
                     // 2. Shift was NOT used as a modifier (with another key)
                     if elapsed < 0.15 && !shiftUsedAsModifier {
-                        // Quick tap detected - toggle mode
-                        toggleInputMode(client: sender)
+                        // Use delayed toggle to handle race condition in Electron apps (Lark, etc.)
+                        // In Electron, the keyDown event for Shift+Symbol may arrive AFTER the
+                        // flagsChanged event for Shift release. By delaying the toggle by 50ms,
+                        // we give the keyDown event time to arrive and cancel the toggle.
+                        pendingShiftToggle?.cancel()
+                        let workItem = DispatchWorkItem { [weak self] in
+                            guard let self = self else { return }
+                            // Double-check conditions haven't changed
+                            if !self.shiftUsedAsModifier {
+                                NSLog("MarmotIM: Executing delayed shift toggle")
+                                self.toggleInputMode(client: sender)
+                            }
+                            self.pendingShiftToggle = nil
+                        }
+                        pendingShiftToggle = workItem
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05, execute: workItem)
                     }
                 }
                 shiftPressedTime = nil
