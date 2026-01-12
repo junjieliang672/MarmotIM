@@ -5,6 +5,8 @@ DerivedData/
 *.xcuserstate
 xcuserdata/
 dist/
+release/
+MarmotIM-*.zip
 
 # Claude Code
 .claude/
