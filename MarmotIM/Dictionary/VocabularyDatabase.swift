@@ -56,6 +56,11 @@ final class VocabularyDatabase {
         return dbPath
     }
 
+    /// Get the database connection (for direct queries)
+    func getConnection() -> OpaquePointer? {
+        return db
+    }
+
     /// Close the database connection (for import/export operations)
     func closeDatabase() {
         lock.lock()
