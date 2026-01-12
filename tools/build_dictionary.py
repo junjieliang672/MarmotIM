@@ -26,6 +26,14 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
+# Note: Symbol dictionary building requires PyYAML: pip install pyyaml
+try:
+    import yaml
+    YAML_AVAILABLE = True
+except ImportError:
+    yaml = None  # type: ignore
+    YAML_AVAILABLE = False
+
 
 # Source priority: Wubi entries rank higher
 SOURCE_WUBI = 1
@@ -714,6 +722,39 @@ def build_fuzzy_pinyin_index(cursor, pinyin_path: str):
     print(f"  Added {count} fuzzy pinyin entries")
 
 
+def build_symbol_index(cursor, symbols_path: str):
+    """Build symbol index from symbols.yaml"""
+    if not YAML_AVAILABLE:
+        print("Warning: PyYAML not installed. Run: pip install pyyaml")
+        return
+
+    print(f"Building symbol index from {symbols_path}...")
+
+    cursor.execute("DELETE FROM symbol_index")
+
+    with open(symbols_path, 'r', encoding='utf-8') as f:
+        content = yaml.safe_load(f)  # type: ignore[union-attr]
+
+    count = 0
+    symbols = content.get('punctuator', {}).get('symbols', {})
+
+    for code, symbol_list in symbols.items():
+        if not code.startswith('/'):
+            continue
+
+        category = code[1:]  # Remove leading /
+
+        if isinstance(symbol_list, list):
+            for symbol in symbol_list:
+                cursor.execute(
+                    "INSERT INTO symbol_index (code, symbol, category, description) VALUES (?, ?, ?, ?)",
+                    (category, str(symbol), category, None)
+                )
+                count += 1
+
+    print(f"  Added {count} symbol entries")
+
+
 def load_corpus_frequencies(filepath: str) -> Dict[str, float]:
     """
     Load word frequency data from a corpus file.
@@ -894,8 +935,11 @@ def main():
             build_fuzzy_pinyin_index(cursor, args.pinyin)
 
         if args.build_symbol:
-            # Symbol building will be added in Task 10
-            print("Symbol building not yet implemented (Task 10)")
+            symbol_path = os.path.join(os.path.dirname(args.pinyin), 'symbols.yaml')
+            if os.path.exists(symbol_path):
+                build_symbol_index(cursor, symbol_path)
+            else:
+                print(f"Warning: symbols.yaml not found at {symbol_path}")
 
         conn.commit()
         conn.close()
