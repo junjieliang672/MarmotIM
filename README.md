@@ -24,16 +24,32 @@
 
 ## 安装
 
-### 前置要求
-- macOS 13.0+
-- Xcode 15.0+
-- Python 3.8+ (用于构建词库)
+### 方法一：下载安装（推荐）
 
-### 安装步骤
+无需 Xcode，适合普通用户：
+
+1. 从 [Releases](https://github.com/junjieliang672/MarmotIM/releases) 下载最新版本的 `MarmotIM-vX.X.X.zip`
+2. 解压后打开终端，cd 到解压目录
+3. 运行安装脚本：
+   ```bash
+   bash install.sh
+   ```
+4. 输入管理员密码完成安装
+
+安装完成后：
+1. 打开「系统设置 → 键盘 → 输入源」
+2. 点击「+」添加「土拨鼠输入法」(在中文分类下)
+3. 从菜单栏选择土拨鼠输入法开始使用
+
+如果输入法没有出现在列表中，请注销并重新登录。
+
+### 方法二：从源码构建
+
+适合开发者，需要 Xcode 15.0+ 和 Python 3.8+：
 
 ```bash
 # 1. 克隆仓库
-git clone https://github.com/marmotim/MarmotIM.git
+git clone https://github.com/junjieliang672/MarmotIM.git
 cd MarmotIM
 
 # 2. 构建词库
@@ -49,18 +65,14 @@ python3 tools/build_dictionary.py \
 ./scripts/build.sh
 ```
 
-安装完成后：
-1. 打开「系统设置 → 键盘 → 输入源」
-2. 点击「+」添加「土拨鼠输入法」(在中文分类下)
-3. 从菜单栏选择土拨鼠输入法开始使用
-
-如果输入法没有出现在列表中，请注销并重新登录。
-
-### 快速更新（开发用）
+### 开发者命令
 
 ```bash
-# 无需注销的快速更新
+# 快速更新（无需注销）
 ./scripts/quick_update.sh
+
+# 构建发布包
+./scripts/release.sh
 ```
 
 ## 使用方法
