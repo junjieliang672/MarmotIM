@@ -373,11 +373,31 @@ class InputController: IMKInputController {
         return true
     }
 
+    /// Handle Tab key - enter filter mode if single letter prefix
     private func handleTab(client sender: Any!) -> Bool {
-        // Tab cycles through candidates
-        guard isComposing, !currentCandidates.isEmpty else { return false }
-        // For now, just select first candidate
-        return selectCandidate(at: 0, client: sender)
+        // Only enter filter mode from normal mode with single letter
+        guard filterMode == .none && inputBuffer.count == 1 else {
+            // Default tab behavior (if any)
+            return false
+        }
+
+        let prefix = inputBuffer.lowercased()
+        guard let mode = FilterMode(rawValue: prefix), mode != .none else {
+            return false
+        }
+
+        // Enter filter mode
+        NSLog("MarmotIM: Entering filter mode: \(mode.displayLabel)")
+        filterMode = mode
+        filterBuffer = ""
+        inputBuffer = ""
+        isComposing = true
+
+        // Update UI to show filter mode
+        updateMarkedText(client: sender)
+        showFilterCandidates(client: sender)
+
+        return true
     }
 
     private func handleArrowKey(isDown: Bool, client sender: Any!) -> Bool {
@@ -801,6 +821,12 @@ class InputController: IMKInputController {
         candidateWindowController?.hide()
     }
 
+    /// Show candidates for current filter mode (stub - implemented in Task 5)
+    private func showFilterCandidates(client sender: Any!) {
+        // TODO: Implement in Task 5
+        NSLog("MarmotIM: showFilterCandidates called for mode: \(filterMode)")
+    }
+
     // MARK: - Reset
 
     private func reset() {
@@ -809,6 +835,9 @@ class InputController: IMKInputController {
         currentCandidates = []
         currentPage = 0
         isComposing = false
+        // Reset filter mode state
+        filterMode = .none
+        filterBuffer = ""
     }
 
     // MARK: - IMKStateSetting Protocol
