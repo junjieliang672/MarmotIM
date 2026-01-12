@@ -11,6 +11,9 @@ MarmotIM-*.zip
 # Claude Code
 .claude/
 
+# Design documents (local only)
+docs/plans/
+
 # Generated dictionary files
 dict/
 
