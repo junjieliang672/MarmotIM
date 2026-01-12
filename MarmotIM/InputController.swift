@@ -43,6 +43,9 @@ class InputController: IMKInputController {
     /// Pending shift toggle work item (used for delayed toggle to handle Electron app timing issues)
     private var pendingShiftToggle: DispatchWorkItem?
 
+    /// Track when the last keyDown event occurred (for ZSA keyboard timing fix)
+    private var lastKeyDownTime: Date?
+
     /// Track state for paired punctuation (true = next should be closing)
     private var pairedPunctuationState: [String: Bool] = [:]
 
@@ -115,6 +118,19 @@ class InputController: IMKInputController {
         let keyCode = event.keyCode
         let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
         let characters = event.characters ?? ""
+
+        // Pass through Command key shortcuts (Cmd+C, Cmd+V, Cmd+A, etc.)
+        // These should be handled by the system, not the input method
+        if modifiers.contains(.command) {
+            return false
+        }
+
+        // Record keyDown timestamp for ZSA keyboard timing fix
+        // ZSA keyboards may send events in order: Shift down → Shift up → keyDown
+        // We need to detect this and prevent false mode toggles
+        let now = Date()
+        lastKeyDownTime = now
+        NSLog("MarmotIM: keyDown at \(now.timeIntervalSince1970), shiftPressedTime: \(shiftPressedTime?.timeIntervalSince1970 ?? 0)")
 
         // If Shift is held while pressing another key, mark it as used as modifier (not for mode switching)
         if modifiers.contains(.shift) {
@@ -615,13 +631,27 @@ class InputController: IMKInputController {
 
         // Check if Shift key state changed
         if event.keyCode == 56 || event.keyCode == 60 { // Left Shift or Right Shift
+            let now = Date()
             if modifiers.contains(.shift) {
-                // Shift pressed down - record timestamp, reset modifier flag, cancel any pending toggle
-                shiftPressedTime = Date()
-                shiftUsedAsModifier = false
-                pendingShiftToggle?.cancel()
-                pendingShiftToggle = nil
+                // Shift pressed down - only record timestamp if not already pressed
+                // This handles ZSA keyboards that send both Left and Right Shift events
+                if shiftPressedTime == nil {
+                    shiftPressedTime = now
+                    shiftUsedAsModifier = false
+                    pendingShiftToggle?.cancel()
+                    pendingShiftToggle = nil
+                    NSLog("MarmotIM: Shift DOWN (first) at \(now.timeIntervalSince1970)")
+                } else {
+                    NSLog("MarmotIM: Shift DOWN (ignored, already pressed) at \(now.timeIntervalSince1970)")
+                }
             } else {
+                // Shift released - only process once (shiftPressedTime will be nil after first processing)
+                // This handles ZSA keyboards that send both Left and Right Shift UP events
+                guard shiftPressedTime != nil else {
+                    NSLog("MarmotIM: Shift UP (ignored, already processed) at \(now.timeIntervalSince1970)")
+                    return false
+                }
+                NSLog("MarmotIM: Shift UP at \(now.timeIntervalSince1970), lastKeyDownTime: \(lastKeyDownTime?.timeIntervalSince1970 ?? 0)")
                 // Shift released - check if it was a quick tap (< 150ms) AND not used as modifier
                 if let pressedTime = shiftPressedTime {
                     let elapsed = Date().timeIntervalSince(pressedTime)
@@ -630,16 +660,20 @@ class InputController: IMKInputController {
                     // 2. Shift was NOT used as a modifier (with another key)
                     if elapsed < 0.15 && !shiftUsedAsModifier {
                         // Use delayed toggle to handle race condition in Electron apps (Lark, etc.)
-                        // In Electron, the keyDown event for Shift+Symbol may arrive AFTER the
-                        // flagsChanged event for Shift release. By delaying the toggle by 50ms,
-                        // we give the keyDown event time to arrive and cancel the toggle.
+                        // and ZSA keyboards which may send events in order: Shift down → Shift up → keyDown
+                        // By delaying the toggle by 50ms, we give the keyDown event time to arrive.
                         pendingShiftToggle?.cancel()
+                        let shiftDownTime = pressedTime  // Capture for closure
                         let workItem = DispatchWorkItem { [weak self] in
                             guard let self = self else { return }
                             // Double-check conditions haven't changed
-                            if !self.shiftUsedAsModifier {
+                            // Also check if a keyDown occurred after shift was pressed (ZSA keyboard fix)
+                            let keyDownAfterShift = self.lastKeyDownTime.map { $0 > shiftDownTime } ?? false
+                            if !self.shiftUsedAsModifier && !keyDownAfterShift {
                                 NSLog("MarmotIM: Executing delayed shift toggle")
                                 self.toggleInputMode(client: sender)
+                            } else {
+                                NSLog("MarmotIM: Cancelled shift toggle - shiftUsedAsModifier: \(self.shiftUsedAsModifier), keyDownAfterShift: \(keyDownAfterShift)")
                             }
                             self.pendingShiftToggle = nil
                         }
