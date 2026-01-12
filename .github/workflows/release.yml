@@ -45,11 +45,24 @@ jobs:
 
       - name: Build app
         run: |
-          chmod +x scripts/build.sh
-          ./scripts/build.sh
+          # Build Release version directly (don't use build.sh as it tries to install locally)
+          xcodebuild \
+            -project MarmotIM.xcodeproj \
+            -scheme MarmotIM \
+            -configuration Release \
+            -derivedDataPath build/DerivedData \
+            CONFIGURATION_BUILD_DIR="$(pwd)/build/Release" \
+            build
+
+          # Verify build succeeded
+          if [ ! -d "build/Release/MarmotIM.app" ]; then
+            echo "Error: Build failed - app not found"
+            exit 1
+          fi
+          echo "Build succeeded: build/Release/MarmotIM.app"
 
       - name: Import signing certificate
-        if: env.MACOS_CERTIFICATE != ''
+        if: ${{ secrets.MACOS_CERTIFICATE != '' }}
         env:
           MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
           MACOS_CERTIFICATE_PWD: ${{ secrets.MACOS_CERTIFICATE_PWD }}
@@ -70,7 +83,7 @@ jobs:
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
 
       - name: Sign app
-        if: env.DEVELOPER_ID != ''
+        if: ${{ secrets.DEVELOPER_ID != '' }}
         env:
           DEVELOPER_ID: ${{ secrets.DEVELOPER_ID }}
         run: |
@@ -80,7 +93,7 @@ jobs:
             build/Release/MarmotIM.app
 
       - name: Notarize app
-        if: env.APPLE_ID != ''
+        if: ${{ secrets.APPLE_ID != '' }}
         env:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_ID_PASSWORD: ${{ secrets.APPLE_ID_PASSWORD }}
