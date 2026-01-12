@@ -2,10 +2,10 @@ import Foundation
 
 /// Ranks candidates using tier-based Frecency algorithm
 ///
-/// ## Tier Structure (Absolute Priority)
+/// ## Tier Structure (Absolute Priority - CANNOT be overridden)
 ///
 /// When input length <= 4 (Wubi-priority mode):
-/// - Tier 1: Full Wubi match (+100B)
+/// - Tier 1: Full Wubi match (+100B) - Wubi 1-2级简码 always first
 /// - Tier 2: Full Pinyin match (+10B)
 /// - Tier 3: Prefix Wubi match (+1B)
 /// - Tier 4: Prefix Pinyin match (0)
@@ -17,8 +17,9 @@ import Foundation
 /// ## Within-Tier Ranking (Frecency)
 ///
 /// 1. **Recency Score**: Exponentially decaying boost
-///    - Immediately after selection: ~10,000,000 (guarantees #1 in tier)
+///    - Immediately after selection: ~100,000,000 (guarantees #1 in tier)
 ///    - Half-life: 1 day
+///    - IMPORTANT: Cannot cross tier boundaries (max ~110M < 1B tier gap)
 ///
 /// 2. **Frequency Score**: Permanent accumulating score
 ///    - 10,000 points per selection
@@ -28,6 +29,7 @@ import Foundation
 /// 4. **Short Word Bonus**: Prefer shorter words
 ///
 /// Total = TierBonus + Recency + Frequency + Base + ShortWordBonus
+/// (tierOverrideBoost is disabled to preserve absolute tier priority)
 struct CandidateRanker {
 
     // MARK: - Tier Bonus Constants

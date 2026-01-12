@@ -250,37 +250,47 @@ final class CandidateRankerTests: XCTestCase {
     }
 
     // MARK: - Part 5: Tier Absolute Separation Tests
+    //
+    // These tests verify that tier priority is ABSOLUTE and cannot be overridden
+    // by any combination of recency, frequency, base score, or short word bonus.
+    // This ensures Wubi 1-2级简码 (Tier 1) always ranks first.
 
     func testTierSeparation_MaxWithinTierCannotCrossTier() {
-        // Maximum possible within-tier score
-        // Recency: 10,000,000 + Frequency: 10,000,000 (1000 accesses) + Base: 65,535 + ShortWord: 40,000
-        let maxWithinTier: Double = 10_000_000 + 10_000_000 + 65_535 + 40_000
+        // Maximum possible within-tier score (tierOverrideBoost is now 0)
+        // Recency: 100,000,000 + Frequency: 10,000,000 (1000 accesses) + Base: 65,535 + ShortWord: 40,000
+        let maxWithinTier: Double = 100_000_000 + 10_000_000 + 65_535 + 40_000
 
-        // This should still be less than the tier gap
+        // This should still be less than the minimum tier gap (1B between Tier 3 and Tier 4)
         XCTAssertLessThan(maxWithinTier, CandidateRanker.tier3Bonus)
         XCTAssertLessThan(maxWithinTier, 1_000_000_000)
     }
 
     func testTierSeparation_Tier4WithMaxScoreCannotReachTier3() {
         // Even with max everything, Tier 4 cannot reach Tier 3
-        let tier4WithMaxScore: Double = 0 + 10_000_000 + 10_000_000 + 65_535 + 40_000
+        // tierOverrideBoost is 0, so it's not included
+        let tier4WithMaxScore: Double = 0 + 100_000_000 + 10_000_000 + 65_535 + 40_000
         let tier3WithMinScore: Double = CandidateRanker.tier3Bonus + 0 + 0 + 0 + 0
 
         XCTAssertLessThan(tier4WithMaxScore, tier3WithMinScore)
     }
 
     func testTierSeparation_Tier3WithMaxScoreCannotReachTier2() {
-        let tier3WithMaxScore: Double = CandidateRanker.tier3Bonus + 10_000_000 + 10_000_000 + 65_535 + 40_000
+        let tier3WithMaxScore: Double = CandidateRanker.tier3Bonus + 100_000_000 + 10_000_000 + 65_535 + 40_000
         let tier2WithMinScore: Double = CandidateRanker.tier2Bonus + 0 + 0 + 0 + 0
 
         XCTAssertLessThan(tier3WithMaxScore, tier2WithMinScore)
     }
 
     func testTierSeparation_Tier2WithMaxScoreCannotReachTier1() {
-        let tier2WithMaxScore: Double = CandidateRanker.tier2Bonus + 10_000_000 + 10_000_000 + 65_535 + 40_000
+        let tier2WithMaxScore: Double = CandidateRanker.tier2Bonus + 100_000_000 + 10_000_000 + 65_535 + 40_000
         let tier1WithMinScore: Double = CandidateRanker.tier1Bonus + 0 + 0 + 0 + 0
 
         XCTAssertLessThan(tier2WithMaxScore, tier1WithMinScore)
+    }
+
+    func testTierSeparation_TierOverrideBoostIsDisabled() {
+        // Verify tierOverrideBoost is set to 0 to ensure absolute tier separation
+        XCTAssertEqual(FrecencyScore.tierOverrideInitialBoost, 0)
     }
 
     // MARK: - Part 6: Boost Function Tests
@@ -488,12 +498,13 @@ final class CandidateRankerTests: XCTestCase {
     // MARK: - Part 11: Additional Frecency Integration Tests
 
     func testFrecency_RecencyDominatesImmediately() {
-        // Immediately after selection, recency should dominate base frequency
+        // Immediately after selection, recency should dominate base frequency within tier
         let now = UInt32(Date().timeIntervalSince1970)
         let recencyScore = FrecencyScore.calculateRecencyScore(lastAccessTimestamp: now)
         let maxBaseScore = FrecencyScore.calculateBaseScore(baseFrequency: 65535)
 
-        XCTAssertGreaterThan(recencyScore, maxBaseScore * 100) // Recency is 100x+ higher
+        // Recency (100M) is much higher than max base (65K)
+        XCTAssertGreaterThan(recencyScore, maxBaseScore * 100) // Recency is 1000x+ higher
     }
 
     func testFrecency_FrequencyAccumulates() {
@@ -734,7 +745,8 @@ final class CandidateRankerTests: XCTestCase {
     }
 
     func testFrecencyConstants_InitialBoost() {
-        XCTAssertEqual(FrecencyScore.recencyInitialBoost, 10_000_000)
+        // Reduced from 1B to 100M to ensure tier separation is absolute
+        XCTAssertEqual(FrecencyScore.recencyInitialBoost, 100_000_000)
     }
 
     func testFrecencyConstants_FrequencyMultiplier() {
@@ -762,9 +774,10 @@ final class CandidateRankerTests: XCTestCase {
 
     func testFrecency_RecencyScoreAfterHours_SevenDays() {
         let score = FrecencyScore.recencyScoreAfterHours(168) // 7 days
-        // After 7 days (7 half-lives), should be ~1/128 of initial
-        XCTAssertLessThan(score, 100_000)
-        XCTAssertGreaterThan(score, 50_000) // ~78,125
+        // After 7 days (7 half-lives), should be ~1/128 of initial (100M)
+        // 100M / 128 ≈ 781,250
+        XCTAssertLessThan(score, 1_000_000)
+        XCTAssertGreaterThan(score, 500_000) // ~781,250
     }
 
     func testFrecency_WouldRankFirst_JustNow() {
@@ -773,7 +786,7 @@ final class CandidateRankerTests: XCTestCase {
     }
 
     func testFrecency_WouldRankFirst_OneDayAgo() {
-        // With 1-day half-life, 1 day ago still has ~5M recency which is > 100K threshold
+        // With 1-day half-life, 1 day ago still has ~50M recency which is > 100K threshold
         let oneDayAgo = UInt32(Date().timeIntervalSince1970 - 86400)
         XCTAssertTrue(FrecencyScore.wouldRankFirst(lastAccessTimestamp: oneDayAgo))
     }
@@ -860,7 +873,7 @@ final class CandidateRankerTests: XCTestCase {
 
     func testCheDiReranking_AfterUserSelection() {
         // Test: After user selects 彻底, it should jump to #1 due to recency boost
-        // Recency boost (10,000,000) >> base frequency difference (< 1,000)
+        // Recency boost (100,000,000) >> base frequency difference (< 1,000)
 
         let cheDi1 = makeEntry(id: 1, text: "车底", pinyin: "chedi", baseFrequency: 33691)
         let cheDi6 = makeEntry(id: 6, text: "彻底", pinyin: "chedi", baseFrequency: 32823)
@@ -872,7 +885,7 @@ final class CandidateRankerTests: XCTestCase {
 
         // Calculate recency score for just-selected word
         let recencyScore = FrecencyScore.calculateRecencyScore(lastAccessTimestamp: now)
-        XCTAssertGreaterThan(recencyScore, 9_000_000, "Recent selection should have ~10M recency boost")
+        XCTAssertGreaterThan(recencyScore, 90_000_000, "Recent selection should have ~100M recency boost")
 
         // Calculate total scores (all Tier 1)
         let tier1Bonus = CandidateRanker.tier1Bonus
@@ -889,23 +902,23 @@ final class CandidateRankerTests: XCTestCase {
 
         // The difference should be dominated by recency
         let scoreDifference = score6 - score1
-        XCTAssertGreaterThan(scoreDifference, 9_000_000, "Score difference should be ~10M from recency")
+        XCTAssertGreaterThan(scoreDifference, 90_000_000, "Score difference should be ~100M from recency")
     }
 
     func testCheDiReranking_7DaysLater() {
         // Test: 7 days after selection, recency fades significantly but frequency remains
-        // With 1-day half-life, after 7 days recency is ~1/128 of initial (~78,125)
+        // With 1-day half-life, after 7 days recency is ~1/128 of initial (100M → ~781K)
 
         let now = UInt32(Date().timeIntervalSince1970)
         let sevenDaysAgo = now - 86400 * 7 // 7 days
 
         // User selected 彻底 once, 7 days ago
         let recencyScore7d = FrecencyScore.calculateRecencyScore(lastAccessTimestamp: sevenDaysAgo)
-        XCTAssertLessThan(recencyScore7d, 100_000, "Recency should be ~78K after 7 days")
-        XCTAssertGreaterThan(recencyScore7d, 50_000, "Recency should be ~78K after 7 days")
+        XCTAssertLessThan(recencyScore7d, 1_000_000, "Recency should be ~781K after 7 days")
+        XCTAssertGreaterThan(recencyScore7d, 500_000, "Recency should be ~781K after 7 days")
 
         // After 7 days, with 1 selection:
-        // 彻底: ~78K (recency) + 10,000 (frequency) + 32,823 (base) = ~120,823
+        // 彻底: ~781K (recency) + 10,000 (frequency) + 32,823 (base) = ~823,823
         // 车底: 33,691 (base) = 33,691
         // So 彻底 still wins due to recency + frequency bonus
 
@@ -977,7 +990,7 @@ final class CandidateRankerTests: XCTestCase {
 
     func testKhamReranking_AfterOneSelection_ShouldRiseToFirst() {
         // Test: After selecting 中英 once, it should rise to #1
-        // Recency boost of 10,000,000 >> short word bonus difference of 10,000
+        // Recency boost of 100,000,000 >> short word bonus difference of 10,000
 
         let hu = makeEntry(id: 1, text: "唬", wubi: "kham", baseFrequency: 35000, length: 1)
         let zhongYing = makeEntry(id: 2, text: "中英", wubi: "kham", baseFrequency: 35000, length: 2)
@@ -1001,7 +1014,7 @@ final class CandidateRankerTests: XCTestCase {
         XCTAssertGreaterThan(zhongYingTotal, huTotal, "中英 should rank #1 after 1 selection")
 
         let scoreDifference = zhongYingTotal - huTotal
-        XCTAssertGreaterThan(scoreDifference, 9_900_000, "中英 should have ~10M score advantage")
+        XCTAssertGreaterThan(scoreDifference, 99_000_000, "中英 should have ~100M score advantage")
 
         // Print detailed breakdown for debugging
         let recencyScore = FrecencyScore.calculateRecencyScore(lastAccessTimestamp: now)
@@ -1026,7 +1039,7 @@ final class CandidateRankerTests: XCTestCase {
           Total: \(zhongYingTotal)
 
         Score Difference: \(scoreDifference)
-        Expected: 中英 should be #1 (score diff > 9.9M)
+        Expected: 中英 should be #1 (score diff > 99M)
         """)
     }
 
@@ -1128,5 +1141,169 @@ final class CandidateRankerTests: XCTestCase {
         // Verify that with timestamp=0, recency is indeed 0
         let recencyWithZeroTimestamp = FrecencyScore.calculateRecencyScore(lastAccessTimestamp: 0)
         XCTAssertEqual(recencyWithZeroTimestamp, 0, "Zero timestamp should give zero recency")
+    }
+
+    // MARK: - Part 23: Wubi Jiǎnmǎ (简码) Always First Tests
+    //
+    // These tests verify that Wubi 1-2级简码 (Tier 1: Full Wubi match)
+    // ALWAYS ranks first, regardless of recency boost on lower-tier entries.
+
+    func testWubiJianma_AlwaysBeforeFullPinyin_EvenWithMaxRecency() {
+        // Scenario: User has selected a Pinyin word many times recently
+        // But Wubi jiǎnmǎ should STILL rank first due to absolute tier priority
+
+        // Wubi 一级简码 "一" (code: g)
+        let wubiEntry = makeEntry(id: 1, text: "一", wubi: "g", baseFrequency: 30000, length: 1)
+        // Pinyin word with same pronunciation
+        let pinyinEntry = makeEntry(id: 2, text: "衣", pinyin: "yi", baseFrequency: 60000, length: 1)
+
+        let wubiMatch = makeMatch(entry: wubiEntry, matchedCode: "g", matchType: .full, codeType: .wubi)
+        let pinyinMatch = makeMatch(entry: pinyinEntry, matchedCode: "yi", matchType: .full, codeType: .pinyin)
+
+        let now = UInt32(Date().timeIntervalSince1970)
+
+        // Wubi: no user data (never selected)
+        let wubiScore = CandidateRanker.tier1Bonus + Double(wubiEntry.baseFrequency) + 40_000 // short word bonus
+
+        // Pinyin: maximum possible user data (just selected, 1000 times before)
+        let pinyinRecency = FrecencyScore.calculateRecencyScore(lastAccessTimestamp: now)
+        let pinyinFrequency = FrecencyScore.calculateFrequencyScore(accessCount: 1000)
+        let pinyinScore = CandidateRanker.tier2Bonus + pinyinRecency + pinyinFrequency + Double(pinyinEntry.baseFrequency) + 40_000
+
+        // Verify tier bonuses
+        XCTAssertEqual(CandidateRanker.getTierBonus(match: wubiMatch, inputLength: 1), CandidateRanker.tier1Bonus)
+        XCTAssertEqual(CandidateRanker.getTierBonus(match: pinyinMatch, inputLength: 2), CandidateRanker.tier2Bonus)
+
+        // CRITICAL: Wubi should ALWAYS win due to tier priority
+        XCTAssertGreaterThan(wubiScore, pinyinScore,
+            "Wubi jiǎnmǎ (Tier 1) must ALWAYS rank above Full Pinyin (Tier 2) even with max recency")
+
+        // Calculate the margin
+        let margin = wubiScore - pinyinScore
+        XCTAssertGreaterThan(margin, 80_000_000_000,
+            "Tier gap should be ~90B even with max recency boosting Pinyin")
+    }
+
+    func testWubiJianma_AlwaysBeforePrefixWubi_EvenWithMaxRecency() {
+        // Scenario: Prefix Wubi match has max recency, but Full Wubi should still win
+
+        // Wubi 二级简码 "中" (code: kh)
+        let fullWubiEntry = makeEntry(id: 1, text: "中", wubi: "kh", baseFrequency: 30000, length: 1)
+        // Prefix Wubi match "中国" (code: khgg, input: kh)
+        let prefixWubiEntry = makeEntry(id: 2, text: "中国", wubi: "khgg", baseFrequency: 65000, length: 2)
+
+        let fullWubiMatch = makeMatch(entry: fullWubiEntry, matchedCode: "kh", matchType: .full, codeType: .wubi)
+        let prefixWubiMatch = makeMatch(entry: prefixWubiEntry, matchedCode: "khgg", matchType: .prefix, codeType: .wubi)
+
+        let now = UInt32(Date().timeIntervalSince1970)
+
+        // Full Wubi: no user data
+        let fullWubiScore = CandidateRanker.tier1Bonus + Double(fullWubiEntry.baseFrequency) + 40_000
+
+        // Prefix Wubi: maximum user data
+        let prefixRecency = FrecencyScore.calculateRecencyScore(lastAccessTimestamp: now)
+        let prefixFrequency = FrecencyScore.calculateFrequencyScore(accessCount: 1000)
+        let prefixWubiScore = CandidateRanker.tier3Bonus + prefixRecency + prefixFrequency + Double(prefixWubiEntry.baseFrequency) + 30_000
+
+        // Verify tier bonuses
+        XCTAssertEqual(CandidateRanker.getTierBonus(match: fullWubiMatch, inputLength: 2), CandidateRanker.tier1Bonus)
+        XCTAssertEqual(CandidateRanker.getTierBonus(match: prefixWubiMatch, inputLength: 2), CandidateRanker.tier3Bonus)
+
+        // CRITICAL: Full Wubi should ALWAYS win
+        XCTAssertGreaterThan(fullWubiScore, prefixWubiScore,
+            "Full Wubi (Tier 1) must ALWAYS rank above Prefix Wubi (Tier 3) even with max recency")
+
+        // Calculate the margin
+        let margin = fullWubiScore - prefixWubiScore
+        XCTAssertGreaterThan(margin, 98_000_000_000,
+            "Tier gap should be ~99B (100B - 1B) even with max recency")
+    }
+
+    func testWubiJianma_AllTiersAbsolutelySeparated() {
+        // Comprehensive test: verify ALL tier boundaries cannot be crossed
+
+        let now = UInt32(Date().timeIntervalSince1970)
+
+        // Maximum possible non-tier score (for any entry with max user data)
+        let maxRecency = FrecencyScore.calculateRecencyScore(lastAccessTimestamp: now)
+        let maxFrequency = FrecencyScore.calculateFrequencyScore(accessCount: 1000) // 10M
+        let maxBase: Double = 65535
+        let maxShortWord: Double = 40_000
+        let maxNonTierScore = maxRecency + maxFrequency + maxBase + maxShortWord
+
+        // Verify the max non-tier score is less than 1B (minimum tier gap)
+        XCTAssertLessThan(maxNonTierScore, 1_000_000_000,
+            "Max non-tier score (\(maxNonTierScore)) must be < 1B (min tier gap)")
+
+        // Verify each tier gap is preserved
+        // Tier 4 max vs Tier 3 min
+        let tier4Max = 0 + maxNonTierScore
+        let tier3Min = CandidateRanker.tier3Bonus + 0
+        XCTAssertLessThan(tier4Max, tier3Min, "Tier 4 cannot reach Tier 3")
+
+        // Tier 3 max vs Tier 2 min
+        let tier3Max = CandidateRanker.tier3Bonus + maxNonTierScore
+        let tier2Min = CandidateRanker.tier2Bonus + 0
+        XCTAssertLessThan(tier3Max, tier2Min, "Tier 3 cannot reach Tier 2")
+
+        // Tier 2 max vs Tier 1 min
+        let tier2Max = CandidateRanker.tier2Bonus + maxNonTierScore
+        let tier1Min = CandidateRanker.tier1Bonus + 0
+        XCTAssertLessThan(tier2Max, tier1Min, "Tier 2 cannot reach Tier 1")
+
+        print("""
+
+        === Tier Separation Verification ===
+        Max non-tier score: \(maxNonTierScore)
+        (Recency: \(maxRecency), Freq: \(maxFrequency), Base: \(maxBase), Short: \(maxShortWord))
+
+        Tier 4 max: \(tier4Max)
+        Tier 3 min: \(tier3Min) | gap: \(tier3Min - tier4Max)
+
+        Tier 3 max: \(tier3Max)
+        Tier 2 min: \(tier2Min) | gap: \(tier2Min - tier3Max)
+
+        Tier 2 max: \(tier2Max)
+        Tier 1 min: \(tier1Min) | gap: \(tier1Min - tier2Max)
+
+        RESULT: All tier boundaries are absolutely preserved!
+        Wubi 1-2级简码 will ALWAYS rank first.
+        """)
+    }
+
+    func testWubiJianma_RealWorldScenario() {
+        // Real-world scenario: User types "g" (Wubi code)
+        // Expected: "一" (Wubi 一级简码) should ALWAYS be first
+        // Even if user has selected "个" (Pinyin: ge) thousands of times
+
+        // Wubi 一级简码
+        let yi = makeEntry(id: 1, text: "一", wubi: "g", baseFrequency: 64000, length: 1)
+        // Common Pinyin word that might match "g" as prefix
+        let ge = makeEntry(id: 2, text: "个", pinyin: "ge", baseFrequency: 65535, length: 1)
+
+        let yiMatch = makeMatch(entry: yi, matchedCode: "g", matchType: .full, codeType: .wubi)
+        let geMatch = makeMatch(entry: ge, matchedCode: "ge", matchType: .prefix, codeType: .pinyin)
+
+        // Input is "g" (length 1, short code mode)
+        let inputLength = 1
+
+        // Verify tiers
+        let yiTier = CandidateRanker.getTierBonus(match: yiMatch, inputLength: inputLength)
+        let geTier = CandidateRanker.getTierBonus(match: geMatch, inputLength: inputLength)
+
+        XCTAssertEqual(yiTier, CandidateRanker.tier1Bonus, "一 should be Tier 1 (Full Wubi)")
+        XCTAssertEqual(geTier, 0, "个 should be Tier 4 (Prefix Pinyin)")
+
+        // Even with extreme user data for "个"
+        let now = UInt32(Date().timeIntervalSince1970)
+        let geRecency = FrecencyScore.calculateRecencyScore(lastAccessTimestamp: now)
+        let geFrequency = FrecencyScore.calculateFrequencyScore(accessCount: 10000) // 100M
+
+        let yiScore = yiTier + Double(yi.baseFrequency) + 40_000
+        let geScore = geTier + geRecency + geFrequency + Double(ge.baseFrequency) + 40_000
+
+        // 一 MUST win
+        XCTAssertGreaterThan(yiScore, geScore,
+            "Wubi 一级简码 '一' must ALWAYS beat any Tier 4 word regardless of user history")
     }
 }

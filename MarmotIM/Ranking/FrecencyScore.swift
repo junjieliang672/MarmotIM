@@ -3,23 +3,26 @@ import Foundation
 /// Dual-Score Frecency Algorithm
 ///
 /// This algorithm combines two components:
-/// 1. **Recency Score**: Strong immediate boost that decays exponentially over time
-///    - Guarantees recently selected words rank #1
+/// 1. **Recency Score**: Immediate boost that decays exponentially over time
+///    - Guarantees recently selected words rank #1 within their tier
 ///    - Formula: initialBoost × e^(-λ × timeSince)
 ///    - Half-life of 1 day means score drops by 50% every 24 hours
 ///
 /// 2. **Frequency Score**: Permanent score that accumulates with each selection
-///    - Never decays, so most-used words eventually dominate
+///    - Never decays, so most-used words eventually dominate within tier
 ///    - Formula: accessCount × frequencyMultiplier
 ///
 /// Total Score = RecencyScore + FrequencyScore + BaseScore
 ///
 /// Key Properties:
-/// - Immediately after selection: ~1,000,000,000 points (guarantees #1)
-/// - After 1 day: ~500,000,000 points (half-life)
-/// - After 7 days: ~7,812,500 points (still significant)
-/// - After 14 days: ~61,035 points (recency fading)
+/// - Immediately after selection: ~100,000,000 points (guarantees #1 in tier)
+/// - After 1 day: ~50,000,000 points (half-life)
+/// - After 7 days: ~781,250 points (still significant)
+/// - After 14 days: ~6,103 points (recency fading)
 /// - 100 selections with no recency: 1,000,000 points (frequency dominates)
+///
+/// IMPORTANT: Tier priority is absolute. Recency/frequency cannot cross tiers.
+/// Max non-tier score ≈ 110M, min tier gap = 1B (Tier 3 to Tier 4)
 struct FrecencyScore {
 
     // MARK: - Configuration
@@ -29,24 +32,24 @@ struct FrecencyScore {
     static let recencyHalfLife: TimeInterval = 86400
 
     /// Initial recency boost immediately after selection
-    /// This value is high enough to guarantee #1 ranking
-    /// With half-life of 1 day, 2 seconds of time difference produces ~16K score difference,
-    /// which exceeds the max short word bonus difference (10K)
-    static let recencyInitialBoost: Double = 1_000_000_000
+    /// This value guarantees #1 ranking within the same tier
+    /// but is low enough to never cross tier boundaries
+    /// Max non-tier score = recency(100M) + freq(10M) + base(65K) + short(40K) ≈ 110M < 1B (min tier gap)
+    static let recencyInitialBoost: Double = 100_000_000
 
     /// Lambda for exponential decay: ln(2) / halfLife
     static var lambda: Double {
         log(2.0) / recencyHalfLife
     }
 
-    // MARK: - Tier Override Boost (Short-term, 1 hour half-life)
+    // MARK: - Tier Override Boost (DISABLED)
     //
-    // This is a separate boost that can override tier priority
-    // Use case: User repeatedly selects a pinyin word over a wubi word
-    // The tier-override boost should push the pinyin word above wubi temporarily
+    // Previously this allowed recent selections to override tier priority.
+    // Now disabled to ensure Wubi jiǎnmǎ (1-2 level codes) always rank first.
+    // Tier separation is now absolute and cannot be overridden by recency.
 
     /// Tier override half-life in seconds (1 hour)
-    /// This decays much faster than regular recency
+    /// Kept for reference but tierOverrideInitialBoost is 0
     static let tierOverrideHalfLife: TimeInterval = 3600
 
     /// Lambda for tier override decay
@@ -54,14 +57,12 @@ struct FrecencyScore {
         log(2.0) / tierOverrideHalfLife
     }
 
-    /// Initial tier override boost
-    /// Must be large enough that a recent selection beats a less-recent selection
-    /// even accounting for tier gaps. With 500B initial and 1hr half-life:
-    /// - Just selected: 500B boost
-    /// - 30 min ago: 354B boost (500B * 0.707)
-    /// - Difference: 146B > 100B tier gap
-    /// This ensures "last selection wins" within ~30 minutes
-    static let tierOverrideInitialBoost: Double = 500_000_000_000
+    /// Initial tier override boost - SET TO 0 to disable tier crossing
+    /// This ensures tier priority is absolute:
+    /// - Tier 1 (Full Wubi) always beats Tier 2 (Full Pinyin)
+    /// - Tier 2 always beats Tier 3 (Prefix Wubi)
+    /// - Tier 3 always beats Tier 4 (Prefix Pinyin)
+    static let tierOverrideInitialBoost: Double = 0
 
     /// Permanent frequency multiplier per access
     /// This accumulates and never decays
