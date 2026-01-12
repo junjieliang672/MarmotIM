@@ -17,6 +17,13 @@ if [ ! -d "MarmotIM.app" ]; then
     exit 1
 fi
 
+# Remove quarantine attribute (macOS security)
+echo "正在移除安全限制..."
+xattr -cr MarmotIM.app 2>/dev/null || true
+
+# Ensure executable has correct permissions
+chmod +x MarmotIM.app/Contents/MacOS/MarmotIM
+
 # Stop existing process if running
 echo "正在停止旧版本..."
 if pgrep -f MarmotIM > /dev/null 2>&1; then
@@ -33,7 +40,18 @@ echo "正在安装到 /Library/Input Methods/ ..."
 echo "(需要输入管理员密码)"
 sudo rm -rf "/Library/Input Methods/MarmotIM.app"
 sudo cp -r MarmotIM.app "/Library/Input Methods/"
+sudo chmod +x "/Library/Input Methods/MarmotIM.app/Contents/MacOS/MarmotIM"
 sudo codesign --force --deep --sign - "/Library/Input Methods/MarmotIM.app"
+
+# Check if dictionary exists
+DICT_PATH="$HOME/Library/Application Support/MarmotIM/dictionary.db"
+if [ ! -f "$DICT_PATH" ]; then
+    echo ""
+    echo "⚠️  警告: 未找到词库文件"
+    echo "   输入法需要词库才能正常工作。"
+    echo "   请参考 README.txt 中的「构建词库」部分。"
+    echo ""
+fi
 
 # Start the input method
 echo "正在启动输入法..."
@@ -50,3 +68,5 @@ echo "  2. 点击「+」添加「土拨鼠输入法」(在中文分类下)"
 echo "  3. 从菜单栏选择土拨鼠输入法开始使用"
 echo ""
 echo "如果输入法没有出现在列表中，请注销并重新登录。"
+echo ""
+echo "如果输入法无法输入中文，请先构建词库（见 README.txt）。"
