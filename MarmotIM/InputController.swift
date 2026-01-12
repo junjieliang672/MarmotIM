@@ -1,6 +1,23 @@
 import Cocoa
 import InputMethodKit
 
+/// Filter mode for specialized input (emoji, fuzzy pinyin, symbol)
+enum FilterMode: String {
+    case none = ""
+    case emoji = "e"
+    case fuzzyPinyin = "p"
+    case symbol = "s"
+
+    var displayLabel: String {
+        switch self {
+        case .none: return ""
+        case .emoji: return "[🙂 emoji]"
+        case .fuzzyPinyin: return "[拼 模糊拼音]"
+        case .symbol: return "[※ 符号]"
+        }
+    }
+}
+
 /// Main input controller handling keyboard events and candidate selection
 @objc(MarmotIMInputController)
 class InputController: IMKInputController {
@@ -42,6 +59,12 @@ class InputController: IMKInputController {
 
     /// Track state for paired punctuation (true = next should be closing)
     private var pairedPunctuationState: [String: Bool] = [:]
+
+    /// Current filter mode (none, emoji, fuzzyPinyin, symbol)
+    private var filterMode: FilterMode = .none
+
+    /// Input buffer for filter mode (separate from normal inputBuffer)
+    private var filterBuffer: String = ""
 
     /// Chinese quote pairs: opening → closing
     /// Only quotes support open/close pairing, NOT brackets
