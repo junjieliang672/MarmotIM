@@ -282,6 +282,11 @@ class InputController: IMKInputController {
     // MARK: - Input Handling
 
     private func handleLetterInput(_ char: String, client sender: Any!) -> Bool {
+        // Route to filter mode if active
+        if filterMode != .none {
+            return handleFilterInput(char, client: sender)
+        }
+
         // Add character to input buffer preserving original case
         // This allows users to type "This" and see "This" in the buffer
         inputBuffer.append(char)
@@ -295,6 +300,20 @@ class InputController: IMKInputController {
 
         // Show candidate window
         showCandidateWindow(client: sender)
+
+        return true
+    }
+
+    /// Handle input in filter mode
+    private func handleFilterInput(_ char: String, client sender: Any!) -> Bool {
+        filterBuffer.append(char.lowercased())
+        isComposing = true
+
+        // Update marked text with filter prefix
+        updateMarkedText(client: sender)
+
+        // Search in filter-specific dictionary
+        showFilterCandidates(client: sender)
 
         return true
     }
@@ -353,7 +372,36 @@ class InputController: IMKInputController {
     }
 
     private func handleBackspace(client sender: Any!) -> Bool {
-        guard isComposing, !inputBuffer.isEmpty else { return false }
+        guard isComposing else { return false }
+
+        // Handle filter mode backspace
+        if filterMode != .none {
+            guard !filterBuffer.isEmpty else {
+                // Exit filter mode when buffer is empty
+                reset()
+                hideCandidateWindow()
+                if let client = sender as? IMKTextInput {
+                    client.setMarkedText("", selectionRange: NSRange(location: 0, length: 0), replacementRange: NSRange(location: NSNotFound, length: 0))
+                }
+                return true
+            }
+
+            filterBuffer.removeLast()
+
+            if filterBuffer.isEmpty {
+                // Show empty filter mode UI (no candidates)
+                allCandidates = []
+                currentCandidates = []
+                hideCandidateWindow()
+            } else {
+                showFilterCandidates(client: sender)
+            }
+            updateMarkedText(client: sender)
+            return true
+        }
+
+        // Normal mode backspace
+        guard !inputBuffer.isEmpty else { return false }
 
         // Remove last character
         inputBuffer.removeLast()
@@ -777,15 +825,23 @@ class InputController: IMKInputController {
     // MARK: - Marked Text
 
     private func updateMarkedText(client sender: Any!) {
-        if let client = sender as? IMKTextInput {
+        guard let client = sender as? IMKTextInput else { return }
+
+        let displayText: String
+        if filterMode != .none {
+            // Show filter mode label + buffer
+            displayText = "\(filterMode.displayLabel) \(filterBuffer)"
+        } else {
             // Use empty string to hide marked text from input field
             // The input code is already shown in the candidate window
-            client.setMarkedText(
-                "",
-                selectionRange: NSRange(location: 0, length: 0),
-                replacementRange: NSRange(location: NSNotFound, length: 0)
-            )
+            displayText = ""
         }
+
+        client.setMarkedText(
+            displayText,
+            selectionRange: NSRange(location: displayText.count, length: 0),
+            replacementRange: NSRange(location: NSNotFound, length: 0)
+        )
     }
 
     // MARK: - Candidate Window
@@ -821,10 +877,42 @@ class InputController: IMKInputController {
         candidateWindowController?.hide()
     }
 
-    /// Show candidates for current filter mode (stub - implemented in Task 5)
+    /// Show candidates for current filter mode
     private func showFilterCandidates(client sender: Any!) {
-        // TODO: Implement in Task 5
-        NSLog("MarmotIM: showFilterCandidates called for mode: \(filterMode)")
+        guard let engine = AppDelegate.shared?.dictionaryEngine else { return }
+
+        var filterResults: [FilterCandidate] = []
+
+        switch filterMode {
+        case .emoji:
+            filterResults = engine.searchEmoji(code: filterBuffer)
+        case .fuzzyPinyin:
+            filterResults = engine.searchFuzzyPinyin(code: filterBuffer)
+        case .symbol:
+            filterResults = engine.searchSymbol(code: filterBuffer)
+        case .none:
+            return
+        }
+
+        // Convert FilterCandidate to Candidate for display
+        allCandidates = filterResults.enumerated().map { (index, fc) in
+            Candidate(
+                entryId: UInt32(index),
+                text: fc.text,
+                code: fc.code,
+                codeType: .pinyin,  // Simplified for filter mode
+                isFullMatch: true,
+                baseFrequency: UInt16(min(fc.frequency, Int(UInt16.max))),
+                score: Double(fc.frequency)
+            )
+        }
+
+        // Apply filter user ranking (will be implemented in Task 7)
+        // rankFilterCandidates()
+
+        currentPage = 0
+        updateCurrentPageCandidates()
+        showCandidateWindow(client: sender)
     }
 
     // MARK: - Reset
