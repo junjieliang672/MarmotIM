@@ -635,6 +635,85 @@ def save_sqlite(entries: List[dict], pinyin_index: Dict, wubi_index: Dict, filep
     print(f"  SQLite size: {file_size / 1024 / 1024:.1f} MB")
 
 
+def build_emoji_index(cursor, emoji_path: str):
+    """Build emoji index from emoji_table.txt"""
+    print(f"Building emoji index from {emoji_path}...")
+
+    cursor.execute("DELETE FROM emoji_index")
+
+    count = 0
+    with open(emoji_path, 'r', encoding='utf-8') as f:
+        for line in f:
+            parts = line.strip().split()
+            if len(parts) < 2:
+                continue
+
+            code = parts[0]
+            emojis = parts[1:]
+
+            for emoji in emojis:
+                cursor.execute(
+                    "INSERT INTO emoji_index (code, code_type, emoji, frequency) VALUES (?, ?, ?, ?)",
+                    (code, 'pinyin', emoji, 0)
+                )
+                count += 1
+
+    print(f"  Added {count} emoji entries")
+
+
+FUZZY_RULES = {
+    'initial': [
+        ('zh', 'z'), ('ch', 'c'), ('sh', 's'),
+        ('n', 'l'), ('r', 'l'), ('f', 'h')
+    ],
+    'final': [
+        ('ang', 'an'), ('eng', 'en'), ('ing', 'in'),
+        ('iang', 'ian'), ('uang', 'uan')
+    ]
+}
+
+
+def generate_fuzzy_variants(pinyin: str, word: str):
+    """Generate fuzzy variants for a pinyin"""
+    variants = []
+    for rule_type, rules in FUZZY_RULES.items():
+        for a, b in rules:
+            if a in pinyin:
+                fuzzy = pinyin.replace(a, b, 1)
+                variants.append((fuzzy, pinyin, word, rule_type))
+            if b in pinyin:
+                fuzzy = pinyin.replace(b, a, 1)
+                variants.append((fuzzy, pinyin, word, rule_type))
+    return variants
+
+
+def build_fuzzy_pinyin_index(cursor, pinyin_path: str):
+    """Build fuzzy pinyin index"""
+    print(f"Building fuzzy pinyin index from {pinyin_path}...")
+
+    cursor.execute("DELETE FROM fuzzy_pinyin")
+
+    count = 0
+    with open(pinyin_path, 'r', encoding='utf-8') as f:
+        for line in f:
+            parts = line.strip().split()
+            if len(parts) < 2:
+                continue
+
+            pinyin = parts[0]
+            words = parts[1:]
+
+            for word in words[:3]:  # Limit to top 3 words per pinyin
+                for fuzzy_code, original, w, fuzzy_type in generate_fuzzy_variants(pinyin, word):
+                    cursor.execute(
+                        "INSERT INTO fuzzy_pinyin (fuzzy_code, original_code, word, fuzzy_type) VALUES (?, ?, ?, ?)",
+                        (fuzzy_code, original, w, fuzzy_type)
+                    )
+                    count += 1
+
+    print(f"  Added {count} fuzzy pinyin entries")
+
+
 def load_corpus_frequencies(filepath: str) -> Dict[str, float]:
     """
     Load word frequency data from a corpus file.
@@ -724,6 +803,14 @@ def main():
     parser.add_argument('--extra-pinyin-dir', help='Directory containing extra pinyin tables (cn_en_table.txt, en_table.txt, emoji_table.txt)')
     parser.add_argument('--install', action='store_true', help='Install dictionary to MarmotIM application directory')
 
+    # Filter dictionary build options
+    parser.add_argument('--build-emoji', action='store_true',
+                        help='Build emoji index from vocab/emoji_table.txt')
+    parser.add_argument('--build-fuzzy', action='store_true',
+                        help='Build fuzzy pinyin index')
+    parser.add_argument('--build-symbol', action='store_true',
+                        help='Build symbol index from symbols.yaml')
+
     args = parser.parse_args()
 
     os.makedirs(args.output, exist_ok=True)
@@ -788,6 +875,30 @@ def main():
     # Save SQLite (primary format for new architecture)
     print("\nStep 7: Saving SQLite format (primary)...")
     save_sqlite(entries, pinyin_index, wubi_index, os.path.join(args.output, 'dictionary.db'))
+
+    # Build filter dictionaries if requested
+    if args.build_emoji or args.build_fuzzy or args.build_symbol:
+        print("\nStep 7b: Building filter dictionaries...")
+        db_path = os.path.join(args.output, 'dictionary.db')
+        conn = sqlite3.connect(db_path)
+        cursor = conn.cursor()
+
+        if args.build_emoji:
+            emoji_filter_path = os.path.join(os.path.dirname(args.pinyin), 'emoji_table.txt')
+            if os.path.exists(emoji_filter_path):
+                build_emoji_index(cursor, emoji_filter_path)
+            else:
+                print(f"Warning: emoji_table.txt not found at {emoji_filter_path}")
+
+        if args.build_fuzzy:
+            build_fuzzy_pinyin_index(cursor, args.pinyin)
+
+        if args.build_symbol:
+            # Symbol building will be added in Task 10
+            print("Symbol building not yet implemented (Task 10)")
+
+        conn.commit()
+        conn.close()
 
     # Save binary format (legacy, optional)
     if not args.skip_binary:
