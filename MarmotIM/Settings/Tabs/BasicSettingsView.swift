@@ -120,6 +120,82 @@ struct BasicSettingsView: View {
                     }
                 }
 
+                // Fuzzy Pinyin section
+                SettingsSection(title: "模糊拼音") {
+                    Toggle(isOn: $viewModel.config.fuzzyPinyin.enabled) {
+                        Text("启用模糊拼音")
+                    }
+                    .onChange(of: viewModel.config.fuzzyPinyin.enabled) { _ in
+                        viewModel.save()
+                    }
+
+                    if viewModel.config.fuzzyPinyin.enabled {
+                        Divider()
+
+                        Text("声母模糊")
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                        HStack {
+                            Toggle("zh ↔ z", isOn: $viewModel.config.fuzzyPinyin.zh_z)
+                                .onChange(of: viewModel.config.fuzzyPinyin.zh_z) { _ in
+                                    viewModel.save()
+                                }
+                            Toggle("ch ↔ c", isOn: $viewModel.config.fuzzyPinyin.ch_c)
+                                .onChange(of: viewModel.config.fuzzyPinyin.ch_c) { _ in
+                                    viewModel.save()
+                                }
+                            Toggle("sh ↔ s", isOn: $viewModel.config.fuzzyPinyin.sh_s)
+                                .onChange(of: viewModel.config.fuzzyPinyin.sh_s) { _ in
+                                    viewModel.save()
+                                }
+                        }
+                        HStack {
+                            Toggle("n ↔ l", isOn: $viewModel.config.fuzzyPinyin.n_l)
+                                .onChange(of: viewModel.config.fuzzyPinyin.n_l) { _ in
+                                    viewModel.save()
+                                }
+                            Toggle("r ↔ l", isOn: $viewModel.config.fuzzyPinyin.r_l)
+                                .onChange(of: viewModel.config.fuzzyPinyin.r_l) { _ in
+                                    viewModel.save()
+                                }
+                            Toggle("f ↔ h", isOn: $viewModel.config.fuzzyPinyin.f_h)
+                                .onChange(of: viewModel.config.fuzzyPinyin.f_h) { _ in
+                                    viewModel.save()
+                                }
+                        }
+
+                        Divider()
+
+                        Text("韵母模糊")
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                        HStack {
+                            Toggle("an ↔ ang", isOn: $viewModel.config.fuzzyPinyin.an_ang)
+                                .onChange(of: viewModel.config.fuzzyPinyin.an_ang) { _ in
+                                    viewModel.save()
+                                }
+                            Toggle("en ↔ eng", isOn: $viewModel.config.fuzzyPinyin.en_eng)
+                                .onChange(of: viewModel.config.fuzzyPinyin.en_eng) { _ in
+                                    viewModel.save()
+                                }
+                            Toggle("in ↔ ing", isOn: $viewModel.config.fuzzyPinyin.in_ing)
+                                .onChange(of: viewModel.config.fuzzyPinyin.in_ing) { _ in
+                                    viewModel.save()
+                                }
+                        }
+                        HStack {
+                            Toggle("ian ↔ iang", isOn: $viewModel.config.fuzzyPinyin.ian_iang)
+                                .onChange(of: viewModel.config.fuzzyPinyin.ian_iang) { _ in
+                                    viewModel.save()
+                                }
+                            Toggle("uan ↔ uang", isOn: $viewModel.config.fuzzyPinyin.uan_uang)
+                                .onChange(of: viewModel.config.fuzzyPinyin.uan_uang) { _ in
+                                    viewModel.save()
+                                }
+                        }
+                    }
+                }
+
                 Spacer()
             }
             .padding()
