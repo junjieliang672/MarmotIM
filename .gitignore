@@ -1,3 +1,6 @@
+# Git worktrees
+.worktrees/
+
 # Build artifacts
 build/
 .build/
