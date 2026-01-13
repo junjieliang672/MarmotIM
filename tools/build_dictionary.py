@@ -678,7 +678,8 @@ def save_sqlite(entries: List[dict], pinyin_index: Dict, wubi_index: Dict, filep
             code TEXT NOT NULL,
             code_type TEXT NOT NULL,
             emoji TEXT NOT NULL,
-            frequency INTEGER DEFAULT 0
+            frequency INTEGER DEFAULT 0,
+            UNIQUE(code, emoji)
         );
 
         CREATE TABLE fuzzy_pinyin (
@@ -686,7 +687,8 @@ def save_sqlite(entries: List[dict], pinyin_index: Dict, wubi_index: Dict, filep
             fuzzy_code TEXT NOT NULL,
             original_code TEXT NOT NULL,
             word TEXT NOT NULL,
-            fuzzy_type TEXT NOT NULL
+            fuzzy_type TEXT NOT NULL,
+            UNIQUE(fuzzy_code, original_code, word)
         );
 
         CREATE TABLE symbol_index (
@@ -887,7 +889,7 @@ def build_fuzzy_pinyin_index(cursor, pinyin_path: str, vocab_dir: Optional[str] 
             for word in words[:3]:  # Limit to top 3 words per pinyin
                 for fuzzy_code, original, w, fuzzy_type in generate_fuzzy_variants(pinyin, word):
                     cursor.execute(
-                        "INSERT INTO fuzzy_pinyin (fuzzy_code, original_code, word, fuzzy_type) VALUES (?, ?, ?, ?)",
+                        "INSERT OR IGNORE INTO fuzzy_pinyin (fuzzy_code, original_code, word, fuzzy_type) VALUES (?, ?, ?, ?)",
                         (fuzzy_code, original, w, fuzzy_type)
                     )
                     entries.append((fuzzy_code, original, w, fuzzy_type))
