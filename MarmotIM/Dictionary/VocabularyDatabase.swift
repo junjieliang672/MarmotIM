@@ -56,6 +56,11 @@ final class VocabularyDatabase {
         return dbPath
     }
 
+    /// Get the database connection (for direct queries)
+    func getConnection() -> OpaquePointer? {
+        return db
+    }
+
     /// Close the database connection (for import/export operations)
     func closeDatabase() {
         lock.lock()
@@ -195,6 +200,53 @@ final class VocabularyDatabase {
         executeSQL("CREATE INDEX IF NOT EXISTS idx_user_learning_score ON user_learning(total_score DESC)")
         executeSQL("CREATE INDEX IF NOT EXISTS idx_entries_source ON entries(source)")
         executeSQL("CREATE INDEX IF NOT EXISTS idx_user_favorites_text ON user_favorites(text)")
+
+        // Filter mode tables
+        executeSQL("""
+            CREATE TABLE IF NOT EXISTS emoji_index (
+                id INTEGER PRIMARY KEY,
+                code TEXT NOT NULL,
+                code_type TEXT NOT NULL,
+                emoji TEXT NOT NULL,
+                frequency INTEGER DEFAULT 0
+            )
+        """)
+        executeSQL("CREATE INDEX IF NOT EXISTS idx_emoji_code ON emoji_index(code)")
+
+        executeSQL("""
+            CREATE TABLE IF NOT EXISTS fuzzy_pinyin (
+                id INTEGER PRIMARY KEY,
+                fuzzy_code TEXT NOT NULL,
+                original_code TEXT NOT NULL,
+                word TEXT NOT NULL,
+                fuzzy_type TEXT NOT NULL
+            )
+        """)
+        executeSQL("CREATE INDEX IF NOT EXISTS idx_fuzzy_code ON fuzzy_pinyin(fuzzy_code)")
+
+        executeSQL("""
+            CREATE TABLE IF NOT EXISTS symbol_index (
+                id INTEGER PRIMARY KEY,
+                code TEXT NOT NULL,
+                symbol TEXT NOT NULL,
+                category TEXT,
+                description TEXT
+            )
+        """)
+        executeSQL("CREATE INDEX IF NOT EXISTS idx_symbol_code ON symbol_index(code)")
+
+        // Filter mode user frequency (isolated from normal mode)
+        executeSQL("""
+            CREATE TABLE IF NOT EXISTS filter_user_freq (
+                filter_type TEXT NOT NULL,
+                code TEXT NOT NULL,
+                word TEXT NOT NULL,
+                frequency INTEGER DEFAULT 1,
+                last_used REAL,
+                PRIMARY KEY (filter_type, code, word)
+            )
+        """)
+        executeSQL("CREATE INDEX IF NOT EXISTS idx_filter_freq ON filter_user_freq(filter_type, code)")
     }
 
     // MARK: - Entry Operations
@@ -974,6 +1026,63 @@ final class VocabularyDatabase {
 
         executeSQL("COMMIT")
         NSLog("MarmotIM: Migrated \(migratedCount) user learning records")
+    }
+
+    // MARK: - Filter Mode User Frequency
+
+    /// Record user selection in filter mode (isolated from normal mode)
+    func recordFilterSelection(filterType: String, code: String, word: String) {
+        guard let db = db else { return }
+
+        let now = Date().timeIntervalSince1970
+        let sql = """
+            INSERT INTO filter_user_freq (filter_type, code, word, frequency, last_used)
+            VALUES (?, ?, ?, 1, ?)
+            ON CONFLICT(filter_type, code, word) DO UPDATE SET
+                frequency = frequency + 1,
+                last_used = ?
+        """
+
+        var stmt: OpaquePointer?
+        if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
+            sqlite3_bind_text(stmt, 1, filterType, -1, nil)
+            sqlite3_bind_text(stmt, 2, code, -1, nil)
+            sqlite3_bind_text(stmt, 3, word, -1, nil)
+            sqlite3_bind_double(stmt, 4, now)
+            sqlite3_bind_double(stmt, 5, now)
+            sqlite3_step(stmt)
+        }
+        sqlite3_finalize(stmt)
+    }
+
+    /// Get filter user frequency data
+    func getFilterUserFreq(filterType: String, code: String) -> [(word: String, frequency: Int, lastUsed: Double)] {
+        guard let db = db else { return [] }
+
+        var results: [(String, Int, Double)] = []
+        let sql = """
+            SELECT word, frequency, last_used
+            FROM filter_user_freq
+            WHERE filter_type = ? AND code LIKE ? || '%'
+            ORDER BY frequency DESC, last_used DESC
+        """
+
+        var stmt: OpaquePointer?
+        if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
+            sqlite3_bind_text(stmt, 1, filterType, -1, nil)
+            sqlite3_bind_text(stmt, 2, code, -1, nil)
+
+            while sqlite3_step(stmt) == SQLITE_ROW {
+                guard let wordPtr = sqlite3_column_text(stmt, 0) else { continue }
+                let word = String(cString: wordPtr)
+                let freq = Int(sqlite3_column_int(stmt, 1))
+                let lastUsed = sqlite3_column_double(stmt, 2)
+                results.append((word, freq, lastUsed))
+            }
+        }
+        sqlite3_finalize(stmt)
+
+        return results
     }
 
     // MARK: - Helpers

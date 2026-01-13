@@ -1,4 +1,24 @@
 import Foundation
+import SQLite3
+
+/// Candidate for filter mode search results
+struct FilterCandidate {
+    let text: String
+    let code: String
+    let codeType: String
+    var frequency: Int
+    var originalCode: String?
+    var description: String?
+
+    init(text: String, code: String, codeType: String, frequency: Int, originalCode: String? = nil, description: String? = nil) {
+        self.text = text
+        self.code = code
+        self.codeType = codeType
+        self.frequency = frequency
+        self.originalCode = originalCode
+        self.description = description
+    }
+}
 
 /// High-performance dictionary engine using SQLite + Trie architecture
 ///
@@ -666,5 +686,134 @@ class DictionaryEngine {
             (pinyinTrie.codeCount, pinyinTrie.entryCount),
             (wubiTrie.codeCount, wubiTrie.entryCount)
         )
+    }
+
+    // MARK: - Filter Mode Search
+
+    /// Search emoji by code (pinyin or english)
+    func searchEmoji(code: String, limit: Int = 100) -> [FilterCandidate] {
+        guard let db = VocabularyDatabase.shared.getConnection() else { return [] }
+
+        var results: [FilterCandidate] = []
+        let sql = """
+            SELECT emoji, code, code_type, frequency
+            FROM emoji_index
+            WHERE code LIKE '%' || ? || '%'
+            ORDER BY frequency DESC
+            LIMIT ?
+        """
+
+        var stmt: OpaquePointer?
+        if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
+            sqlite3_bind_text(stmt, 1, code, -1, nil)
+            sqlite3_bind_int(stmt, 2, Int32(limit))
+
+            while sqlite3_step(stmt) == SQLITE_ROW {
+                guard let emojiPtr = sqlite3_column_text(stmt, 0),
+                      let codePtr = sqlite3_column_text(stmt, 1),
+                      let typePtr = sqlite3_column_text(stmt, 2) else {
+                    continue
+                }
+                let emoji = String(cString: emojiPtr)
+                let matchCode = String(cString: codePtr)
+                let codeType = String(cString: typePtr)
+                let frequency = Int(sqlite3_column_int(stmt, 3))
+
+                results.append(FilterCandidate(
+                    text: emoji,
+                    code: matchCode,
+                    codeType: codeType,
+                    frequency: frequency
+                ))
+            }
+        }
+        sqlite3_finalize(stmt)
+
+        return results
+    }
+
+    /// Search fuzzy pinyin
+    func searchFuzzyPinyin(code: String, limit: Int = 100) -> [FilterCandidate] {
+        guard let db = VocabularyDatabase.shared.getConnection() else { return [] }
+
+        var results: [FilterCandidate] = []
+        let sql = """
+            SELECT word, fuzzy_code, original_code, fuzzy_type
+            FROM fuzzy_pinyin
+            WHERE fuzzy_code LIKE ? || '%'
+            LIMIT ?
+        """
+
+        var stmt: OpaquePointer?
+        if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
+            sqlite3_bind_text(stmt, 1, code, -1, nil)
+            sqlite3_bind_int(stmt, 2, Int32(limit))
+
+            while sqlite3_step(stmt) == SQLITE_ROW {
+                guard let wordPtr = sqlite3_column_text(stmt, 0),
+                      let fuzzyCodePtr = sqlite3_column_text(stmt, 1),
+                      let originalCodePtr = sqlite3_column_text(stmt, 2),
+                      let fuzzyTypePtr = sqlite3_column_text(stmt, 3) else {
+                    continue
+                }
+                let word = String(cString: wordPtr)
+                let fuzzyCode = String(cString: fuzzyCodePtr)
+                let originalCode = String(cString: originalCodePtr)
+                let fuzzyType = String(cString: fuzzyTypePtr)
+
+                results.append(FilterCandidate(
+                    text: word,
+                    code: fuzzyCode,
+                    codeType: "fuzzy_\(fuzzyType)",
+                    frequency: 0,
+                    originalCode: originalCode
+                ))
+            }
+        }
+        sqlite3_finalize(stmt)
+
+        return results
+    }
+
+    /// Search symbols by code or category
+    func searchSymbol(code: String, limit: Int = 100) -> [FilterCandidate] {
+        guard let db = VocabularyDatabase.shared.getConnection() else { return [] }
+
+        var results: [FilterCandidate] = []
+        let sql = """
+            SELECT symbol, code, category, description
+            FROM symbol_index
+            WHERE code LIKE '%' || ? || '%' OR category = ?
+            LIMIT ?
+        """
+
+        var stmt: OpaquePointer?
+        if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
+            sqlite3_bind_text(stmt, 1, code, -1, nil)
+            sqlite3_bind_text(stmt, 2, code, -1, nil)
+            sqlite3_bind_int(stmt, 3, Int32(limit))
+
+            while sqlite3_step(stmt) == SQLITE_ROW {
+                guard let symbolPtr = sqlite3_column_text(stmt, 0),
+                      let codePtr = sqlite3_column_text(stmt, 1) else {
+                    continue
+                }
+                let symbol = String(cString: symbolPtr)
+                let matchCode = String(cString: codePtr)
+                let category = sqlite3_column_text(stmt, 2).map { String(cString: $0) }
+                let description = sqlite3_column_text(stmt, 3).map { String(cString: $0) }
+
+                results.append(FilterCandidate(
+                    text: symbol,
+                    code: matchCode,
+                    codeType: category ?? "symbol",
+                    frequency: 0,
+                    description: description
+                ))
+            }
+        }
+        sqlite3_finalize(stmt)
+
+        return results
     }
 }

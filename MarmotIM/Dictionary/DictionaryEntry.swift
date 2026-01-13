@@ -101,4 +101,15 @@ struct Candidate: Identifiable {
         self.baseFrequency = match.entry.baseFrequency
         self.score = score
     }
+
+    /// Direct initializer for filter mode candidates
+    init(entryId: UInt32, text: String, code: String, codeType: DictionaryMatch.CodeType, isFullMatch: Bool, baseFrequency: UInt16, score: Double) {
+        self.entryId = entryId
+        self.text = text
+        self.code = code
+        self.codeType = codeType
+        self.isFullMatch = isFullMatch
+        self.baseFrequency = baseFrequency
+        self.score = score
+    }
 }

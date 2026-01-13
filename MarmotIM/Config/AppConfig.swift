@@ -151,6 +151,30 @@ struct CandidateWindowStyle: Codable, Equatable {
     )
 }
 
+// MARK: - Fuzzy Pinyin Configuration
+
+/// Fuzzy pinyin configuration
+struct FuzzyPinyinConfig: Codable, Equatable {
+    var enabled: Bool = true
+
+    // Initial (声母) fuzzy rules
+    var zh_z: Bool = true
+    var ch_c: Bool = true
+    var sh_s: Bool = true
+    var n_l: Bool = true
+    var r_l: Bool = true
+    var f_h: Bool = true
+
+    // Final (韵母) fuzzy rules
+    var an_ang: Bool = true
+    var en_eng: Bool = true
+    var in_ing: Bool = true
+    var ian_iang: Bool = true
+    var uan_uang: Bool = true
+
+    static let `default` = FuzzyPinyinConfig()
+}
+
 // MARK: - Default Punctuation Mapping
 
 /// Default Chinese punctuation mapping
@@ -232,6 +256,11 @@ struct AppConfig: Codable {
     /// Custom ranking formula in Python (optional)
     var customRankingFormula: String?
 
+    // MARK: - Fuzzy Pinyin Settings (模糊拼音)
+
+    /// Fuzzy pinyin configuration
+    var fuzzyPinyin: FuzzyPinyinConfig = .default
+
     // MARK: - Legacy Settings (现有设置)
 
     /// Enable auto-commit when there's a unique high-frequency match
@@ -274,6 +303,9 @@ struct AppConfig: Codable {
         // Ranking Settings
         rankingWeights: .default,
         customRankingFormula: nil,
+
+        // Fuzzy Pinyin Settings
+        fuzzyPinyin: .default,
 
         // Legacy Settings
         enableAutoCommit: false,
@@ -405,6 +437,7 @@ extension AppConfig {
         case candidateWindowStyle
         case rankingWeights
         case customRankingFormula
+        case fuzzyPinyin
         case enableAutoCommit
         case showCodeHint
         case frecencyMaxScore

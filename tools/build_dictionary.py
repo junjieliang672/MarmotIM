@@ -26,6 +26,14 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
+# Note: Symbol dictionary building requires PyYAML: pip install pyyaml
+try:
+    import yaml
+    YAML_AVAILABLE = True
+except ImportError:
+    yaml = None  # type: ignore
+    YAML_AVAILABLE = False
+
 
 # Source priority: Wubi entries rank higher
 SOURCE_WUBI = 1
@@ -451,10 +459,93 @@ def save_metadata(entries: List[dict], output_dir: str):
         json.dump(metadata, f, indent=2)
 
 
+def backup_user_data(db_path: str) -> Tuple[list, list, list]:
+    """
+    Backup user_learning and user_favorites data from existing database.
+    Returns (user_learning_rows, user_favorites_rows)
+    """
+    if not os.path.exists(db_path):
+        return [], [], []
+
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+
+    user_learning = []
+    user_favorites = []
+
+    try:
+        # Backup user_learning
+        cursor.execute("SELECT entry_id, access_count, last_access_timestamp, total_score FROM user_learning")
+        user_learning = cursor.fetchall()
+        print(f"  Backed up {len(user_learning)} user_learning records")
+    except sqlite3.OperationalError:
+        print("  No user_learning table found (new database)")
+
+    try:
+        # Backup user_favorites
+        cursor.execute("SELECT text, wubi_code, pinyin_code, added_timestamp FROM user_favorites")
+        user_favorites = cursor.fetchall()
+        print(f"  Backed up {len(user_favorites)} user_favorites records")
+    except sqlite3.OperationalError:
+        print("  No user_favorites table found (new database)")
+
+    try:
+        # Also backup filter_user_freq if exists
+        cursor.execute("SELECT filter_type, code, word, frequency, last_used FROM filter_user_freq")
+        filter_freq = cursor.fetchall()
+        if filter_freq:
+            print(f"  Backed up {len(filter_freq)} filter_user_freq records")
+    except sqlite3.OperationalError:
+        filter_freq = []
+
+    conn.close()
+    return user_learning, user_favorites, filter_freq
+
+
+def restore_user_data(db_path: str, user_learning: list, user_favorites: list, filter_freq: list):
+    """
+    Restore user_learning and user_favorites data to new database.
+    """
+    if not user_learning and not user_favorites and not filter_freq:
+        print("  No user data to restore")
+        return
+
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+
+    # Restore user_learning
+    if user_learning:
+        cursor.executemany(
+            "INSERT OR REPLACE INTO user_learning (entry_id, access_count, last_access_timestamp, total_score) VALUES (?, ?, ?, ?)",
+            user_learning
+        )
+        print(f"  Restored {len(user_learning)} user_learning records")
+
+    # Restore user_favorites
+    if user_favorites:
+        cursor.executemany(
+            "INSERT OR REPLACE INTO user_favorites (text, wubi_code, pinyin_code, added_timestamp) VALUES (?, ?, ?, ?)",
+            user_favorites
+        )
+        print(f"  Restored {len(user_favorites)} user_favorites records")
+
+    # Restore filter_user_freq
+    if filter_freq:
+        cursor.executemany(
+            "INSERT OR REPLACE INTO filter_user_freq (filter_type, code, word, frequency, last_used) VALUES (?, ?, ?, ?, ?)",
+            filter_freq
+        )
+        print(f"  Restored {len(filter_freq)} filter_user_freq records")
+
+    conn.commit()
+    conn.close()
+
+
 def install_to_marmotim(output_dir: str):
     """
     Install dictionary files to MarmotIM application directory.
     Copies dictionary.db to ~/Library/Application Support/MarmotIM/
+    IMPORTANT: Preserves user_learning and user_favorites data!
     """
     # Determine MarmotIM directory (main directory, not dict/ subdirectory)
     home = Path.home()
@@ -463,25 +554,49 @@ def install_to_marmotim(output_dir: str):
     # Create directory if it doesn't exist
     marmotim_dict_dir.mkdir(parents=True, exist_ok=True)
 
-    # Files to install
-    files_to_install = ['dictionary.db', 'metadata.json']
+    # Handle dictionary.db specially to preserve user data
+    src_db = os.path.join(output_dir, 'dictionary.db')
+    dst_db = marmotim_dict_dir / 'dictionary.db'
 
-    for filename in files_to_install:
+    if os.path.exists(src_db):
+        # Step 1: Backup user data from existing database
+        print("  Preserving user data...")
+        user_learning, user_favorites, filter_freq = backup_user_data(str(dst_db))
+
+        # Step 2: Backup existing file
+        if dst_db.exists():
+            backup = dst_db.with_suffix('.db.bak')
+            shutil.copy2(dst_db, backup)
+            print(f"  Backed up dictionary.db to dictionary.db.bak")
+
+        # Step 3: Remove old WAL files (they are incompatible with new database)
+        wal_file = dst_db.with_suffix('.db-wal')
+        shm_file = dst_db.with_suffix('.db-shm')
+        if wal_file.exists():
+            os.remove(wal_file)
+            print(f"  Removed old WAL file")
+        if shm_file.exists():
+            os.remove(shm_file)
+            print(f"  Removed old SHM file")
+
+        # Step 4: Copy new database
+        shutil.copy2(src_db, dst_db)
+        print(f"  Installed dictionary.db to {marmotim_dict_dir}")
+
+        # Step 5: Restore user data to new database
+        print("  Restoring user data...")
+        restore_user_data(str(dst_db), user_learning, user_favorites, filter_freq)
+    else:
+        print(f"  Warning: dictionary.db not found in output directory")
+
+    # Install other files (metadata.json)
+    for filename in ['metadata.json']:
         src = os.path.join(output_dir, filename)
         dst = marmotim_dict_dir / filename
 
         if os.path.exists(src):
-            # Backup existing file
-            if dst.exists():
-                backup = dst.with_suffix(dst.suffix + '.bak')
-                shutil.copy2(dst, backup)
-                print(f"  Backed up {dst.name} to {backup.name}")
-
-            # Copy new file
             shutil.copy2(src, dst)
-            print(f"  Installed {filename} to {marmotim_dict_dir}")
-        else:
-            print(f"  Warning: {filename} not found in output directory")
+            print(f"  Installed {filename}")
 
     print(f"  Installation complete: {marmotim_dict_dir}")
 
@@ -557,12 +672,50 @@ def save_sqlite(entries: List[dict], pinyin_index: Dict, wubi_index: Dict, filep
             version INTEGER PRIMARY KEY
         );
 
+        -- Filter mode tables
+        CREATE TABLE emoji_index (
+            id INTEGER PRIMARY KEY,
+            code TEXT NOT NULL,
+            code_type TEXT NOT NULL,
+            emoji TEXT NOT NULL,
+            frequency INTEGER DEFAULT 0
+        );
+
+        CREATE TABLE fuzzy_pinyin (
+            id INTEGER PRIMARY KEY,
+            fuzzy_code TEXT NOT NULL,
+            original_code TEXT NOT NULL,
+            word TEXT NOT NULL,
+            fuzzy_type TEXT NOT NULL
+        );
+
+        CREATE TABLE symbol_index (
+            id INTEGER PRIMARY KEY,
+            code TEXT NOT NULL,
+            symbol TEXT NOT NULL,
+            category TEXT,
+            description TEXT
+        );
+
+        CREATE TABLE filter_user_freq (
+            filter_type TEXT NOT NULL,
+            code TEXT NOT NULL,
+            word TEXT NOT NULL,
+            frequency INTEGER DEFAULT 1,
+            last_used REAL,
+            PRIMARY KEY (filter_type, code, word)
+        );
+
         -- Create indexes for fast prefix queries
         CREATE INDEX idx_pinyin_prefix ON pinyin_index(code);
         CREATE INDEX idx_wubi_prefix ON wubi_index(code);
         CREATE INDEX idx_user_learning_score ON user_learning(total_score DESC);
         CREATE INDEX idx_entries_source ON entries(source);
         CREATE INDEX idx_user_favorites_text ON user_favorites(text);
+        CREATE INDEX idx_emoji_code ON emoji_index(code);
+        CREATE INDEX idx_fuzzy_code ON fuzzy_pinyin(fuzzy_code);
+        CREATE INDEX idx_symbol_code ON symbol_index(code);
+        CREATE INDEX idx_filter_freq ON filter_user_freq(filter_type, code);
     ''')
 
     # Set schema version
@@ -633,6 +786,179 @@ def save_sqlite(entries: List[dict], pinyin_index: Dict, wubi_index: Dict, filep
 
     file_size = os.path.getsize(filepath)
     print(f"  SQLite size: {file_size / 1024 / 1024:.1f} MB")
+
+
+def build_emoji_index(cursor, emoji_paths: list, vocab_dir: Optional[str] = None):
+    """Build emoji index from multiple emoji table files."""
+    print(f"Building emoji index from {len(emoji_paths)} files...")
+
+    cursor.execute("DELETE FROM emoji_index")
+
+    entries = []  # Collect entries for txt export
+    count = 0
+
+    for emoji_path in emoji_paths:
+        if not os.path.exists(emoji_path):
+            print(f"  Warning: {emoji_path} not found, skipping")
+            continue
+
+        print(f"  Processing {emoji_path}...")
+        with open(emoji_path, 'r', encoding='utf-8') as f:
+            for line in f:
+                # Skip comments
+                if line.startswith('#'):
+                    continue
+                parts = line.strip().split()
+                if len(parts) < 2:
+                    continue
+
+                code = parts[0]
+                emojis = parts[1:]
+
+                for emoji in emojis:
+                    cursor.execute(
+                        "INSERT OR IGNORE INTO emoji_index (code, code_type, emoji, frequency) VALUES (?, ?, ?, ?)",
+                        (code, 'code', emoji, 0)
+                    )
+                    entries.append((code, 'code', emoji))
+                    count += 1
+
+    print(f"  Added {count} emoji entries total")
+
+    # Save to txt file in vocab directory
+    if vocab_dir:
+        save_emoji_index_txt(entries, vocab_dir)
+
+
+def save_emoji_index_txt(entries: list, vocab_dir: str):
+    """Save emoji index as txt file to vocab directory"""
+    output_path = os.path.join(vocab_dir, 'emoji_index.txt')
+    with open(output_path, 'w', encoding='utf-8') as f:
+        f.write("# Emoji Index - Generated by build_dictionary.py\n")
+        f.write("# Format: code code_type emoji\n")
+        for code, code_type, emoji in entries:
+            f.write(f"{code}\t{code_type}\t{emoji}\n")
+    print(f"  Saved emoji index to {output_path}")
+
+
+FUZZY_RULES = {
+    'initial': [
+        ('zh', 'z'), ('ch', 'c'), ('sh', 's'),
+        ('n', 'l'), ('r', 'l'), ('f', 'h')
+    ],
+    'final': [
+        ('ang', 'an'), ('eng', 'en'), ('ing', 'in'),
+        ('iang', 'ian'), ('uang', 'uan')
+    ]
+}
+
+
+def generate_fuzzy_variants(pinyin: str, word: str):
+    """Generate fuzzy variants for a pinyin"""
+    variants = []
+    for rule_type, rules in FUZZY_RULES.items():
+        for a, b in rules:
+            if a in pinyin:
+                fuzzy = pinyin.replace(a, b, 1)
+                variants.append((fuzzy, pinyin, word, rule_type))
+            if b in pinyin:
+                fuzzy = pinyin.replace(b, a, 1)
+                variants.append((fuzzy, pinyin, word, rule_type))
+    return variants
+
+
+def build_fuzzy_pinyin_index(cursor, pinyin_path: str, vocab_dir: Optional[str] = None):
+    """Build fuzzy pinyin index"""
+    print(f"Building fuzzy pinyin index from {pinyin_path}...")
+
+    cursor.execute("DELETE FROM fuzzy_pinyin")
+
+    entries = []  # Collect entries for txt export
+    count = 0
+    with open(pinyin_path, 'r', encoding='utf-8') as f:
+        for line in f:
+            parts = line.strip().split()
+            if len(parts) < 2:
+                continue
+
+            pinyin = parts[0]
+            words = parts[1:]
+
+            for word in words[:3]:  # Limit to top 3 words per pinyin
+                for fuzzy_code, original, w, fuzzy_type in generate_fuzzy_variants(pinyin, word):
+                    cursor.execute(
+                        "INSERT INTO fuzzy_pinyin (fuzzy_code, original_code, word, fuzzy_type) VALUES (?, ?, ?, ?)",
+                        (fuzzy_code, original, w, fuzzy_type)
+                    )
+                    entries.append((fuzzy_code, original, w, fuzzy_type))
+                    count += 1
+
+    print(f"  Added {count} fuzzy pinyin entries")
+
+    # Save to txt file in vocab directory
+    if vocab_dir:
+        save_fuzzy_pinyin_txt(entries, vocab_dir)
+
+
+def save_fuzzy_pinyin_txt(entries: list, vocab_dir: str):
+    """Save fuzzy pinyin index as txt file to vocab directory"""
+    output_path = os.path.join(vocab_dir, 'fuzzy_pinyin.txt')
+    with open(output_path, 'w', encoding='utf-8') as f:
+        f.write("# Fuzzy Pinyin Index - Generated by build_dictionary.py\n")
+        f.write("# Format: fuzzy_code original_code word fuzzy_type\n")
+        for fuzzy_code, original, word, fuzzy_type in entries:
+            f.write(f"{fuzzy_code}\t{original}\t{word}\t{fuzzy_type}\n")
+    print(f"  Saved fuzzy pinyin index to {output_path}")
+
+
+def build_symbol_index(cursor, symbols_path: str, vocab_dir: Optional[str] = None):
+    """Build symbol index from symbols.yaml"""
+    if not YAML_AVAILABLE:
+        print("Warning: PyYAML not installed. Run: pip install pyyaml")
+        return
+
+    print(f"Building symbol index from {symbols_path}...")
+
+    cursor.execute("DELETE FROM symbol_index")
+
+    with open(symbols_path, 'r', encoding='utf-8') as f:
+        content = yaml.safe_load(f)  # type: ignore[union-attr]
+
+    entries = []  # Collect entries for txt export
+    count = 0
+    symbols = content.get('punctuator', {}).get('symbols', {})
+
+    for code, symbol_list in symbols.items():
+        if not code.startswith('/'):
+            continue
+
+        category = code[1:]  # Remove leading /
+
+        if isinstance(symbol_list, list):
+            for symbol in symbol_list:
+                cursor.execute(
+                    "INSERT INTO symbol_index (code, symbol, category, description) VALUES (?, ?, ?, ?)",
+                    (category, str(symbol), category, None)
+                )
+                entries.append((category, str(symbol), category))
+                count += 1
+
+    print(f"  Added {count} symbol entries")
+
+    # Save to txt file in vocab directory
+    if vocab_dir:
+        save_symbol_index_txt(entries, vocab_dir)
+
+
+def save_symbol_index_txt(entries: list, vocab_dir: str):
+    """Save symbol index as txt file to vocab directory"""
+    output_path = os.path.join(vocab_dir, 'symbol_index.txt')
+    with open(output_path, 'w', encoding='utf-8') as f:
+        f.write("# Symbol Index - Generated by build_dictionary.py\n")
+        f.write("# Format: code symbol category\n")
+        for code, symbol, category in entries:
+            f.write(f"{code}\t{symbol}\t{category}\n")
+    print(f"  Saved symbol index to {output_path}")
 
 
 def load_corpus_frequencies(filepath: str) -> Dict[str, float]:
@@ -724,6 +1050,14 @@ def main():
     parser.add_argument('--extra-pinyin-dir', help='Directory containing extra pinyin tables (cn_en_table.txt, en_table.txt, emoji_table.txt)')
     parser.add_argument('--install', action='store_true', help='Install dictionary to MarmotIM application directory')
 
+    # Filter dictionary build options
+    parser.add_argument('--build-emoji', action='store_true',
+                        help='Build emoji index from vocab/emoji_table.txt')
+    parser.add_argument('--build-fuzzy', action='store_true',
+                        help='Build fuzzy pinyin index')
+    parser.add_argument('--build-symbol', action='store_true',
+                        help='Build symbol index from symbols.yaml')
+
     args = parser.parse_args()
 
     os.makedirs(args.output, exist_ok=True)
@@ -788,6 +1122,36 @@ def main():
     # Save SQLite (primary format for new architecture)
     print("\nStep 7: Saving SQLite format (primary)...")
     save_sqlite(entries, pinyin_index, wubi_index, os.path.join(args.output, 'dictionary.db'))
+
+    # Build filter dictionaries if requested
+    if args.build_emoji or args.build_fuzzy or args.build_symbol:
+        print("\nStep 7b: Building filter dictionaries...")
+        db_path = os.path.join(args.output, 'dictionary.db')
+        conn = sqlite3.connect(db_path)
+        cursor = conn.cursor()
+
+        # vocab_dir is where source files are located and where we save generated txt files
+        vocab_dir = os.path.dirname(args.pinyin)
+
+        if args.build_emoji:
+            emoji_files = [
+                os.path.join(vocab_dir, 'emoji_table.txt'),
+                os.path.join(vocab_dir, 'emoji_en_table.txt')
+            ]
+            build_emoji_index(cursor, emoji_files, vocab_dir)
+
+        if args.build_fuzzy:
+            build_fuzzy_pinyin_index(cursor, args.pinyin, vocab_dir)
+
+        if args.build_symbol:
+            symbol_path = os.path.join(vocab_dir, 'symbols.yaml')
+            if os.path.exists(symbol_path):
+                build_symbol_index(cursor, symbol_path, vocab_dir)
+            else:
+                print(f"Warning: symbols.yaml not found at {symbol_path}")
+
+        conn.commit()
+        conn.close()
 
     # Save binary format (legacy, optional)
     if not args.skip_binary:

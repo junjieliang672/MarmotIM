@@ -1,6 +1,23 @@
 import Cocoa
 import InputMethodKit
 
+/// Filter mode for specialized input (emoji, fuzzy pinyin, symbol)
+enum FilterMode: String {
+    case none = ""
+    case emoji = "e"
+    case fuzzyPinyin = "p"
+    case symbol = "s"
+
+    var displayLabel: String {
+        switch self {
+        case .none: return ""
+        case .emoji: return "[🙂 emoji]"
+        case .fuzzyPinyin: return "[拼 模糊拼音]"
+        case .symbol: return "[※ 符号]"
+        }
+    }
+}
+
 /// Main input controller handling keyboard events and candidate selection
 @objc(MarmotIMInputController)
 class InputController: IMKInputController {
@@ -48,6 +65,12 @@ class InputController: IMKInputController {
 
     /// Track state for paired punctuation (true = next should be closing)
     private var pairedPunctuationState: [String: Bool] = [:]
+
+    /// Current filter mode (none, emoji, fuzzyPinyin, symbol)
+    private var filterMode: FilterMode = .none
+
+    /// Input buffer for filter mode (separate from normal inputBuffer)
+    private var filterBuffer: String = ""
 
     /// Chinese quote pairs: opening → closing
     /// Only quotes support open/close pairing, NOT brackets
@@ -186,6 +209,19 @@ class InputController: IMKInputController {
             if isComposing {
                 return handlePageDown(client: sender)
             }
+        case 41: // ; key
+            if isComposing && filterMode == .none && inputBuffer.count == 1 {
+                let prefix = inputBuffer.lowercased()
+                if let mode = FilterMode(rawValue: prefix), mode != .none {
+                    NSLog("MarmotIM: Entering filter mode via semicolon: \(mode.displayLabel)")
+                    filterMode = mode
+                    filterBuffer = ""
+                    inputBuffer = ""
+                    updateMarkedText(client: sender)
+                    showFilterCandidates(client: sender)
+                    return true
+                }
+            }
         default:
             break
         }
@@ -286,6 +322,11 @@ class InputController: IMKInputController {
     // MARK: - Input Handling
 
     private func handleLetterInput(_ char: String, client sender: Any!) -> Bool {
+        // Route to filter mode if active
+        if filterMode != .none {
+            return handleFilterInput(char, client: sender)
+        }
+
         // Add character to input buffer preserving original case
         // This allows users to type "This" and see "This" in the buffer
         inputBuffer.append(char)
@@ -303,7 +344,54 @@ class InputController: IMKInputController {
         return true
     }
 
+    /// Handle input in filter mode
+    private func handleFilterInput(_ char: String, client sender: Any!) -> Bool {
+        filterBuffer.append(char.lowercased())
+        isComposing = true
+
+        // Update marked text with filter prefix
+        updateMarkedText(client: sender)
+
+        // Search in filter-specific dictionary
+        showFilterCandidates(client: sender)
+
+        return true
+    }
+
+    /// Exit filter mode
+    /// - Parameter commit: If true, commit selected candidate; if false, cancel
+    private func exitFilterMode(commit: Bool, client sender: Any!) {
+        NSLog("MarmotIM: Exiting filter mode (commit: \(commit))")
+
+        if commit && !allCandidates.isEmpty {
+            // Commit the first candidate
+            let candidate = allCandidates[0]
+            commitText(candidate.text, client: sender)
+
+            // Record selection for filter ranking (isolated from normal mode)
+            recordFilterSelection(code: filterBuffer, word: candidate.text)
+        }
+
+        // Reset filter state
+        filterMode = .none
+        filterBuffer = ""
+
+        // Reset normal state
+        reset()
+        hideCandidateWindow()
+
+        if let client = sender as? IMKTextInput {
+            client.setMarkedText("", selectionRange: NSRange(location: 0, length: 0), replacementRange: NSRange(location: NSNotFound, length: 0))
+        }
+    }
+
     private func handleSpace(client sender: Any!) -> Bool {
+        // Handle filter mode space - commit first candidate
+        if filterMode != .none && !allCandidates.isEmpty {
+            exitFilterMode(commit: true, client: sender)
+            return true
+        }
+
         guard isComposing else { return false }
 
         // If we have candidates, select the first one
@@ -320,6 +408,12 @@ class InputController: IMKInputController {
     private func handleReturn(client sender: Any!) -> Bool {
         NSLog("MarmotIM: handleReturn - isComposing=%d, inputBuffer='%@', enterKeyBehavior=%@",
               isComposing ? 1 : 0, inputBuffer, AppDelegate.config.enterKeyBehavior.rawValue)
+
+        // Handle filter mode return - commit first candidate
+        if filterMode != .none && !allCandidates.isEmpty {
+            exitFilterMode(commit: true, client: sender)
+            return true
+        }
 
         guard isComposing else { return false }
 
@@ -343,6 +437,12 @@ class InputController: IMKInputController {
     }
 
     private func handleEscape(client sender: Any!) -> Bool {
+        // Handle filter mode escape
+        if filterMode != .none {
+            exitFilterMode(commit: false, client: sender)
+            return true
+        }
+
         guard isComposing else { return false }
 
         reset()
@@ -357,7 +457,32 @@ class InputController: IMKInputController {
     }
 
     private func handleBackspace(client sender: Any!) -> Bool {
-        guard isComposing, !inputBuffer.isEmpty else { return false }
+        guard isComposing else { return false }
+
+        // Handle filter mode backspace
+        if filterMode != .none {
+            guard !filterBuffer.isEmpty else {
+                // Exit filter mode when buffer is empty
+                exitFilterMode(commit: false, client: sender)
+                return true
+            }
+
+            filterBuffer.removeLast()
+
+            if filterBuffer.isEmpty {
+                // Show empty filter mode UI (no candidates)
+                allCandidates = []
+                currentCandidates = []
+                hideCandidateWindow()
+            } else {
+                showFilterCandidates(client: sender)
+            }
+            updateMarkedText(client: sender)
+            return true
+        }
+
+        // Normal mode backspace
+        guard !inputBuffer.isEmpty else { return false }
 
         // Remove last character
         inputBuffer.removeLast()
@@ -377,11 +502,11 @@ class InputController: IMKInputController {
         return true
     }
 
+    /// Handle Tab key - no longer triggers filter mode
     private func handleTab(client sender: Any!) -> Bool {
-        // Tab cycles through candidates
-        guard isComposing, !currentCandidates.isEmpty else { return false }
-        // For now, just select first candidate
-        return selectCandidate(at: 0, client: sender)
+        // Tab no longer triggers filter mode (use ; instead)
+        // Return false to let Tab pass through
+        return false
     }
 
     private func handleArrowKey(isDown: Bool, client sender: Any!) -> Bool {
@@ -761,6 +886,14 @@ class InputController: IMKInputController {
               candidate.text, candidate.entryId, candidate.baseFrequency, inputBuffer)
         commitText(candidate.text, client: sender)
 
+        // If in filter mode, exit after selection
+        if filterMode != .none {
+            // Record selection for filter ranking (isolated from normal mode)
+            recordFilterSelection(code: filterBuffer, word: candidate.text)
+            filterMode = .none
+            filterBuffer = ""
+        }
+
         // Update user data (learning) - uses new DictionaryEngine API
         // CRITICAL: Use explicit guard to detect when engine is nil (bug detection)
         if let engine = AppDelegate.shared?.dictionaryEngine {
@@ -795,16 +928,24 @@ class InputController: IMKInputController {
     // MARK: - Marked Text
 
     private func updateMarkedText(client sender: Any!) {
-        if let client = sender as? IMKTextInput {
+        guard let client = sender as? IMKTextInput else { return }
+
+        let displayText: String
+        if filterMode != .none {
+            // Show filter mode label + buffer
+            displayText = "\(filterMode.displayLabel) \(filterBuffer)"
+        } else {
             // Set inputBuffer as marked text so the client knows there's composing text
             // This fixes backspace issues in Chrome/Electron where empty marked text
             // causes backspace to delete both the composing character and committed text
-            client.setMarkedText(
-                inputBuffer,
-                selectionRange: NSRange(location: inputBuffer.count, length: 0),
-                replacementRange: NSRange(location: NSNotFound, length: 0)
-            )
+            displayText = inputBuffer
         }
+
+        client.setMarkedText(
+            displayText,
+            selectionRange: NSRange(location: displayText.count, length: 0),
+            replacementRange: NSRange(location: NSNotFound, length: 0)
+        )
     }
 
     // MARK: - Candidate Window
@@ -840,6 +981,95 @@ class InputController: IMKInputController {
         candidateWindowController?.hide()
     }
 
+    /// Show candidates for current filter mode
+    private func showFilterCandidates(client sender: Any!) {
+        guard let engine = AppDelegate.shared?.dictionaryEngine else { return }
+
+        var filterResults: [FilterCandidate] = []
+
+        switch filterMode {
+        case .emoji:
+            filterResults = engine.searchEmoji(code: filterBuffer)
+        case .fuzzyPinyin:
+            filterResults = engine.searchFuzzyPinyin(code: filterBuffer)
+        case .symbol:
+            filterResults = engine.searchSymbol(code: filterBuffer)
+        case .none:
+            return
+        }
+
+        // Convert FilterCandidate to Candidate for display
+        allCandidates = filterResults.enumerated().map { (index, fc) in
+            Candidate(
+                entryId: UInt32(index),
+                text: fc.text,
+                code: fc.code,
+                codeType: .pinyin,  // Simplified for filter mode
+                isFullMatch: true,
+                baseFrequency: UInt16(min(fc.frequency, Int(UInt16.max))),
+                score: Double(fc.frequency)
+            )
+        }
+
+        // Apply filter user ranking (isolated from normal mode)
+        rankFilterCandidates()
+
+        currentPage = 0
+        updateCurrentPageCandidates()
+        showCandidateWindow(client: sender)
+    }
+
+    // MARK: - Filter Mode Ranking
+
+    /// Record filter mode selection (delegates to database)
+    private func recordFilterSelection(code: String, word: String) {
+        VocabularyDatabase.shared.recordFilterSelection(
+            filterType: filterMode.rawValue,
+            code: code,
+            word: word
+        )
+    }
+
+    /// Rank filter candidates using isolated user data
+    private func rankFilterCandidates() {
+        let userFreqs = VocabularyDatabase.shared.getFilterUserFreq(
+            filterType: filterMode.rawValue,
+            code: filterBuffer
+        )
+
+        // Create lookup for user frequency
+        var freqLookup: [String: (Int, Double)] = [:]
+        for (word, freq, lastUsed) in userFreqs {
+            freqLookup[word] = (freq, lastUsed)
+        }
+
+        // Apply user frequency to candidates
+        for i in 0..<allCandidates.count {
+            if let (freq, lastUsed) = freqLookup[allCandidates[i].text] {
+                // Boost score based on user frequency
+                let recencyBonus = calculateFilterRecencyBonus(lastUsed: lastUsed)
+                allCandidates[i].score += Double(freq) * 10000 + recencyBonus
+            }
+        }
+
+        // Re-sort by score
+        allCandidates.sort { $0.score > $1.score }
+    }
+
+    private func calculateFilterRecencyBonus(lastUsed: Double) -> Double {
+        let now = Date().timeIntervalSince1970
+        let hoursSince = (now - lastUsed) / 3600
+
+        if hoursSince < 1 {
+            return 1_000_000  // Within last hour
+        } else if hoursSince < 24 {
+            return 100_000    // Within last day
+        } else if hoursSince < 168 {
+            return 10_000     // Within last week
+        }
+        return 0
+    }
+
     // MARK: - Reset
 
     private func reset() {
@@ -848,6 +1078,9 @@ class InputController: IMKInputController {
         currentCandidates = []
         currentPage = 0
         isComposing = false
+        // Reset filter mode state
+        filterMode = .none
+        filterBuffer = ""
     }
 
     // MARK: - IMKStateSetting Protocol
@@ -855,6 +1088,24 @@ class InputController: IMKInputController {
     override func setValue(_ value: Any!, forTag tag: Int, client sender: Any!) {
         // Handle input mode changes if needed
         super.setValue(value, forTag: tag, client: sender)
+    }
+
+    // MARK: - Command Selectors (intercept Tab before IMK default handling)
+
+    override func didCommand(by selector: Selector!, client sender: Any!) -> Bool {
+        NSLog("MarmotIM: didCommand(by: \(selector?.description ?? "nil"))")
+
+        // Intercept insertTab: which is sent when Tab is pressed
+        if selector == #selector(insertTab(_:)) {
+            NSLog("MarmotIM: Intercepted insertTab - passing through")
+            return false  // Let Tab pass through
+        }
+
+        return super.didCommand(by: selector, client: sender)
+    }
+
+    @objc func insertTab(_ sender: Any?) {
+        // Placeholder for selector
     }
 
     // MARK: - Menu
