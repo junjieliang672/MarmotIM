@@ -15,20 +15,37 @@ TotalScore = TierBonus + TierOverrideBoost + RecencyScore + FrequencyScore + Bas
 
 ## Tier System (Absolute Priority)
 
-The tier system provides **absolute priority** - a Tier 1 candidate always ranks above Tier 2, regardless of frecency scores.
+The tier system provides **absolute priority** - a higher tier candidate always ranks above lower tiers, regardless of frecency scores.
+
+### Protected Tier (Tier 0) - 简码保护
+
+Wubi 1-2级简码 (level 1-2 short codes) have a **protected tier** that **CANNOT be overridden** by user learning:
+
+| Tier | Match Type | Code Length | Bonus | Override |
+|------|------------|-------------|-------|----------|
+| 0 | Full Wubi | 1-2 chars | +1T | ❌ Never |
+
+**Rationale**: 一级简码 (25 single-key codes like `i`→我, `w`→人) and 二级简码 (625 two-key codes) are the core efficiency of Wubi input. These codes are deeply ingrained in muscle memory - users expect them to **always** produce the same result. Allowing frecency or user history to reorder these would destroy the deterministic nature that makes Wubi fast.
+
+**Implementation**: The jianmaTierBonus (1T = 1,000,000,000,000) is intentionally set higher than:
+- `tier1Bonus (100B) + tierOverrideBoost (500B) = 600B`
+
+This ensures that even if a user repeatedly selects a different word, the 简码 will **always** rank first.
 
 ### Short Code Mode (input length <= 4)
 
-When input is 4 characters or less, Wubi matches are prioritized:
+When input is 4 characters or less, Wubi matches are prioritized. These are **regular tiers** that CAN be overridden by user selection:
 
-| Tier | Match Type | Code Type | Bonus |
-|------|------------|-----------|-------|
-| 1 | Full Match | Wubi | +100B |
-| 2 | Full Match | Pinyin | +10B |
-| 3 | Prefix Match | Wubi | +1B |
-| 4 | Prefix Match | Pinyin | 0 |
+| Tier | Match Type | Code Type | Bonus | Override |
+|------|------------|-----------|-------|----------|
+| 1 | Full Match | Wubi (3-4 chars) | +100B | ✅ Can override |
+| 2 | Full Match | Pinyin | +10B | ✅ Can override |
+| 3 | Prefix Match | Wubi | +1B | ✅ Can override |
+| 4 | Prefix Match | Pinyin | 0 | ✅ Can override |
 
-**Rationale**: Short codes are typically Wubi codes (1-4 chars). Wubi users expect exact matches to rank first.
+**Note**: Full Wubi matches with 1-2 char codes are Tier 0 (protected), not Tier 1.
+
+**Rationale**: 3-4 character Wubi codes (三级简码, 全码) can be overridden because users may genuinely prefer alternative words. But 1-2级简码 are protected.
 
 ### Long Code Mode (input length > 4)
 
@@ -125,7 +142,7 @@ Prefer shorter words within the same tier:
 
 ## Tier Override Boost (Cross-Tier Promotion)
 
-A special high-value boost that can temporarily override tier boundaries:
+A special high-value boost that can temporarily override **regular tier** boundaries:
 
 ```swift
 TierOverrideBoost = 500,000,000,000 × e^(-λ × timeSince)
@@ -136,6 +153,8 @@ Where:
 - Initial boost = 500B (exceeds tier gap of 100B)
 
 **Purpose**: When a user repeatedly selects a pinyin word over a wubi word, the tier-override boost allows the pinyin word to temporarily rank above the wubi word.
+
+**Important**: This boost **CANNOT** override Tier 0 (1-2级简码). The protected tier bonus (1T) is intentionally set higher than the maximum possible regular score (tier1 100B + tierOverride 500B = 600B), ensuring 简码 always rank first.
 
 **Decay:**
 | Time Since | Boost | Effect |
@@ -236,18 +255,26 @@ CREATE TABLE filter_user_freq (
 
 ## Algorithm Properties
 
+### Tier Override Summary
+
+| Tier | Description | Can User Override? |
+|------|-------------|-------------------|
+| 0 | Wubi 1-2级简码 | ❌ Never - always ranks first |
+| 1-4 | Regular tiers | ✅ Yes - via tierOverrideBoost |
+
 ### Convergence Behavior
 
-1. **Short-term**: Recency dominates. Last selected word ranks #1.
+1. **Short-term**: Recency dominates. Last selected word ranks #1 (within its tier).
 2. **Medium-term** (1-7 days): Recency fades, frequency becomes important.
 3. **Long-term** (>14 days): Frequency and base score dominate.
 
 ### User Experience
 
-- **Immediate feedback**: Selected word immediately jumps to #1
+- **Immediate feedback**: Selected word immediately jumps to #1 (within its tier)
 - **Learning**: Frequently used words gradually rise in ranking
 - **Forgetting**: Rarely used words gradually fall back to base ranking
 - **Stability**: High-frequency words maintain position even when not recently used
+- **简码保护**: 1-2级简码 always produce the same result, preserving muscle memory
 
 ### Performance
 
