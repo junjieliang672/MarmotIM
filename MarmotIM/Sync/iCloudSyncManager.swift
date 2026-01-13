@@ -21,7 +21,7 @@ class iCloudSyncManager {
     private let syncQueue = DispatchQueue(label: "com.marmotim.sync", qos: .utility)
     private var syncTimer: Timer?
     private var metadataQuery: NSMetadataQuery?
-    private let syncInterval: TimeInterval = 300  // 5 minutes
+    private let syncInterval: TimeInterval = 1800  // 30 minutes
 
     // Database path
     private let localDBPath: URL
