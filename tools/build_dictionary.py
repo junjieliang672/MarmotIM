@@ -788,32 +788,42 @@ def save_sqlite(entries: List[dict], pinyin_index: Dict, wubi_index: Dict, filep
     print(f"  SQLite size: {file_size / 1024 / 1024:.1f} MB")
 
 
-def build_emoji_index(cursor, emoji_path: str, vocab_dir: Optional[str] = None):
-    """Build emoji index from emoji_table.txt"""
-    print(f"Building emoji index from {emoji_path}...")
+def build_emoji_index(cursor, emoji_paths: list, vocab_dir: Optional[str] = None):
+    """Build emoji index from multiple emoji table files."""
+    print(f"Building emoji index from {len(emoji_paths)} files...")
 
     cursor.execute("DELETE FROM emoji_index")
 
     entries = []  # Collect entries for txt export
     count = 0
-    with open(emoji_path, 'r', encoding='utf-8') as f:
-        for line in f:
-            parts = line.strip().split()
-            if len(parts) < 2:
-                continue
 
-            code = parts[0]
-            emojis = parts[1:]
+    for emoji_path in emoji_paths:
+        if not os.path.exists(emoji_path):
+            print(f"  Warning: {emoji_path} not found, skipping")
+            continue
 
-            for emoji in emojis:
-                cursor.execute(
-                    "INSERT INTO emoji_index (code, code_type, emoji, frequency) VALUES (?, ?, ?, ?)",
-                    (code, 'pinyin', emoji, 0)
-                )
-                entries.append((code, 'pinyin', emoji))
-                count += 1
+        print(f"  Processing {emoji_path}...")
+        with open(emoji_path, 'r', encoding='utf-8') as f:
+            for line in f:
+                # Skip comments
+                if line.startswith('#'):
+                    continue
+                parts = line.strip().split()
+                if len(parts) < 2:
+                    continue
 
-    print(f"  Added {count} emoji entries")
+                code = parts[0]
+                emojis = parts[1:]
+
+                for emoji in emojis:
+                    cursor.execute(
+                        "INSERT OR IGNORE INTO emoji_index (code, code_type, emoji, frequency) VALUES (?, ?, ?, ?)",
+                        (code, 'code', emoji, 0)
+                    )
+                    entries.append((code, 'code', emoji))
+                    count += 1
+
+    print(f"  Added {count} emoji entries total")
 
     # Save to txt file in vocab directory
     if vocab_dir:
@@ -1124,11 +1134,11 @@ def main():
         vocab_dir = os.path.dirname(args.pinyin)
 
         if args.build_emoji:
-            emoji_filter_path = os.path.join(vocab_dir, 'emoji_table.txt')
-            if os.path.exists(emoji_filter_path):
-                build_emoji_index(cursor, emoji_filter_path, vocab_dir)
-            else:
-                print(f"Warning: emoji_table.txt not found at {emoji_filter_path}")
+            emoji_files = [
+                os.path.join(vocab_dir, 'emoji_table.txt'),
+                os.path.join(vocab_dir, 'emoji_en_table.txt')
+            ]
+            build_emoji_index(cursor, emoji_files, vocab_dir)
 
         if args.build_fuzzy:
             build_fuzzy_pinyin_index(cursor, args.pinyin, vocab_dir)
