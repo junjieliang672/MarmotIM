@@ -698,7 +698,7 @@ class DictionaryEngine {
         let sql = """
             SELECT emoji, code, code_type, frequency
             FROM emoji_index
-            WHERE code LIKE ? || '%'
+            WHERE code LIKE '%' || ? || '%'
             ORDER BY frequency DESC
             LIMIT ?
         """
