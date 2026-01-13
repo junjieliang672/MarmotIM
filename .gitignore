@@ -19,6 +19,8 @@ docs/plans/
 
 # Generated dictionary files
 dict/
+MarmotIM/Resources/vocabulary.db/
+vocab/fuzzy_pinyin.txt
 
 # Logs
 logs/
