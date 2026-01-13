@@ -19,6 +19,7 @@
 - **五笔拼音混拼** - 五笔码和拼音码共存，无需切换模式。短码优先五笔，长码优先拼音
 - **智能排序自适应** - 基于 Frecency 算法，结合使用频率和最近使用时间动态调整排序，使用越久越顺手
 - **前缀快速匹配** - 支持最短前缀快速输入
+- **过滤模式** - 支持 Emoji、模糊拼音、符号的专用搜索模式，可通过特定触发符快速进入
 - **划词入库** - Control+= 快速添加选中文字到用户词库
 - **数据库导入导出** - 支持备份和迁移用户数据
 
@@ -52,14 +53,8 @@
 git clone https://github.com/junjieliang672/MarmotIM.git
 cd MarmotIM
 
-# 2. 构建词库
-python3 tools/build_dictionary.py \
-    --pinyin vocab/py_table.txt \
-    --wubi vocab/wb_table.txt \
-    --extra-pinyin-dir vocab \
-    --output dict \
-    --skip-json \
-    --install
+# 2. 构建词库（使用默认参数，包含 Emoji、模糊拼音、符号索引）
+python3 tools/build_dictionary.py
 
 # 3. 构建并安装（需要输入密码）
 ./scripts/build.sh
@@ -90,6 +85,18 @@ python3 tools/build_dictionary.py \
 | 中英文切换 | Shift / Control / Fn | 可在设置中更改，或禁用 |
 | Enter 键 | 清除编码 / 输出编码 | 可在设置中更改 |
 | 空码时 | 转临时英文 / 清除编码 | 可在设置中更改 |
+
+### 过滤模式
+
+输入触发符 + `;` 进入过滤模式，可进行专项搜索：
+
+| 触发符 | 模式 | 说明 | 示例 |
+|--------|------|------|------|
+| `e;` | Emoji 模式 | 搜索 Emoji 表情，支持拼音和英文 | `e;cat` → 🐱, `e;maozi` → 🎩 |
+| `p;` | 模糊拼音 | 搜索模糊拼音匹配（z/zh, c/ch, s/sh 等） | `p;si` → 匹配 shi/si |
+| `s;` | 符号模式 | 搜索特殊符号 | `s;jiantou` → ← ↑ → ↓ |
+
+进入过滤模式后，继续输入关键字进行搜索，使用数字键选择候选，按 Escape 退出。
 
 ### 高级功能
 
@@ -142,7 +149,9 @@ MarmotIM/
 │   ├── wb_table.txt          # 五笔词库
 │   ├── cn_en_table.txt       # 中英混合词库
 │   ├── en_table.txt          # 英文词库
-│   └── emoji_table.txt       # Emoji 词库
+│   ├── emoji_table.txt       # Emoji 词库（拼音）
+│   ├── emoji_en_table.txt    # Emoji 词库（英文）
+│   └── symbols.yaml          # 符号词库
 ├── tools/                   # 构建工具
 │   ├── build_dictionary.py   # 词库构建脚本
 │   └── generate_icon.py      # 图标生成
