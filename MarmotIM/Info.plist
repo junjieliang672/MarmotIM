@@ -91,6 +91,20 @@
         </array>
     </dict>
 
+    <!-- iCloud Documents Configuration -->
+    <key>NSUbiquitousContainers</key>
+    <dict>
+        <key>iCloud.com.marmotim.inputmethod.MarmotIM</key>
+        <dict>
+            <key>NSUbiquitousContainerIsDocumentScopePublic</key>
+            <true/>
+            <key>NSUbiquitousContainerName</key>
+            <string>MarmotIM</string>
+            <key>NSUbiquitousContainerSupportedFolderLevels</key>
+            <string>None</string>
+        </dict>
+    </dict>
+
     <key>NSHumanReadableCopyright</key>
     <string>Copyright 2026. All rights reserved.</string>
 </dict>

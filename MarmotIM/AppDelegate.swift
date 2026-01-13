@@ -40,11 +40,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Setup notification observers
         setupNotificationObservers()
 
+        // Start iCloud sync service
+        iCloudSyncManager.shared.start()
+
         NSLog("MarmotIM: Initialization complete")
     }
 
     func applicationWillTerminate(_ notification: Notification) {
         NSLog("MarmotIM: Application will terminate")
+
+        // Stop iCloud sync service
+        iCloudSyncManager.shared.stop()
 
         // Save any pending user data
         Self.userDataStore?.save()

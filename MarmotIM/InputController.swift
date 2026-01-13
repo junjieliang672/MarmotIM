@@ -1156,6 +1156,16 @@ class InputController: IMKInputController {
         userDictItem.target = self
         menu.addItem(userDictItem)
 
+        // iCloud Sync Status
+        let syncItem = NSMenuItem(
+            title: syncStatusText(),
+            action: #selector(syncNow(_:)),
+            keyEquivalent: ""
+        )
+        syncItem.target = self
+        syncItem.image = syncStatusIcon()
+        menu.addItem(syncItem)
+
         menu.addItem(NSMenuItem.separator())
 
         // Input mode section
@@ -1216,5 +1226,77 @@ class InputController: IMKInputController {
             isEnglishMode = true
             NSLog("MarmotIM: Switched to English mode via menu")
         }
+    }
+
+    // MARK: - iCloud Sync Status
+
+    private func syncStatusText() -> String {
+        let sync = iCloudSyncManager.shared
+
+        // iCloud not available
+        guard sync.isICloudAvailable else {
+            return "iCloud 未连接"
+        }
+
+        // Syncing
+        if sync.isSyncing {
+            return "同步中..."
+        }
+
+        // Never synced
+        guard let lastTime = sync.lastSyncTime else {
+            return "未同步"
+        }
+
+        // Sync failed
+        if !sync.lastSyncSuccess {
+            return "同步失败 · 点击重试"
+        }
+
+        // Sync success, show time ago
+        let timeAgo = formatTimeAgo(lastTime)
+        return "已同步 · \(timeAgo)"
+    }
+
+    private func syncStatusIcon() -> NSImage? {
+        let sync = iCloudSyncManager.shared
+
+        let iconName: String
+        if !sync.isICloudAvailable {
+            iconName = "icloud.slash"
+        } else if sync.isSyncing {
+            iconName = "arrow.triangle.2.circlepath"
+        } else if !sync.lastSyncSuccess {
+            iconName = "exclamationmark.icloud"
+        } else {
+            iconName = "checkmark.icloud"
+        }
+
+        let image = NSImage(systemSymbolName: iconName, accessibilityDescription: nil)
+        image?.isTemplate = true
+        return image
+    }
+
+    private func formatTimeAgo(_ date: Date) -> String {
+        let seconds = Int(-date.timeIntervalSinceNow)
+
+        if seconds < 60 {
+            return "刚刚"
+        } else if seconds < 3600 {
+            return "\(seconds / 60)分钟前"
+        } else if seconds < 86400 {
+            return "\(seconds / 3600)小时前"
+        } else if seconds < 604800 {
+            return "\(seconds / 86400)天前"
+        } else {
+            let formatter = DateFormatter()
+            formatter.dateFormat = "MM-dd HH:mm"
+            return formatter.string(from: date)
+        }
+    }
+
+    @objc private func syncNow(_ sender: Any?) {
+        NSLog("MarmotIM: Manual sync triggered")
+        iCloudSyncManager.shared.syncNow()
     }
 }
