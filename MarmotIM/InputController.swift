@@ -182,6 +182,19 @@ class InputController: IMKInputController {
             if isComposing {
                 return handlePageDown(client: sender)
             }
+        case 41: // ; key
+            if isComposing && filterMode == .none && inputBuffer.count == 1 {
+                let prefix = inputBuffer.lowercased()
+                if let mode = FilterMode(rawValue: prefix), mode != .none {
+                    NSLog("MarmotIM: Entering filter mode via semicolon: \(mode.displayLabel)")
+                    filterMode = mode
+                    filterBuffer = ""
+                    inputBuffer = ""
+                    updateMarkedText(client: sender)
+                    showFilterCandidates(client: sender)
+                    return true
+                }
+            }
         default:
             break
         }
@@ -462,31 +475,11 @@ class InputController: IMKInputController {
         return true
     }
 
-    /// Handle Tab key - enter filter mode if single letter prefix
+    /// Handle Tab key - no longer triggers filter mode
     private func handleTab(client sender: Any!) -> Bool {
-        // Only enter filter mode from normal mode with single letter
-        guard filterMode == .none && inputBuffer.count == 1 else {
-            // Default tab behavior (if any)
-            return false
-        }
-
-        let prefix = inputBuffer.lowercased()
-        guard let mode = FilterMode(rawValue: prefix), mode != .none else {
-            return false
-        }
-
-        // Enter filter mode
-        NSLog("MarmotIM: Entering filter mode: \(mode.displayLabel)")
-        filterMode = mode
-        filterBuffer = ""
-        inputBuffer = ""
-        isComposing = true
-
-        // Update UI to show filter mode
-        updateMarkedText(client: sender)
-        showFilterCandidates(client: sender)
-
-        return true
+        // Tab no longer triggers filter mode (use ; instead)
+        // Return false to let Tab pass through
+        return false
     }
 
     private func handleArrowKey(isDown: Bool, client sender: Any!) -> Bool {
@@ -1033,6 +1026,24 @@ class InputController: IMKInputController {
     override func setValue(_ value: Any!, forTag tag: Int, client sender: Any!) {
         // Handle input mode changes if needed
         super.setValue(value, forTag: tag, client: sender)
+    }
+
+    // MARK: - Command Selectors (intercept Tab before IMK default handling)
+
+    override func didCommand(by selector: Selector!, client sender: Any!) -> Bool {
+        NSLog("MarmotIM: didCommand(by: \(selector?.description ?? "nil"))")
+
+        // Intercept insertTab: which is sent when Tab is pressed
+        if selector == #selector(insertTab(_:)) {
+            NSLog("MarmotIM: Intercepted insertTab - passing through")
+            return false  // Let Tab pass through
+        }
+
+        return super.didCommand(by: selector, client: sender)
+    }
+
+    @objc func insertTab(_ sender: Any?) {
+        // Placeholder for selector
     }
 
     // MARK: - Menu
