@@ -783,7 +783,7 @@ class DictionaryEngine {
         let sql = """
             SELECT symbol, code, category, description
             FROM symbol_index
-            WHERE code LIKE ? || '%' OR category = ?
+            WHERE code LIKE '%' || ? || '%' OR category = ?
             LIMIT ?
         """
 
