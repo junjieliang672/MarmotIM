@@ -690,6 +690,18 @@ class DictionaryEngine {
 
     // MARK: - Filter Mode Search
 
+    /// Helper: increment last character for range query upper bound
+    /// e.g., "ni" -> "nj", "abc" -> "abd"
+    private func incrementLastChar(_ s: String) -> String {
+        guard !s.isEmpty else { return s }
+        var chars = Array(s)
+        if let lastChar = chars.last, let scalar = lastChar.unicodeScalars.first {
+            let nextScalar = UnicodeScalar(scalar.value + 1)!
+            chars[chars.count - 1] = Character(nextScalar)
+        }
+        return String(chars)
+    }
+
     /// Search emoji by code (pinyin or english)
     func searchEmoji(code: String, limit: Int = 100) -> [FilterCandidate] {
         guard let db = VocabularyDatabase.shared.getConnection() else { return [] }
@@ -705,7 +717,9 @@ class DictionaryEngine {
 
         var stmt: OpaquePointer?
         if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
-            sqlite3_bind_text(stmt, 1, code, -1, nil)
+            // Use NSString for proper SQLite binding
+            let codeNS = code as NSString
+            sqlite3_bind_text(stmt, 1, codeNS.utf8String, -1, nil)
             sqlite3_bind_int(stmt, 2, Int32(limit))
 
             while sqlite3_step(stmt) == SQLITE_ROW {
@@ -732,22 +746,32 @@ class DictionaryEngine {
         return results
     }
 
-    /// Search fuzzy pinyin
+    /// Search fuzzy pinyin using index-optimized range query
     func searchFuzzyPinyin(code: String, limit: Int = 100) -> [FilterCandidate] {
         guard let db = VocabularyDatabase.shared.getConnection() else { return [] }
+        guard !code.isEmpty else { return [] }
 
         var results: [FilterCandidate] = []
+
+        // Use range query instead of LIKE for index efficiency
+        // For prefix "ni", search: fuzzy_code >= "ni" AND fuzzy_code < "nj"
+        let upperBound = incrementLastChar(code)
+
         let sql = """
             SELECT word, fuzzy_code, original_code, fuzzy_type
             FROM fuzzy_pinyin
-            WHERE fuzzy_code LIKE ? || '%'
+            WHERE fuzzy_code >= ? AND fuzzy_code < ?
             LIMIT ?
         """
 
         var stmt: OpaquePointer?
         if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
-            sqlite3_bind_text(stmt, 1, code, -1, nil)
-            sqlite3_bind_int(stmt, 2, Int32(limit))
+            // Use NSString for proper SQLite binding
+            let codeNS = code as NSString
+            let upperNS = upperBound as NSString
+            sqlite3_bind_text(stmt, 1, codeNS.utf8String, -1, nil)
+            sqlite3_bind_text(stmt, 2, upperNS.utf8String, -1, nil)
+            sqlite3_bind_int(stmt, 3, Int32(limit))
 
             while sqlite3_step(stmt) == SQLITE_ROW {
                 guard let wordPtr = sqlite3_column_text(stmt, 0),
@@ -789,8 +813,10 @@ class DictionaryEngine {
 
         var stmt: OpaquePointer?
         if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
-            sqlite3_bind_text(stmt, 1, code, -1, nil)
-            sqlite3_bind_text(stmt, 2, code, -1, nil)
+            // Use NSString for proper SQLite binding
+            let codeNS = code as NSString
+            sqlite3_bind_text(stmt, 1, codeNS.utf8String, -1, nil)
+            sqlite3_bind_text(stmt, 2, codeNS.utf8String, -1, nil)
             sqlite3_bind_int(stmt, 3, Int32(limit))
 
             while sqlite3_step(stmt) == SQLITE_ROW {

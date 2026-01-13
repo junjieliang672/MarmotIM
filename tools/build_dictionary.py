@@ -1,17 +1,25 @@
 #!/usr/bin/env python3
 """
 Dictionary Builder for MarmotIM
-Builds a unified mixed Wubi+Pinyin dictionary with binary indexing.
+Builds a unified mixed Wubi+Pinyin dictionary with SQLite indexing.
+
+Usage:
+    python3 tools/build_dictionary.py           # Run with defaults (recommended)
+    python3 tools/build_dictionary.py --no-install  # Build without installing
+
+All vocab files should be in vocab/ directory. The script will:
+1. Build the main dictionary from py_table.txt and wb_table.txt
+2. Build filter indexes (emoji, fuzzy pinyin, symbols)
+3. Install to ~/Library/Application Support/MarmotIM/
+4. PRESERVE user data (user_learning, user_favorites, filter_user_freq)
 
 Priority:
 1. wb_table.txt entries (higher priority)
 2. py_table.txt entries (lower priority)
-3. Extra pinyin dictionaries (cn_en, en, emoji) with base score 0
+3. Extra pinyin dictionaries (cn_en, en, emoji) with base score 1000
 
 Output:
-- dictionary.db: SQLite indexed dictionary
-- dictionary.bin: Binary indexed dictionary for fast mmap loading
-- dictionary.json: JSON backup for debugging
+- dictionary.db: SQLite indexed dictionary with all filter indexes
 """
 
 import argparse
@@ -1036,31 +1044,53 @@ def apply_corpus_frequencies(entries: List[dict], corpus_freq: Dict[str, float])
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Build MarmotIM dictionary')
-    parser.add_argument('--pinyin', required=True, help='Path to py_table.txt')
-    parser.add_argument('--wubi', required=True, help='Path to wb_table.txt')
-    parser.add_argument('--output', required=True, help='Output directory')
+    # Get project root directory (parent of tools/)
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    project_root = os.path.dirname(script_dir)
+    vocab_dir = os.path.join(project_root, 'vocab')
+    dict_dir = os.path.join(project_root, 'dict')
+
+    parser = argparse.ArgumentParser(
+        description='Build MarmotIM dictionary. Can be run without arguments to build with defaults.')
+
+    # Core paths with sensible defaults
+    parser.add_argument('--pinyin', default=os.path.join(vocab_dir, 'py_table.txt'),
+                        help='Path to py_table.txt (default: vocab/py_table.txt)')
+    parser.add_argument('--wubi', default=os.path.join(vocab_dir, 'wb_table.txt'),
+                        help='Path to wb_table.txt (default: vocab/wb_table.txt)')
+    parser.add_argument('--output', default=dict_dir,
+                        help='Output directory (default: dict/)')
     parser.add_argument('--corpus', help='Path to corpus frequency file (optional)')
     parser.add_argument('--limit', type=int, help='Limit pinyin entries (for testing)')
-    parser.add_argument('--skip-binary', action='store_true', help='Skip binary output (SQLite only)')
-    parser.add_argument('--skip-json', action='store_true', help='Skip JSON output')
+    parser.add_argument('--skip-binary', action='store_true', default=True,
+                        help='Skip binary output (default: True, SQLite only)')
+    parser.add_argument('--skip-json', action='store_true', default=True,
+                        help='Skip JSON output (default: True)')
 
     # Extra pinyin dictionaries
     parser.add_argument('--cn-en', help='Path to cn_en_table.txt (Chinese-English mixed)')
     parser.add_argument('--en', help='Path to en_table.txt (English vocabulary)')
     parser.add_argument('--emoji', help='Path to emoji_table.txt (Emoji vocabulary)')
-    parser.add_argument('--extra-pinyin-dir', help='Directory containing extra pinyin tables (cn_en_table.txt, en_table.txt, emoji_table.txt)')
-    parser.add_argument('--install', action='store_true', help='Install dictionary to MarmotIM application directory')
+    parser.add_argument('--extra-pinyin-dir', default=vocab_dir,
+                        help='Directory containing extra pinyin tables (default: vocab/)')
+    parser.add_argument('--install', action='store_true', default=True,
+                        help='Install dictionary to MarmotIM application directory (default: True)')
+    parser.add_argument('--no-install', action='store_true',
+                        help='Do not install dictionary after building')
 
-    # Filter dictionary build options
-    parser.add_argument('--build-emoji', action='store_true',
-                        help='Build emoji index from vocab/emoji_table.txt')
-    parser.add_argument('--build-fuzzy', action='store_true',
-                        help='Build fuzzy pinyin index')
-    parser.add_argument('--build-symbol', action='store_true',
-                        help='Build symbol index from symbols.yaml')
+    # Filter dictionary build options - all enabled by default
+    parser.add_argument('--build-emoji', action='store_true', default=True,
+                        help='Build emoji index (default: True)')
+    parser.add_argument('--build-fuzzy', action='store_true', default=True,
+                        help='Build fuzzy pinyin index (default: True)')
+    parser.add_argument('--build-symbol', action='store_true', default=True,
+                        help='Build symbol index (default: True)')
 
     args = parser.parse_args()
+
+    # Handle --no-install flag
+    if args.no_install:
+        args.install = False
 
     os.makedirs(args.output, exist_ok=True)
 

@@ -169,7 +169,7 @@ class InputController: IMKInputController {
         }
 
         // Debug log for troubleshooting app-specific issues
-        NSLog("MarmotIM: handle() - keyCode: \(keyCode), chars: '\(characters)', isEnglish: \(isEnglishMode), client: \(clientType), isIMKTextInput: \(isIMKTextInput)")
+        NSLog("MarmotIM: handle() - keyCode: \(keyCode), chars: '\(characters)', isEnglish: \(isEnglishMode), filterMode: \(filterMode), filterBuffer: '\(filterBuffer)', client: \(clientType)")
 
         // Handle Ctrl shortcuts (works in both Chinese and English mode)
         if modifiers.contains(.control) {
@@ -217,8 +217,10 @@ class InputController: IMKInputController {
                     filterMode = mode
                     filterBuffer = ""
                     inputBuffer = ""
+                    isComposing = true  // Ensure composing state is maintained
                     updateMarkedText(client: sender)
                     showFilterCandidates(client: sender)
+                    NSLog("MarmotIM: Filter mode entered successfully, filterMode=\(filterMode), isComposing=\(isComposing)")
                     return true
                 }
             }
@@ -227,7 +229,8 @@ class InputController: IMKInputController {
         }
 
         // Handle number keys for candidate selection (1-9)
-        if let char = characters.first, char.isNumber, !inputBuffer.isEmpty {
+        // Works in both normal mode (inputBuffer not empty) and filter mode
+        if let char = characters.first, char.isNumber, (!inputBuffer.isEmpty || filterMode != .none) {
             let num = Int(String(char)) ?? 0
             if num >= 1 && num <= 9 {
                 return selectCandidate(at: num - 1, client: sender)
@@ -323,7 +326,9 @@ class InputController: IMKInputController {
 
     private func handleLetterInput(_ char: String, client sender: Any!) -> Bool {
         // Route to filter mode if active
+        NSLog("MarmotIM: handleLetterInput called with char: '\(char)', filterMode: \(filterMode)")
         if filterMode != .none {
+            NSLog("MarmotIM: Routing to handleFilterInput because filterMode is \(filterMode)")
             return handleFilterInput(char, client: sender)
         }
 
@@ -346,8 +351,10 @@ class InputController: IMKInputController {
 
     /// Handle input in filter mode
     private func handleFilterInput(_ char: String, client sender: Any!) -> Bool {
+        NSLog("MarmotIM: handleFilterInput called with char: '\(char)', filterMode: \(filterMode), filterBuffer before: '\(filterBuffer)'")
         filterBuffer.append(char.lowercased())
         isComposing = true
+        NSLog("MarmotIM: filterBuffer after append: '\(filterBuffer)'")
 
         // Update marked text with filter prefix
         updateMarkedText(client: sender)
@@ -983,18 +990,26 @@ class InputController: IMKInputController {
 
     /// Show candidates for current filter mode
     private func showFilterCandidates(client sender: Any!) {
-        guard let engine = AppDelegate.shared?.dictionaryEngine else { return }
+        NSLog("MarmotIM: showFilterCandidates called, filterMode: \(filterMode), filterBuffer: '\(filterBuffer)'")
+        guard let engine = AppDelegate.shared?.dictionaryEngine else {
+            NSLog("MarmotIM: showFilterCandidates - engine is nil!")
+            return
+        }
 
         var filterResults: [FilterCandidate] = []
 
         switch filterMode {
         case .emoji:
             filterResults = engine.searchEmoji(code: filterBuffer)
+            NSLog("MarmotIM: searchEmoji returned \(filterResults.count) results for code '\(filterBuffer)'")
         case .fuzzyPinyin:
             filterResults = engine.searchFuzzyPinyin(code: filterBuffer)
+            NSLog("MarmotIM: searchFuzzyPinyin returned \(filterResults.count) results for code '\(filterBuffer)'")
         case .symbol:
             filterResults = engine.searchSymbol(code: filterBuffer)
+            NSLog("MarmotIM: searchSymbol returned \(filterResults.count) results for code '\(filterBuffer)'")
         case .none:
+            NSLog("MarmotIM: showFilterCandidates - filterMode is none, returning")
             return
         }
 
@@ -1010,12 +1025,14 @@ class InputController: IMKInputController {
                 score: Double(fc.frequency)
             )
         }
+        NSLog("MarmotIM: converted to \(allCandidates.count) candidates")
 
         // Apply filter user ranking (isolated from normal mode)
         rankFilterCandidates()
 
         currentPage = 0
         updateCurrentPageCandidates()
+        NSLog("MarmotIM: currentCandidates count: \(currentCandidates.count), isComposing: \(isComposing)")
         showCandidateWindow(client: sender)
     }
 
