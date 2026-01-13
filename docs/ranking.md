@@ -1,231 +1,233 @@
-# MarmotIM Ranking Algorithm
+# 土拨鼠输入法排序算法
 
-## Overview
+## 概述
 
-MarmotIM uses a **Tier-based Frecency** ranking algorithm that combines:
+土拨鼠输入法使用**层级 Frecency** 排序算法，结合以下两个核心机制：
 
-1. **Tier System** - Absolute priority based on match type (full/prefix) and code type (wubi/pinyin)
-2. **Frecency Score** - Within-tier ranking based on recency + frequency + base frequency
+1. **层级系统** - 基于匹配类型（完全/前缀）和编码类型（五笔/拼音）的绝对优先级
+2. **Frecency 分数** - 层级内部基于时效性 + 使用频率 + 基础词频的排序
 
 ```
-TotalScore = TierBonus + TierOverrideBoost + RecencyScore + FrequencyScore + BaseScore + ShortWordBonus
+总分 = 层级加成 + 层级覆盖加成 + 时效分 + 频率分 + 基础分 + 短词加成
 ```
 
 ---
 
-## Tier System (Absolute Priority)
+## 层级系统（绝对优先级）
 
-The tier system provides **absolute priority** - a higher tier candidate always ranks above lower tiers, regardless of frecency scores.
+层级系统提供**绝对优先级** - 高层级候选词始终排在低层级之上，无论 Frecency 分数如何。
 
-### Protected Tier (Tier 0) - 简码保护
+### 保护层级（第 0 层）- 简码保护
 
-Wubi 1-2级简码 (level 1-2 short codes) have a **protected tier** that **CANNOT be overridden** by user learning:
+五笔 1-2 级简码拥有**保护层级**，**不能被**用户学习数据覆盖：
 
-| Tier | Match Type | Code Length | Bonus | Override |
-|------|------------|-------------|-------|----------|
-| 0 | Full Wubi | 1-2 chars | +1T | ❌ Never |
+| 层级 | 匹配类型 | 编码长度 | 加成 | 可覆盖 |
+|------|----------|----------|------|--------|
+| 0 | 五笔完全匹配 | 1-2 字符 | +1T | ❌ 永不 |
 
-**Rationale**: 一级简码 (25 single-key codes like `i`→我, `w`→人) and 二级简码 (625 two-key codes) are the core efficiency of Wubi input. These codes are deeply ingrained in muscle memory - users expect them to **always** produce the same result. Allowing frecency or user history to reorder these would destroy the deterministic nature that makes Wubi fast.
+**设计理由**：一级简码（25 个单键编码，如 `i`→我、`w`→人）和二级简码（625 个双键编码）是五笔输入的核心效率所在。这些编码已深深刻入用户的肌肉记忆 - 用户期望它们**永远**产生相同的结果。如果允许 Frecency 或用户历史重新排序这些简码，将破坏五笔快速输入的确定性本质。
 
-**Implementation**: The jianmaTierBonus (1T = 1,000,000,000,000) is intentionally set higher than:
-- `tier1Bonus (100B) + tierOverrideBoost (500B) = 600B`
+**实现方式**：简码层级加成（1T = 1,000,000,000,000）被特意设置为高于：
+- `第1层加成 (100B) + 层级覆盖加成 (500B) = 600B`
 
-This ensures that even if a user repeatedly selects a different word, the 简码 will **always** rank first.
+这确保即使用户反复选择其他词，简码也**始终**排在第一位。
 
-### Short Code Mode (input length <= 4)
+### 短码模式（输入长度 <= 4）
 
-When input is 4 characters or less, Wubi matches are prioritized. These are **regular tiers** that CAN be overridden by user selection:
+当输入为 4 个字符或更少时，优先匹配五笔。这些是**常规层级**，可以被用户选择覆盖：
 
-| Tier | Match Type | Code Type | Bonus | Override |
-|------|------------|-----------|-------|----------|
-| 1 | Full Match | Wubi (3-4 chars) | +100B | ✅ Can override |
-| 2 | Full Match | Pinyin | +10B | ✅ Can override |
-| 3 | Prefix Match | Wubi | +1B | ✅ Can override |
-| 4 | Prefix Match | Pinyin | 0 | ✅ Can override |
+| 层级 | 匹配类型 | 编码类型 | 加成 | 可覆盖 |
+|------|----------|----------|------|--------|
+| 1 | 完全匹配 | 五笔（3-4字符） | +100B | ✅ 可以 |
+| 2 | 完全匹配 | 拼音 | +10B | ✅ 可以 |
+| 3 | 前缀匹配 | 五笔 | +1B | ✅ 可以 |
+| 4 | 前缀匹配 | 拼音 | 0 | ✅ 可以 |
 
-**Note**: Full Wubi matches with 1-2 char codes are Tier 0 (protected), not Tier 1.
+**注意**：1-2 字符的五笔完全匹配属于第 0 层（保护层级），而非第 1 层。
 
-**Rationale**: 3-4 character Wubi codes (三级简码, 全码) can be overridden because users may genuinely prefer alternative words. But 1-2级简码 are protected.
+**设计理由**：3-4 字符的五笔编码（三级简码、全码）可以被覆盖，因为用户可能确实偏好其他词。但 1-2 级简码受到保护。
 
-### Long Code Mode (input length > 4)
+### 长码模式（输入长度 > 4）
 
-When input exceeds 4 characters, only match type matters:
+当输入超过 4 个字符时，仅匹配类型影响排序：
 
-| Tier | Match Type | Bonus |
-|------|------------|-------|
-| 1 | Full Match | +100B |
-| 2 | Prefix Match | 0 |
+| 层级 | 匹配类型 | 加成 |
+|------|----------|------|
+| 1 | 完全匹配 | +100B |
+| 2 | 前缀匹配 | 0 |
 
-**Rationale**: Long codes are typically pinyin. Full matches should rank above prefix matches.
+**设计理由**：长编码通常是拼音。完全匹配应排在前缀匹配之上。
 
 ---
 
-## Frecency Algorithm
+## Frecency 算法
 
-Within each tier, candidates are ranked by Frecency - a combination of **recency** and **frequency**.
+在每个层级内，候选词按 Frecency 排序 - 结合**时效性**和**使用频率**。
 
-### Recency Score (Exponential Decay)
-
-```swift
-RecencyScore = 1,000,000,000 × e^(-λ × timeSince)
-```
-
-Where:
-- `λ = ln(2) / 86400` (half-life = 1 day = 86400 seconds)
-- `timeSince` = seconds since last selection
-
-**Decay Curve:**
-
-| Time Since Selection | Recency Score | % of Initial |
-|---------------------|---------------|--------------|
-| Just now | 1,000,000,000 | 100% |
-| 6 hours | 757,858,283 | 75.8% |
-| 12 hours | 574,349,177 | 57.4% |
-| 1 day | 500,000,000 | 50% |
-| 2 days | 250,000,000 | 25% |
-| 7 days | 7,812,500 | 0.78% |
-| 14 days | 61,035 | 0.006% |
-
-**Key Property**: Immediately after selection, recency score (~1B) dominates all other factors, guaranteeing the selected word ranks #1 within its tier.
-
-### Frequency Score (Permanent)
+### 时效分（指数衰减）
 
 ```swift
-FrequencyScore = accessCount × 10,000
+时效分 = 1,000,000,000 × e^(-λ × 时间间隔)
 ```
 
-- Each selection adds 10,000 points permanently
-- Never decays
-- After enough selections, frequency dominates over decayed recency
+其中：
+- `λ = ln(2) / 86400`（半衰期 = 1 天 = 86400 秒）
+- `时间间隔` = 距离上次选择的秒数
 
-**Example:**
-| Selections | Frequency Score |
-|------------|-----------------|
+**衰减曲线：**
+
+| 距上次选择时间 | 时效分 | 初始值百分比 |
+|----------------|--------|--------------|
+| 刚刚选择 | 1,000,000,000 | 100% |
+| 6 小时 | 757,858,283 | 75.8% |
+| 12 小时 | 574,349,177 | 57.4% |
+| 1 天 | 500,000,000 | 50% |
+| 2 天 | 250,000,000 | 25% |
+| 7 天 | 7,812,500 | 0.78% |
+| 14 天 | 61,035 | 0.006% |
+
+**关键特性**：选择后立即，时效分（约 10 亿）压倒所有其他因素，保证被选词在其层级内排第一。
+
+### 频率分（永久累积）
+
+```swift
+频率分 = 选择次数 × 10,000
+```
+
+- 每次选择永久增加 10,000 分
+- 永不衰减
+- 足够多次选择后，频率分将超过衰减后的时效分
+
+**示例：**
+
+| 选择次数 | 频率分 |
+|----------|--------|
 | 1 | 10,000 |
 | 10 | 100,000 |
 | 100 | 1,000,000 |
 | 1000 | 10,000,000 |
 
-### Base Score (Dictionary Default)
+### 基础分（词典默认）
 
 ```swift
-BaseScore = baseFrequency  // 0-65535
+基础分 = 基础词频  // 0-65535
 ```
 
-The base frequency comes from the dictionary and reflects:
-- **Wubi entries**: Code length priority (shorter codes = higher frequency)
-  - 1-char code (一级简码): 65,000
-  - 2-char code (二级简码): 55,000
-  - 3-char code (三级简码): 45,000
-  - 4-char code (全码): 35,000
+基础词频来自词典，反映：
+- **五笔词条**：编码长度优先（编码越短，词频越高）
+  - 1 字符编码（一级简码）：65,000
+  - 2 字符编码（二级简码）：55,000
+  - 3 字符编码（三级简码）：45,000
+  - 4 字符编码（全码）：35,000
 
-- **Pinyin entries**: Word position priority (first word in dictionary = higher frequency)
-  - Position 0: 65,000
-  - Position 1: 64,500
-  - Position 2: 64,000
-  - ...decreasing by 500 per position
+- **拼音词条**：词典位置优先（位置越靠前，词频越高）
+  - 位置 0：65,000
+  - 位置 1：64,500
+  - 位置 2：64,000
+  - ...每个位置递减 500
 
-### Short Word Bonus
+### 短词加成
 
 ```swift
-ShortWordBonus = (5 - textLength) × 10,000  // if textLength < 5
+短词加成 = (5 - 词长) × 10,000  // 如果词长 < 5
 ```
 
-Prefer shorter words within the same tier:
-- 1-char word: +40,000
-- 2-char word: +30,000
-- 3-char word: +20,000
-- 4-char word: +10,000
-- 5+ char word: 0
+在同一层级内优先短词：
+- 1 字词：+40,000
+- 2 字词：+30,000
+- 3 字词：+20,000
+- 4 字词：+10,000
+- 5 字及以上：0
 
 ---
 
-## Tier Override Boost (Cross-Tier Promotion)
+## 层级覆盖加成（跨层级提升）
 
-A special high-value boost that can temporarily override **regular tier** boundaries:
+一种特殊的高值加成，可以临时覆盖**常规层级**边界：
 
 ```swift
-TierOverrideBoost = 500,000,000,000 × e^(-λ × timeSince)
+层级覆盖加成 = 500,000,000,000 × e^(-λ × 时间间隔)
 ```
 
-Where:
-- `λ = ln(2) / 3600` (half-life = 1 hour)
-- Initial boost = 500B (exceeds tier gap of 100B)
+其中：
+- `λ = ln(2) / 3600`（半衰期 = 1 小时）
+- 初始加成 = 500B（超过层级差距 100B）
 
-**Purpose**: When a user repeatedly selects a pinyin word over a wubi word, the tier-override boost allows the pinyin word to temporarily rank above the wubi word.
+**用途**：当用户反复选择拼音词而非五笔词时，层级覆盖加成允许拼音词临时排在五笔词之上。
 
-**Important**: This boost **CANNOT** override Tier 0 (1-2级简码). The protected tier bonus (1T) is intentionally set higher than the maximum possible regular score (tier1 100B + tierOverride 500B = 600B), ensuring 简码 always rank first.
+**重要**：此加成**不能**覆盖第 0 层（1-2 级简码）。保护层级加成（1T）被特意设置为高于最大可能的常规分数（第1层 100B + 层级覆盖 500B = 600B），确保简码始终排第一。
 
-**Decay:**
-| Time Since | Boost | Effect |
-|------------|-------|--------|
-| Just now | 500B | Overrides tier |
-| 30 min | 354B | Still overrides |
-| 1 hour | 250B | Still overrides |
-| 2 hours | 125B | Marginally overrides |
-| 3 hours | 62.5B | No longer overrides |
+**衰减：**
 
-**Cutoff**: Boost is set to 0 when it falls below 1B (no longer meaningful).
+| 时间间隔 | 加成 | 效果 |
+|----------|------|------|
+| 刚刚 | 500B | 覆盖层级 |
+| 30 分钟 | 354B | 仍可覆盖 |
+| 1 小时 | 250B | 仍可覆盖 |
+| 2 小时 | 125B | 勉强覆盖 |
+| 3 小时 | 62.5B | 无法覆盖 |
+
+**截止**：当加成低于 1B 时设为 0（不再有意义）。
 
 ---
 
-## Score Calculation Example
+## 分数计算示例
 
-### Scenario 1: Just Selected Wubi Word
-
-```
-Input: "wo" (2 chars, short code mode)
-Match: Full Wubi match, just selected, base=55000
-
-TierBonus = 100,000,000,000 (Tier 1: Full Wubi)
-TierOverrideBoost = 500,000,000,000
-RecencyScore = 1,000,000,000
-FrequencyScore = 10,000 (1 access)
-BaseScore = 55,000
-ShortWordBonus = 30,000 (2-char word)
-
-Total = 600,001,095,000
-```
-
-### Scenario 2: Frequently Used Pinyin Word
+### 场景 1：刚选择的五笔词
 
 ```
-Input: "wo" (2 chars)
-Match: Full Pinyin match, 100 accesses, last access 2 days ago
+输入："wo"（2 字符，短码模式）
+匹配：五笔完全匹配，刚选择，基础分=55000
 
-TierBonus = 10,000,000,000 (Tier 2: Full Pinyin)
-TierOverrideBoost = 0 (decayed past cutoff)
-RecencyScore = 250,000,000 (2 days = 50% × 50%)
-FrequencyScore = 1,000,000 (100 × 10,000)
-BaseScore = 60,000
-ShortWordBonus = 30,000
+层级加成 = 100,000,000,000（第 1 层：五笔完全匹配）
+层级覆盖加成 = 500,000,000,000
+时效分 = 1,000,000,000
+频率分 = 10,000（1 次选择）
+基础分 = 55,000
+短词加成 = 30,000（2 字词）
 
-Total = 10,251,090,000
+总分 = 600,001,095,000
 ```
 
-### Scenario 3: Never Selected Default
+### 场景 2：高频使用的拼音词
 
 ```
-Input: "wo"
-Match: Prefix Pinyin match, never selected, base=40000
+输入："wo"（2 字符）
+匹配：拼音完全匹配，100 次选择，上次选择 2 天前
 
-TierBonus = 0 (Tier 4: Prefix Pinyin)
-TierOverrideBoost = 0
-RecencyScore = 0
-FrequencyScore = 0
-BaseScore = 40,000
-ShortWordBonus = 20,000
+层级加成 = 10,000,000,000（第 2 层：拼音完全匹配）
+层级覆盖加成 = 0（已衰减至截止值以下）
+时效分 = 250,000,000（2 天 = 50% × 50%）
+频率分 = 1,000,000（100 × 10,000）
+基础分 = 60,000
+短词加成 = 30,000
 
-Total = 60,000
+总分 = 10,251,090,000
+```
+
+### 场景 3：从未选择的默认词
+
+```
+输入："wo"
+匹配：拼音前缀匹配，从未选择，基础分=40000
+
+层级加成 = 0（第 4 层：拼音前缀匹配）
+层级覆盖加成 = 0
+时效分 = 0
+频率分 = 0
+基础分 = 40,000
+短词加成 = 20,000
+
+总分 = 60,000
 ```
 
 ---
 
-## Data Storage
+## 数据存储
 
-### Normal Mode
+### 普通模式
 
-User learning data is stored in `user_learning` table:
+用户学习数据存储在 `user_learning` 表：
 
 ```sql
 CREATE TABLE user_learning (
@@ -236,13 +238,13 @@ CREATE TABLE user_learning (
 );
 ```
 
-### Filter Mode (Isolated)
+### 过滤模式（隔离存储）
 
-Filter mode uses a separate table to avoid polluting normal mode rankings:
+过滤模式使用独立表，避免污染普通模式排序：
 
 ```sql
 CREATE TABLE filter_user_freq (
-    filter_type TEXT NOT NULL,  -- 'e' (emoji), 'p' (fuzzy pinyin), 's' (symbol)
+    filter_type TEXT NOT NULL,  -- 'e'（emoji）、'p'（模糊拼音）、's'（符号）
     code TEXT NOT NULL,
     word TEXT NOT NULL,
     frequency INTEGER DEFAULT 1,
@@ -253,40 +255,40 @@ CREATE TABLE filter_user_freq (
 
 ---
 
-## Algorithm Properties
+## 算法特性
 
-### Tier Override Summary
+### 层级覆盖总结
 
-| Tier | Description | Can User Override? |
-|------|-------------|-------------------|
-| 0 | Wubi 1-2级简码 | ❌ Never - always ranks first |
-| 1-4 | Regular tiers | ✅ Yes - via tierOverrideBoost |
+| 层级 | 描述 | 用户可覆盖？ |
+|------|------|--------------|
+| 0 | 五笔 1-2 级简码 | ❌ 永不 - 始终排第一 |
+| 1-4 | 常规层级 | ✅ 可以 - 通过层级覆盖加成 |
 
-### Convergence Behavior
+### 收敛行为
 
-1. **Short-term**: Recency dominates. Last selected word ranks #1 (within its tier).
-2. **Medium-term** (1-7 days): Recency fades, frequency becomes important.
-3. **Long-term** (>14 days): Frequency and base score dominate.
+1. **短期**：时效分主导。刚选择的词在其层级内排第一。
+2. **中期**（1-7 天）：时效分衰减，频率分变得重要。
+3. **长期**（>14 天）：频率分和基础分主导。
 
-### User Experience
+### 用户体验
 
-- **Immediate feedback**: Selected word immediately jumps to #1 (within its tier)
-- **Learning**: Frequently used words gradually rise in ranking
-- **Forgetting**: Rarely used words gradually fall back to base ranking
-- **Stability**: High-frequency words maintain position even when not recently used
-- **简码保护**: 1-2级简码 always produce the same result, preserving muscle memory
+- **即时反馈**：选择的词立即跳到第一位（在其层级内）
+- **学习**：常用词逐渐上升排名
+- **遗忘**：少用词逐渐回落到基础排名
+- **稳定性**：高频词即使最近未使用也能保持位置
+- **简码保护**：1-2 级简码始终产生相同结果，保护肌肉记忆
 
-### Performance
+### 性能
 
-- Score calculation is O(1) per candidate
-- User data is cached in memory for fast lookup
-- Only user-selected entries have user_learning records (sparse storage)
+- 每个候选词的分数计算为 O(1)
+- 用户数据缓存在内存中以快速查找
+- 仅用户选择过的词条有 user_learning 记录（稀疏存储）
 
 ---
 
-## Configuration (AppConfig)
+## 配置（AppConfig）
 
-Ranking weights can be customized in `AppConfig.swift`:
+排序权重可在 `AppConfig.swift` 中自定义：
 
 ```swift
 struct RankingWeights: Codable {
@@ -306,9 +308,9 @@ struct RankingWeights: Codable {
 
 ---
 
-## Source Files
+## 源文件
 
-- `MarmotIM/Ranking/CandidateRanker.swift` - Tier-based ranking logic
-- `MarmotIM/Ranking/FrecencyScore.swift` - Frecency score calculation
-- `MarmotIM/Config/AppConfig.swift` - Configurable weights
-- `MarmotIM/Dictionary/VocabularyDatabase.swift` - User learning data storage
+- `MarmotIM/Ranking/CandidateRanker.swift` - 层级排序逻辑
+- `MarmotIM/Ranking/FrecencyScore.swift` - Frecency 分数计算
+- `MarmotIM/Config/AppConfig.swift` - 可配置权重
+- `MarmotIM/Dictionary/VocabularyDatabase.swift` - 用户学习数据存储
