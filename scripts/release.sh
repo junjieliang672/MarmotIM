@@ -1,29 +1,67 @@
 #!/bin/bash
 # Release build script - creates distributable package
-# Usage: bash scripts/release.sh
+#
+# Usage:
+#   bash scripts/release.sh              # Build with iCloud (requires Apple Developer account)
+#   bash scripts/release.sh --no-icloud  # Build without iCloud (no developer account needed)
 
 set -e
 cd "$(dirname "$0")/.."
+
+# Parse arguments
+NO_ICLOUD=false
+for arg in "$@"; do
+    case $arg in
+        --no-icloud)
+            NO_ICLOUD=true
+            shift
+            ;;
+    esac
+done
 
 VERSION=$(grep -A1 "CFBundleShortVersionString" MarmotIM/Info.plist | grep string | sed 's/.*<string>\(.*\)<\/string>/\1/' | tr -d '\t')
 BUILD=$(grep -A1 "CFBundleVersion" MarmotIM/Info.plist | grep string | sed 's/.*<string>\(.*\)<\/string>/\1/' | tr -d '\t')
 
 echo "Building MarmotIM v${VERSION} (Build ${BUILD})..."
+if [ "$NO_ICLOUD" = true ]; then
+    echo "Mode: No iCloud (ad-hoc signing)"
+else
+    echo "Mode: With iCloud (requires Apple Developer account)"
+fi
+echo ""
 
 # Clean previous build
 rm -rf build/
 rm -rf release/
 
 # Build Release version
-xcodebuild -project MarmotIM.xcodeproj \
-    -scheme MarmotIM \
-    -configuration Release \
-    build \
-    CONFIGURATION_BUILD_DIR="$(pwd)/build" \
-    2>&1 | grep -E "(error:|warning:|BUILD)" | tail -10
+if [ "$NO_ICLOUD" = true ]; then
+    # Build without iCloud entitlements
+    xcodebuild -project MarmotIM.xcodeproj \
+        -scheme MarmotIM \
+        -configuration Release \
+        build \
+        CONFIGURATION_BUILD_DIR="$(pwd)/build" \
+        CODE_SIGN_IDENTITY="-" \
+        CODE_SIGN_ENTITLEMENTS="" \
+        2>&1 | grep -E "(error:|warning:|BUILD)" | tail -10
+else
+    # Build with iCloud
+    xcodebuild -project MarmotIM.xcodeproj \
+        -scheme MarmotIM \
+        -configuration Release \
+        build \
+        CONFIGURATION_BUILD_DIR="$(pwd)/build" \
+        2>&1 | grep -E "(error:|warning:|BUILD)" | tail -10
+fi
 
 if [ ! -d "build/MarmotIM.app" ]; then
     echo "Build failed!"
+    if [ "$NO_ICLOUD" = false ]; then
+        echo ""
+        echo "Hint: If you don't have an Apple Developer account, try:"
+        echo "  bash scripts/release.sh --no-icloud"
+    fi
     exit 1
 fi
 
@@ -37,10 +75,19 @@ cp -r build/MarmotIM.app release/
 cp scripts/install.sh release/
 
 # Create README for the release
-cat > release/README.txt << 'RELEASE_EOF'
+if [ "$NO_ICLOUD" = true ]; then
+    ICLOUD_NOTE="注意：此版本不包含 iCloud 同步功能。
+      如需 iCloud 同步，请使用 Apple Developer 账号自行构建。
+
+"
+else
+    ICLOUD_NOTE=""
+fi
+
+cat > release/README.txt << RELEASE_EOF
 土拨鼠输入法 (MarmotIM) 安装说明
 ================================
-
+${ICLOUD_NOTE}
 第一步：安装应用
 --------------
 方法一：运行安装脚本（推荐）
@@ -75,12 +122,12 @@ cat > release/README.txt << 'RELEASE_EOF'
    cd MarmotIM
 
 3. 运行词库构建脚本：
-   python3 tools/build_dictionary.py \
-       --pinyin vocab/py_table.txt \
-       --wubi vocab/wb_table.txt \
-       --extra-pinyin-dir vocab \
-       --output dict \
-       --skip-json \
+   python3 tools/build_dictionary.py \\
+       --pinyin vocab/py_table.txt \\
+       --wubi vocab/wb_table.txt \\
+       --extra-pinyin-dir vocab \\
+       --output dict \\
+       --skip-json \\
        --install
 
 4. 词库会自动安装到 ~/Library/Application Support/MarmotIM/
@@ -94,23 +141,33 @@ cat > release/README.txt << 'RELEASE_EOF'
 
 RELEASE_EOF
 
-# Create zip package
+# Create zip package with appropriate suffix
+if [ "$NO_ICLOUD" = true ]; then
+    ZIP_NAME="MarmotIM-v${VERSION}-no-icloud.zip"
+else
+    ZIP_NAME="MarmotIM-v${VERSION}.zip"
+fi
+
 cd release
-zip -r "MarmotIM-v${VERSION}.zip" MarmotIM.app install.sh README.txt
+zip -r "$ZIP_NAME" MarmotIM.app install.sh README.txt
 cd ..
 
 # Move zip to project root
-mv release/MarmotIM-v${VERSION}.zip ./
+mv "release/$ZIP_NAME" ./
 
 echo ""
 echo "=========================================="
-echo "Release package created: MarmotIM-v${VERSION}.zip"
+echo "Release package created: $ZIP_NAME"
 echo "=========================================="
 echo ""
 echo "Contents:"
-unzip -l "MarmotIM-v${VERSION}.zip"
+unzip -l "$ZIP_NAME"
 echo ""
+if [ "$NO_ICLOUD" = true ]; then
+    echo "Note: This build does NOT include iCloud sync."
+    echo ""
+fi
 echo "To create a GitHub release:"
 echo "  1. git tag v${VERSION}"
 echo "  2. git push origin v${VERSION}"
-echo "  3. Upload MarmotIM-v${VERSION}.zip to GitHub Releases"
+echo "  3. Upload $ZIP_NAME to GitHub Releases"

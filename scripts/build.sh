@@ -2,7 +2,8 @@
 # Build and install MarmotIM
 #
 # Usage:
-#   ./scripts/build.sh
+#   ./scripts/build.sh              # Build with iCloud (requires Apple Developer account)
+#   ./scripts/build.sh --no-icloud  # Build without iCloud (no developer account needed)
 #
 set -e
 
@@ -14,9 +15,25 @@ SCHEME="MarmotIM"
 APP_NAME="MarmotIM"
 INSTALL_DIR="/Library/Input Methods"
 
+# Parse arguments
+NO_ICLOUD=false
+for arg in "$@"; do
+    case $arg in
+        --no-icloud)
+            NO_ICLOUD=true
+            shift
+            ;;
+    esac
+done
+
 echo "========================================"
 echo "MarmotIM Build & Install"
 echo "========================================"
+if [ "$NO_ICLOUD" = true ]; then
+    echo "Mode: No iCloud (ad-hoc signing)"
+else
+    echo "Mode: With iCloud (requires Apple Developer account)"
+fi
 echo ""
 
 # ========================================
@@ -29,19 +46,38 @@ rm -rf "$BUILD_DIR"
 mkdir -p "$BUILD_DIR"
 
 # Build with xcodebuild
-xcodebuild \
-    -project "$PROJECT_DIR/MarmotIM.xcodeproj" \
-    -scheme "$SCHEME" \
-    -configuration Release \
-    -derivedDataPath "$BUILD_DIR/DerivedData" \
-    CONFIGURATION_BUILD_DIR="$BUILD_DIR/Release" \
-    build 2>&1 | grep -E "(error:|warning:|BUILD)" | tail -20
+if [ "$NO_ICLOUD" = true ]; then
+    # Build without iCloud entitlements - works with ad-hoc signing
+    xcodebuild \
+        -project "$PROJECT_DIR/MarmotIM.xcodeproj" \
+        -scheme "$SCHEME" \
+        -configuration Release \
+        -derivedDataPath "$BUILD_DIR/DerivedData" \
+        CONFIGURATION_BUILD_DIR="$BUILD_DIR/Release" \
+        CODE_SIGN_IDENTITY="-" \
+        CODE_SIGN_ENTITLEMENTS="" \
+        build 2>&1 | grep -E "(error:|warning:|BUILD)" | tail -20
+else
+    # Build with iCloud - requires Apple Developer certificate
+    xcodebuild \
+        -project "$PROJECT_DIR/MarmotIM.xcodeproj" \
+        -scheme "$SCHEME" \
+        -configuration Release \
+        -derivedDataPath "$BUILD_DIR/DerivedData" \
+        CONFIGURATION_BUILD_DIR="$BUILD_DIR/Release" \
+        build 2>&1 | grep -E "(error:|warning:|BUILD)" | tail -20
+fi
 
 APP_PATH="$BUILD_DIR/Release/$APP_NAME.app"
 
 if [ ! -d "$APP_PATH" ]; then
     echo ""
     echo "Error: Build failed - app not found"
+    if [ "$NO_ICLOUD" = false ]; then
+        echo ""
+        echo "Hint: If you don't have an Apple Developer account, try:"
+        echo "  ./scripts/build.sh --no-icloud"
+    fi
     exit 1
 fi
 
@@ -109,6 +145,11 @@ echo "========================================"
 echo "Installation Complete!"
 echo "========================================"
 echo ""
+if [ "$NO_ICLOUD" = true ]; then
+    echo "Note: iCloud sync is DISABLED in this build."
+    echo "      To enable iCloud sync, you need an Apple Developer account."
+    echo ""
+fi
 echo "Next steps:"
 echo "  1. Open System Settings > Keyboard > Input Sources"
 echo "  2. Click '+' and add 'MarmotIM' (under Chinese)"

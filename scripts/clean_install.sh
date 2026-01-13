@@ -1,10 +1,30 @@
 #!/bin/bash
 # MarmotIM Clean Installation Script
 # This script completely removes old installations and installs fresh
+#
+# Usage:
+#   ./scripts/clean_install.sh              # Build with iCloud (requires Apple Developer account)
+#   ./scripts/clean_install.sh --no-icloud  # Build without iCloud (no developer account needed)
 
 set -e
 
+# Parse arguments
+NO_ICLOUD=false
+for arg in "$@"; do
+    case $arg in
+        --no-icloud)
+            NO_ICLOUD=true
+            shift
+            ;;
+    esac
+done
+
 echo "=== MarmotIM Clean Installation ==="
+if [ "$NO_ICLOUD" = true ]; then
+    echo "Mode: No iCloud (ad-hoc signing)"
+else
+    echo "Mode: With iCloud (requires Apple Developer account)"
+fi
 echo ""
 
 # Step 1: Graceful shutdown
@@ -56,7 +76,26 @@ PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 if [ -f "$PROJECT_DIR/MarmotIM.xcodeproj/project.pbxproj" ]; then
     echo "Step 6: Building fresh from source..."
     cd "$PROJECT_DIR"
-    xcodebuild -project MarmotIM.xcodeproj -scheme MarmotIM -configuration Release build CONFIGURATION_BUILD_DIR="$PROJECT_DIR/build" 2>/dev/null | grep -E "(BUILD|error:)" || true
+
+    if [ "$NO_ICLOUD" = true ]; then
+        # Build without iCloud entitlements
+        xcodebuild -project MarmotIM.xcodeproj \
+            -scheme MarmotIM \
+            -configuration Release \
+            build \
+            CONFIGURATION_BUILD_DIR="$PROJECT_DIR/build" \
+            CODE_SIGN_IDENTITY="-" \
+            CODE_SIGN_ENTITLEMENTS="" \
+            2>/dev/null | grep -E "(BUILD|error:)" || true
+    else
+        # Build with iCloud
+        xcodebuild -project MarmotIM.xcodeproj \
+            -scheme MarmotIM \
+            -configuration Release \
+            build \
+            CONFIGURATION_BUILD_DIR="$PROJECT_DIR/build" \
+            2>/dev/null | grep -E "(BUILD|error:)" || true
+    fi
 fi
 
 # Step 7: Install
@@ -67,6 +106,11 @@ if [ -d "$PROJECT_DIR/build/MarmotIM.app" ]; then
     echo "   Installed to /Library/Input Methods/MarmotIM.app"
 else
     echo "   ERROR: Build not found at $PROJECT_DIR/build/MarmotIM.app"
+    if [ "$NO_ICLOUD" = false ]; then
+        echo ""
+        echo "   Hint: If you don't have an Apple Developer account, try:"
+        echo "   ./scripts/clean_install.sh --no-icloud"
+    fi
     exit 1
 fi
 
@@ -85,6 +129,11 @@ fi
 echo ""
 echo "=== Installation Complete ==="
 echo ""
+if [ "$NO_ICLOUD" = true ]; then
+    echo "Note: iCloud sync is DISABLED in this build."
+    echo "      To enable iCloud sync, you need an Apple Developer account."
+    echo ""
+fi
 echo "IMPORTANT: You MUST log out and log back in (or restart) for changes to take effect!"
 echo "The ghost entries will disappear after re-login."
 echo ""
