@@ -8,21 +8,27 @@ final class CandidateRankerTests: XCTestCase {
     // MARK: - Test Helpers
 
     /// Create a mock DictionaryEntry
+    /// When baseFrequency is provided, it sets both wubiBaseFrequency and pinyinBaseFrequency to the same value
     private func makeEntry(
         id: UInt32,
         text: String,
         pinyin: String = "",
         wubi: String? = nil,
-        baseFrequency: UInt16 = 50000,
+        baseFrequency: UInt16? = nil,
+        wubiBaseFrequency: UInt16 = 50000,
+        pinyinBaseFrequency: UInt16 = 50000,
         source: Int = 1,
         length: Int? = nil
     ) -> DictionaryEntry {
+        let wubiFreq = baseFrequency ?? wubiBaseFrequency
+        let pinyinFreq = baseFrequency ?? pinyinBaseFrequency
         return DictionaryEntry(
             id: id,
             text: text,
             pinyin: pinyin,
             wubi: wubi,
-            baseFrequency: baseFrequency,
+            wubiBaseFrequency: wubiFreq,
+            pinyinBaseFrequency: pinyinFreq,
             source: source,
             length: length ?? text.count
         )
@@ -33,7 +39,7 @@ final class CandidateRankerTests: XCTestCase {
         entry: DictionaryEntry,
         matchedCode: String,
         matchType: DictionaryMatch.MatchType,
-        codeType: DictionaryMatch.CodeType
+        codeType: InputCodeType
     ) -> DictionaryMatch {
         return DictionaryMatch(
             entry: entry,
@@ -469,8 +475,8 @@ final class CandidateRankerTests: XCTestCase {
         let tier3Bonus = CandidateRanker.getTierBonus(match: tier3Match, inputLength: 2)
 
         // Even with max base frequency difference
-        let tier2Total = tier2Bonus + Double(tier2Entry.baseFrequency)
-        let tier3Total = tier3Bonus + Double(tier3Entry.baseFrequency)
+        let tier2Total = tier2Bonus + Double(tier2Entry.pinyinBaseFrequency)
+        let tier3Total = tier3Bonus + Double(tier3Entry.wubiBaseFrequency)
 
         XCTAssertGreaterThan(tier2Total, tier3Total)
     }
@@ -490,8 +496,8 @@ final class CandidateRankerTests: XCTestCase {
         XCTAssertEqual(highFreqBonus, lowFreqBonus)
 
         // Higher base frequency wins
-        let highTotal = highFreqBonus + Double(highFreqEntry.baseFrequency)
-        let lowTotal = lowFreqBonus + Double(lowFreqEntry.baseFrequency)
+        let highTotal = highFreqBonus + Double(highFreqEntry.wubiBaseFrequency)
+        let lowTotal = lowFreqBonus + Double(lowFreqEntry.wubiBaseFrequency)
 
         XCTAssertGreaterThan(highTotal, lowTotal)
     }
@@ -696,7 +702,7 @@ final class CandidateRankerTests: XCTestCase {
         // Input length 1 with full Wubi match gets jianmaTierBonus
         let tierBonus = CandidateRanker.getTierBonus(match: match, inputLength: 1)
 
-        let total = tierBonus + Double(entry.baseFrequency)
+        let total = tierBonus + Double(entry.wubiBaseFrequency)
         XCTAssertEqual(total, CandidateRanker.jianmaTierBonus + 65535, "1-char Wubi gets jianmaTierBonus")
     }
 
@@ -706,7 +712,7 @@ final class CandidateRankerTests: XCTestCase {
         // Input length 1 with full Wubi match gets jianmaTierBonus
         let tierBonus = CandidateRanker.getTierBonus(match: match, inputLength: 1)
 
-        let total = tierBonus + Double(entry.baseFrequency)
+        let total = tierBonus + Double(entry.wubiBaseFrequency)
         XCTAssertEqual(total, CandidateRanker.jianmaTierBonus, "1-char Wubi gets jianmaTierBonus")
     }
 
@@ -863,7 +869,7 @@ final class CandidateRankerTests: XCTestCase {
         // All same tier, so order by base frequency descending
         let expectedOrder = [cheDi1, cheDi2, cheDi3, cheDi4, cheDi5, cheDi6]
         let sortedByFreq = [cheDi1, cheDi2, cheDi3, cheDi4, cheDi5, cheDi6]
-            .sorted { $0.baseFrequency > $1.baseFrequency }
+            .sorted { $0.pinyinBaseFrequency > $1.pinyinBaseFrequency }
 
         for i in 0..<expectedOrder.count {
             XCTAssertEqual(sortedByFreq[i].text, expectedOrder[i].text)
@@ -893,11 +899,11 @@ final class CandidateRankerTests: XCTestCase {
         let tier1Bonus = CandidateRanker.tier1Bonus
 
         // 车底: tier1 + 0 (no user data) + base freq
-        let score1 = tier1Bonus + Double(cheDi1.baseFrequency)
+        let score1 = tier1Bonus + Double(cheDi1.pinyinBaseFrequency)
 
         // 彻底: tier1 + recency + frequency + base freq
         let frequencyScore = FrecencyScore.calculateFrequencyScore(accessCount: 1)
-        let score6 = tier1Bonus + recencyScore + frequencyScore + Double(cheDi6.baseFrequency)
+        let score6 = tier1Bonus + recencyScore + frequencyScore + Double(cheDi6.pinyinBaseFrequency)
 
         // 彻底 should now score higher than 车底
         XCTAssertGreaterThan(score6, score1, "彻底 should rank #1 after user selection")
@@ -938,13 +944,13 @@ final class CandidateRankerTests: XCTestCase {
         let cheDi6 = makeEntry(id: 6, text: "彻底", pinyin: "chedi", baseFrequency: 32823)
 
         // No user data for either
-        let frecency1 = FrecencyScore.calculate(accessCount: 0, lastAccessTimestamp: 0, baseFrequency: cheDi1.baseFrequency)
-        let frecency6 = FrecencyScore.calculate(accessCount: 0, lastAccessTimestamp: 0, baseFrequency: cheDi6.baseFrequency)
+        let frecency1 = FrecencyScore.calculate(accessCount: 0, lastAccessTimestamp: 0, baseFrequency: cheDi1.pinyinBaseFrequency)
+        let frecency6 = FrecencyScore.calculate(accessCount: 0, lastAccessTimestamp: 0, baseFrequency: cheDi6.pinyinBaseFrequency)
 
         // Without frecency, order is purely by base frequency
         XCTAssertGreaterThan(frecency1, frecency6, "车底 should rank higher with no user data")
-        XCTAssertEqual(frecency1, Double(cheDi1.baseFrequency))
-        XCTAssertEqual(frecency6, Double(cheDi6.baseFrequency))
+        XCTAssertEqual(frecency1, Double(cheDi1.pinyinBaseFrequency))
+        XCTAssertEqual(frecency6, Double(cheDi6.pinyinBaseFrequency))
     }
 
     // MARK: - Part 22: kham Wubi Ranking Test Case
@@ -977,8 +983,8 @@ final class CandidateRankerTests: XCTestCase {
         // Calculate within-tier scores (no user data)
         // 唬: base(35000) + shortWord(40000) = 75000
         // 中英: base(35000) + shortWord(30000) = 65000
-        let huFrecency = FrecencyScore.calculate(accessCount: 0, lastAccessTimestamp: 0, baseFrequency: hu.baseFrequency)
-        let zhongYingFrecency = FrecencyScore.calculate(accessCount: 0, lastAccessTimestamp: 0, baseFrequency: zhongYing.baseFrequency)
+        let huFrecency = FrecencyScore.calculate(accessCount: 0, lastAccessTimestamp: 0, baseFrequency: hu.wubiBaseFrequency)
+        let zhongYingFrecency = FrecencyScore.calculate(accessCount: 0, lastAccessTimestamp: 0, baseFrequency: zhongYing.wubiBaseFrequency)
 
         let huShortBonus: Double = 40_000 // 1 char
         let zhongYingShortBonus: Double = 30_000 // 2 chars
@@ -1001,10 +1007,10 @@ final class CandidateRankerTests: XCTestCase {
         let now = UInt32(Date().timeIntervalSince1970)
 
         // 唬: no user data
-        let huFrecency = FrecencyScore.calculate(accessCount: 0, lastAccessTimestamp: 0, baseFrequency: hu.baseFrequency)
+        let huFrecency = FrecencyScore.calculate(accessCount: 0, lastAccessTimestamp: 0, baseFrequency: hu.wubiBaseFrequency)
 
         // 中英: just selected (1 access, just now)
-        let zhongYingFrecency = FrecencyScore.calculate(accessCount: 1, lastAccessTimestamp: now, baseFrequency: zhongYing.baseFrequency)
+        let zhongYingFrecency = FrecencyScore.calculate(accessCount: 1, lastAccessTimestamp: now, baseFrequency: zhongYing.wubiBaseFrequency)
 
         let huShortBonus: Double = 40_000
         let zhongYingShortBonus: Double = 30_000
@@ -1029,7 +1035,7 @@ final class CandidateRankerTests: XCTestCase {
           Tier Bonus: \(tierBonus)
           Recency: 0
           Frequency: 0
-          Base: \(hu.baseFrequency)
+          Base: \(hu.wubiBaseFrequency)
           Short Word: \(huShortBonus)
           Total: \(huTotal)
 
@@ -1037,7 +1043,7 @@ final class CandidateRankerTests: XCTestCase {
           Tier Bonus: \(tierBonus)
           Recency: \(recencyScore)
           Frequency: \(frequencyScore)
-          Base: \(zhongYing.baseFrequency)
+          Base: \(zhongYing.wubiBaseFrequency)
           Short Word: \(zhongYingShortBonus)
           Total: \(zhongYingTotal)
 
@@ -1193,14 +1199,14 @@ final class CandidateRankerTests: XCTestCase {
 
         // Wubi jiǎnmǎ: jianmaTierBonus + base + shortWord (no user data)
         let wubiTier = CandidateRanker.getTierBonus(match: wubiMatch, inputLength: 1)
-        let wubiScore = wubiTier + Double(wubiEntry.baseFrequency) + 40_000
+        let wubiScore = wubiTier + Double(wubiEntry.wubiBaseFrequency) + 40_000
 
         // Pinyin: tier2Bonus + tierOverrideBoost + recency + freq + base + shortWord
         let pinyinTier = CandidateRanker.getTierBonus(match: pinyinMatch, inputLength: 1)
         let pinyinTierOverride = FrecencyScore.calculateTierOverrideBoost(lastAccessTimestamp: now)
         let pinyinRecency = FrecencyScore.calculateRecencyScore(lastAccessTimestamp: now)
         let pinyinFrequency = FrecencyScore.calculateFrequencyScore(accessCount: 1000)
-        let pinyinScore = pinyinTier + pinyinTierOverride + pinyinRecency + pinyinFrequency + Double(pinyinEntry.baseFrequency) + 40_000
+        let pinyinScore = pinyinTier + pinyinTierOverride + pinyinRecency + pinyinFrequency + Double(pinyinEntry.pinyinBaseFrequency) + 40_000
 
         // Verify tier bonuses
         XCTAssertEqual(wubiTier, CandidateRanker.jianmaTierBonus, "一级简码 should get jianmaTierBonus (1T)")
@@ -1231,14 +1237,14 @@ final class CandidateRankerTests: XCTestCase {
 
         // Jiǎnmǎ: jianmaTierBonus + base + shortWord
         let jianmaTier = CandidateRanker.getTierBonus(match: jianmaMatch, inputLength: 2)
-        let jianmaScore = jianmaTier + Double(jianmaEntry.baseFrequency) + 40_000
+        let jianmaScore = jianmaTier + Double(jianmaEntry.wubiBaseFrequency) + 40_000
 
         // Regular Wubi (input "qkwy" is 4 chars): tier1Bonus + tierOverride + recency + freq + base + shortWord
         let regularTier = CandidateRanker.getTierBonus(match: regularMatch, inputLength: 4)
         let regularTierOverride = FrecencyScore.calculateTierOverrideBoost(lastAccessTimestamp: now)
         let regularRecency = FrecencyScore.calculateRecencyScore(lastAccessTimestamp: now)
         let regularFrequency = FrecencyScore.calculateFrequencyScore(accessCount: 1000)
-        let regularScore = regularTier + regularTierOverride + regularRecency + regularFrequency + Double(regularWubiEntry.baseFrequency) + 40_000
+        let regularScore = regularTier + regularTierOverride + regularRecency + regularFrequency + Double(regularWubiEntry.wubiBaseFrequency) + 40_000
 
         // Verify tier bonuses
         XCTAssertEqual(jianmaTier, CandidateRanker.jianmaTierBonus, "二级简码 should get jianmaTierBonus (1T)")
@@ -1297,8 +1303,8 @@ final class CandidateRankerTests: XCTestCase {
         let geRecency = FrecencyScore.calculateRecencyScore(lastAccessTimestamp: now)
         let geFrequency = FrecencyScore.calculateFrequencyScore(accessCount: 10000) // 100M
 
-        let yiScore = yiTier + Double(yi.baseFrequency) + 40_000
-        let geScore = geTier + geTierOverride + geRecency + geFrequency + Double(ge.baseFrequency) + 40_000
+        let yiScore = yiTier + Double(yi.wubiBaseFrequency) + 40_000
+        let geScore = geTier + geTierOverride + geRecency + geFrequency + Double(ge.pinyinBaseFrequency) + 40_000
 
         // 一 MUST win
         XCTAssertGreaterThan(yiScore, geScore,

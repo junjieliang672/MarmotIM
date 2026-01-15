@@ -182,7 +182,9 @@ struct CandidateRanker {
         let timestamp = userData?.lastAccessTimestamp ?? 0
         let recencyScore = FrecencyScore.calculateRecencyScore(lastAccessTimestamp: timestamp)
         let frequencyScore = FrecencyScore.calculateFrequencyScore(accessCount: accessCount)
-        let baseScore = FrecencyScore.calculateBaseScore(baseFrequency: match.entry.baseFrequency)
+        // Use mode-specific base frequency based on how this match was found
+        let baseFrequency = match.entry.baseFrequency(for: match.codeType)
+        let baseScore = FrecencyScore.calculateBaseScore(baseFrequency: baseFrequency)
 
         // 3. Tier override boost (short-term, can override tier priority)
         // This allows recently selected entries to temporarily rank above higher-tier entries
@@ -282,7 +284,7 @@ extension CandidateRanker {
             accessCount: userData?.accessCount ?? 0
         )
         let base = FrecencyScore.calculateBaseScore(
-            baseFrequency: match.entry.baseFrequency
+            baseFrequency: match.entry.baseFrequency(for: match.codeType)
         )
 
         var shortWordBonus: Double = 0

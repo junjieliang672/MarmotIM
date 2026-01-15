@@ -30,7 +30,8 @@ final class VocabularyDatabaseTests: XCTestCase {
             text: "测试",
             pinyin: "ceshi",
             wubi: "aaaa",
-            baseFrequency: 50000,
+            wubiBaseFrequency: 50000,
+            pinyinBaseFrequency: 50000,
             source: EntrySource.user.rawValue,
             length: 2
         )
@@ -58,7 +59,8 @@ final class VocabularyDatabaseTests: XCTestCase {
             text: "删除测试",
             pinyin: "shanchueshi",
             wubi: nil,
-            baseFrequency: 10000,
+            wubiBaseFrequency: 10000,
+            pinyinBaseFrequency: 10000,
             source: EntrySource.user.rawValue,
             length: 4
         )
@@ -151,9 +153,9 @@ final class VocabularyDatabaseTests: XCTestCase {
 
         // Insert test entries
         let entries = [
-            DictionaryEntry(id: 44441, text: "批量1", pinyin: "piliang1", wubi: nil, baseFrequency: 1000, source: 3, length: 3),
-            DictionaryEntry(id: 44442, text: "批量2", pinyin: "piliang2", wubi: nil, baseFrequency: 2000, source: 3, length: 3),
-            DictionaryEntry(id: 44443, text: "批量3", pinyin: "piliang3", wubi: nil, baseFrequency: 3000, source: 3, length: 3)
+            DictionaryEntry(id: 44441, text: "批量1", pinyin: "piliang1", wubi: nil, wubiBaseFrequency: 1000, pinyinBaseFrequency: 1000, source: 3, length: 3),
+            DictionaryEntry(id: 44442, text: "批量2", pinyin: "piliang2", wubi: nil, wubiBaseFrequency: 2000, pinyinBaseFrequency: 2000, source: 3, length: 3),
+            DictionaryEntry(id: 44443, text: "批量3", pinyin: "piliang3", wubi: nil, wubiBaseFrequency: 3000, pinyinBaseFrequency: 3000, source: 3, length: 3)
         ]
 
         for entry in entries {
@@ -194,7 +196,8 @@ final class VocabularyDatabaseTests: XCTestCase {
             text: "计数测试",
             pinyin: "jishuceshi",
             wubi: nil,
-            baseFrequency: 1000,
+            wubiBaseFrequency: 1000,
+            pinyinBaseFrequency: 1000,
             source: 3,
             length: 4
         )

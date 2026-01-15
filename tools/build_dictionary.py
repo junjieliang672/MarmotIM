@@ -267,27 +267,53 @@ def merge_dictionaries(
     """
     Merge wubi, pinyin, and extra pinyin entries into unified dictionary.
 
-    Each word can have multiple entries with different frequencies:
-    1. Wubi entry (keyed by text|w|code): Uses code-length frequency (简码优先)
-    2. Pinyin entry (keyed by text|p|code): Uses word-position frequency (常用词优先)
-    3. Extra pinyin entry (keyed by text|e|code): Base freq = 0
+    CRITICAL: Uses text as unique key to ensure frecency scores are shared
+    across all input methods. Each text has ONE entry with:
+    - All wubi codes collected (for wubi index)
+    - All pinyin codes collected (for pinyin index)
+    - Separate base frequencies for each input mode:
+      - wubi_base_frequency: Used when searching via wubi
+      - pinyin_base_frequency: Used when searching via pinyin
+    - Best source priority (wubi > pinyin > extra)
 
-    This ensures correct ranking for both input methods:
-    - Wubi input: shorter code entries rank higher
-    - Pinyin input: common words like 是 rank before rare words like 式
-    - Extra input: only show if no better match exists
+    This ensures:
+    - Selecting "鬼" via wubi "rqc" updates the same entry as pinyin "gui"
+    - Frecency scores are shared across input methods
+    - Each input mode uses its own base frequency for ranking
     """
-    # Key: (text, code) where code is wubi or pinyin
+    # Key by text only - each text has ONE entry with all its codes
     merged: Dict[str, dict] = {}
 
-    # First add all wubi entries (high priority for wubi input)
-    for entry in wubi_entries:
-        # Index by wubi code
-        wubi_key = f"{entry['text']}|w|{entry['wubi']}"
-        if wubi_key not in merged:
-            merged[wubi_key] = entry.copy()
+    # Track codes for each text
+    text_wubi_codes: Dict[str, set] = defaultdict(set)
+    text_pinyin_codes: Dict[str, set] = defaultdict(set)
 
-    print(f"  After wubi: {len(merged)} entries")
+    # First add all wubi entries (high priority)
+    for entry in wubi_entries:
+        text = entry['text']
+        wubi_code = entry['wubi']
+
+        if wubi_code:
+            text_wubi_codes[text].add(wubi_code)
+
+        if text not in merged:
+            merged[text] = {
+                'text': text,
+                'wubi': wubi_code,
+                'pinyin': '',
+                'wubi_base_frequency': entry['baseFrequency'],
+                'pinyin_base_frequency': 0,  # Will be set by pinyin entries
+                'source': SOURCE_WUBI,
+                'length': entry['length']
+            }
+        else:
+            # Keep best wubi frequency (wubi entries have code-length based freq)
+            if entry['baseFrequency'] > merged[text]['wubi_base_frequency']:
+                merged[text]['wubi_base_frequency'] = entry['baseFrequency']
+            # Keep wubi source if any wubi entry exists
+            merged[text]['source'] = SOURCE_WUBI
+
+    print(f"  After wubi: {len(merged)} unique texts")
 
     # Then add pinyin entries
     added = 0
@@ -295,45 +321,71 @@ def merge_dictionaries(
     for entry in pinyin_entries:
         text = entry['text']
         pinyin = entry['pinyin']
-        wubi = entry['wubi']
+        wubi = entry.get('wubi')
 
-        # Check if we have this word with same wubi code
-        wubi_key = f"{text}|w|{wubi}" if wubi else None
-        pinyin_key = f"{text}|p|{pinyin}"
+        if pinyin:
+            text_pinyin_codes[text].add(pinyin)
+        if wubi:
+            text_wubi_codes[text].add(wubi)
 
-        # If we already have this exact word+wubi from wubi dict, update pinyin field
-        # (for reverse lookup), but DON'T skip creating pinyin entry
-        if wubi_key and wubi_key in merged:
-            if not merged[wubi_key]['pinyin']:
-                merged[wubi_key]['pinyin'] = pinyin
-                updated += 1
-            # NOTE: Removed 'continue' - we still need to create pinyin entry below
-
-        # ALWAYS create pinyin-keyed entry with pinyin frequency
-        # This ensures pinyin lookups use position-based frequency
-        if pinyin_key not in merged:
-            merged[pinyin_key] = entry.copy()
+        if text not in merged:
+            merged[text] = {
+                'text': text,
+                'wubi': wubi,
+                'pinyin': pinyin,
+                'wubi_base_frequency': 0,  # No wubi entry for this text
+                'pinyin_base_frequency': entry['baseFrequency'],
+                'source': SOURCE_PINYIN,
+                'length': entry['length']
+            }
             added += 1
+        else:
+            # Update pinyin field if not set
+            if not merged[text]['pinyin'] and pinyin:
+                merged[text]['pinyin'] = pinyin
+                updated += 1
+            # Update pinyin_base_frequency (keep best)
+            if entry['baseFrequency'] > merged[text]['pinyin_base_frequency']:
+                merged[text]['pinyin_base_frequency'] = entry['baseFrequency']
+            # Don't override source if already wubi
 
-    print(f"  Added {added} pinyin entries, updated {updated} wubi entries with pinyin field")
+    print(f"  Added {added} new texts from pinyin, updated {updated} with pinyin field")
 
     # Then add extra pinyin entries (lowest priority)
     extra_added = 0
     for entry in extra_entries:
         text = entry['text']
         pinyin = entry['pinyin']
+        wubi = entry.get('wubi')
 
-        # Use 'e' prefix to distinguish extra entries
-        extra_key = f"{text}|e|{pinyin}"
+        if pinyin:
+            text_pinyin_codes[text].add(pinyin)
+        if wubi:
+            text_wubi_codes[text].add(wubi)
 
-        # Only add if this exact text+pinyin combo doesn't exist
-        pinyin_key = f"{text}|p|{pinyin}"
-        if pinyin_key not in merged and extra_key not in merged:
-            merged[extra_key] = entry.copy()
+        if text not in merged:
+            merged[text] = {
+                'text': text,
+                'wubi': wubi,
+                'pinyin': pinyin,
+                'wubi_base_frequency': 0,
+                'pinyin_base_frequency': entry['baseFrequency'],
+                'source': SOURCE_EXTRA_PINYIN,
+                'length': entry['length']
+            }
             extra_added += 1
+        else:
+            # Only update pinyin_base_frequency if not already set
+            if merged[text]['pinyin_base_frequency'] == 0:
+                merged[text]['pinyin_base_frequency'] = entry['baseFrequency']
 
-    print(f"  Added {extra_added} extra pinyin entries")
-    print(f"  Total merged: {len(merged)} entries")
+    print(f"  Added {extra_added} new texts from extra pinyin")
+    print(f"  Total unique texts: {len(merged)}")
+
+    # Attach all codes to each entry
+    for text, entry in merged.items():
+        entry['wubi_codes'] = text_wubi_codes.get(text, set())
+        entry['pinyin_codes'] = text_pinyin_codes.get(text, set())
 
     # Convert to list and assign IDs
     entries = []
@@ -348,9 +400,13 @@ def build_indexes(entries: List[dict]) -> Tuple[Dict[str, List[int]], Dict[str, 
     """
     Build pinyin and wubi indexes for fast lookup.
 
-    IMPORTANT:
-    - Pinyin index: includes all entries with pinyin field (including extra)
-    - Wubi index: ONLY includes entries from SOURCE_WUBI (wb_table.txt)
+    IMPORTANT: Uses wubi_codes and pinyin_codes sets from each entry to create
+    index entries for ALL codes pointing to the same entry ID.
+
+    This ensures:
+    - All pinyin codes for a text point to the same entry
+    - All wubi codes for a text point to the same entry
+    - Frecency scores are shared across input methods
 
     Returns: (pinyin_index, wubi_index)
     """
@@ -360,13 +416,19 @@ def build_indexes(entries: List[dict]) -> Tuple[Dict[str, List[int]], Dict[str, 
     for entry in entries:
         entry_id = entry['id']
 
-        if entry.get('pinyin'):
-            pinyin_index[entry['pinyin']].append(entry_id)
+        # Index ALL pinyin codes for this entry
+        pinyin_codes = entry.get('pinyin_codes', set())
+        for code in pinyin_codes:
+            if code:
+                pinyin_index[code].append(entry_id)
 
-        # Only index wubi codes from wubi source entries
+        # Index ALL wubi codes for this entry (only if source is wubi)
         # This ensures wubi search only returns entries from wb_table.txt
-        if entry.get('wubi') and entry.get('source') == SOURCE_WUBI:
-            wubi_index[entry['wubi']].append(entry_id)
+        if entry.get('source') == SOURCE_WUBI:
+            wubi_codes = entry.get('wubi_codes', set())
+            for code in wubi_codes:
+                if code:
+                    wubi_index[code].append(entry_id)
 
     return dict(pinyin_index), dict(wubi_index)
 
@@ -470,7 +532,10 @@ def save_metadata(entries: List[dict], output_dir: str):
 def backup_user_data(db_path: str) -> Tuple[list, list, list]:
     """
     Backup user_learning and user_favorites data from existing database.
-    Returns (user_learning_rows, user_favorites_rows)
+    Returns (user_learning_rows, user_favorites_rows, filter_freq_rows)
+
+    IMPORTANT: Backs up by TEXT instead of entry_id because entry IDs change
+    when dictionary is rebuilt with new merge strategy (text as unique key).
     """
     if not os.path.exists(db_path):
         return [], [], []
@@ -482,12 +547,22 @@ def backup_user_data(db_path: str) -> Tuple[list, list, list]:
     user_favorites = []
 
     try:
-        # Backup user_learning
-        cursor.execute("SELECT entry_id, access_count, last_access_timestamp, total_score FROM user_learning")
+        # Backup user_learning by TEXT (join with entries table)
+        # This ensures we can restore even when entry IDs change
+        # IMPORTANT: Aggregate scores for same text since old schema had multiple entries
+        cursor.execute("""
+            SELECT e.text,
+                   SUM(ul.access_count) as access_count,
+                   MAX(ul.last_access_timestamp) as last_access,
+                   SUM(ul.total_score) as total_score
+            FROM user_learning ul
+            JOIN entries e ON ul.entry_id = e.id
+            GROUP BY e.text
+        """)
         user_learning = cursor.fetchall()
-        print(f"  Backed up {len(user_learning)} user_learning records")
-    except sqlite3.OperationalError:
-        print("  No user_learning table found (new database)")
+        print(f"  Backed up {len(user_learning)} user_learning records (by text, aggregated)")
+    except sqlite3.OperationalError as err:
+        print(f"  No user_learning table found (new database): {err}")
 
     try:
         # Backup user_favorites
@@ -513,6 +588,9 @@ def backup_user_data(db_path: str) -> Tuple[list, list, list]:
 def restore_user_data(db_path: str, user_learning: list, user_favorites: list, filter_freq: list):
     """
     Restore user_learning and user_favorites data to new database.
+
+    IMPORTANT: user_learning is now backed up by TEXT (not entry_id).
+    We look up the new entry_id for each text before inserting.
     """
     if not user_learning and not user_favorites and not filter_freq:
         print("  No user data to restore")
@@ -521,13 +599,24 @@ def restore_user_data(db_path: str, user_learning: list, user_favorites: list, f
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
 
-    # Restore user_learning
+    # Restore user_learning by looking up new entry_id from text
     if user_learning:
-        cursor.executemany(
-            "INSERT OR REPLACE INTO user_learning (entry_id, access_count, last_access_timestamp, total_score) VALUES (?, ?, ?, ?)",
-            user_learning
-        )
-        print(f"  Restored {len(user_learning)} user_learning records")
+        restored = 0
+        skipped = 0
+        for text, access_count, last_access_timestamp, total_score in user_learning:
+            # Look up new entry_id by text
+            cursor.execute("SELECT id FROM entries WHERE text = ?", (text,))
+            row = cursor.fetchone()
+            if row:
+                entry_id = row[0]
+                cursor.execute(
+                    "INSERT OR REPLACE INTO user_learning (entry_id, access_count, last_access_timestamp, total_score) VALUES (?, ?, ?, ?)",
+                    (entry_id, access_count, last_access_timestamp, total_score)
+                )
+                restored += 1
+            else:
+                skipped += 1
+        print(f"  Restored {restored} user_learning records, skipped {skipped} (text not found)")
 
     # Restore user_favorites
     if user_favorites:
@@ -629,12 +718,14 @@ def save_sqlite(entries: List[dict], pinyin_index: Dict, wubi_index: Dict, filep
     # Create tables
     cursor.executescript('''
         -- Main entries table
+        -- Schema version 3: Separate base frequencies for wubi and pinyin modes
         CREATE TABLE entries (
             id INTEGER PRIMARY KEY,
             text TEXT NOT NULL,
             pinyin TEXT,
             wubi TEXT,
-            base_frequency INTEGER NOT NULL DEFAULT 0,
+            wubi_base_frequency INTEGER NOT NULL DEFAULT 0,
+            pinyin_base_frequency INTEGER NOT NULL DEFAULT 0,
             source INTEGER NOT NULL DEFAULT 1,
             length INTEGER NOT NULL,
             created_at INTEGER DEFAULT (strftime('%s', 'now'))
@@ -721,6 +812,8 @@ def save_sqlite(entries: List[dict], pinyin_index: Dict, wubi_index: Dict, filep
         CREATE INDEX idx_wubi_prefix ON wubi_index(code);
         CREATE INDEX idx_user_learning_score ON user_learning(total_score DESC);
         CREATE INDEX idx_entries_source ON entries(source);
+        CREATE INDEX idx_entries_text ON entries(text);  -- For user_learning restore by text
+        CREATE UNIQUE INDEX idx_entries_text_unique ON entries(text);  -- Enforce unique text
         CREATE INDEX idx_user_favorites_text ON user_favorites(text);
         CREATE INDEX idx_emoji_code ON emoji_index(code);
         CREATE INDEX idx_fuzzy_code ON fuzzy_pinyin(fuzzy_code);
@@ -728,21 +821,23 @@ def save_sqlite(entries: List[dict], pinyin_index: Dict, wubi_index: Dict, filep
         CREATE INDEX idx_filter_freq ON filter_user_freq(filter_type, code);
     ''')
 
-    # Set schema version
-    cursor.execute("INSERT INTO schema_version (version) VALUES (1)")
+    # Set schema version (3 = separate wubi/pinyin base frequencies)
+    cursor.execute("INSERT INTO schema_version (version) VALUES (3)")
     conn.commit()
 
     # Insert entries in a single transaction for performance
     print("    Inserting entries...")
     conn.execute("BEGIN TRANSACTION")
 
+    # Store multiple codes as comma-separated values
     entry_data = [
         (
             e['id'],
             e['text'],
-            e.get('pinyin') or '',
-            e.get('wubi'),
-            e['baseFrequency'],
+            ','.join(sorted(e.get('pinyin_codes', set()))) or e.get('pinyin') or '',
+            ','.join(sorted(e.get('wubi_codes', set()))) or e.get('wubi') or '',
+            e['wubi_base_frequency'],
+            e['pinyin_base_frequency'],
             e['source'],
             e['length']
         )
@@ -750,7 +845,7 @@ def save_sqlite(entries: List[dict], pinyin_index: Dict, wubi_index: Dict, filep
     ]
 
     cursor.executemany(
-        "INSERT INTO entries (id, text, pinyin, wubi, base_frequency, source, length) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO entries (id, text, pinyin, wubi, wubi_base_frequency, pinyin_base_frequency, source, length) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
         entry_data
     )
     print(f"    Inserted {len(entries)} entries")

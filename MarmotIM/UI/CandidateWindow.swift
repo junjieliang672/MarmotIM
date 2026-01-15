@@ -267,7 +267,7 @@ struct CandidateView_Previews: PreviewProvider {
             candidates: [
                 Candidate(
                     from: DictionaryMatch(
-                        entry: DictionaryEntry(id: 1, text: "我国", pinyin: "woguo", wubi: "qklg", baseFrequency: 60000, source: 1, length: 2),
+                        entry: DictionaryEntry(id: 1, text: "我国", pinyin: "woguo", wubi: "qklg", wubiBaseFrequency: 60000, pinyinBaseFrequency: 60000, source: 1, length: 2),
                         matchedCode: "woguo",
                         matchType: .full,
                         codeType: .pinyin
@@ -276,7 +276,7 @@ struct CandidateView_Previews: PreviewProvider {
                 ),
                 Candidate(
                     from: DictionaryMatch(
-                        entry: DictionaryEntry(id: 2, text: "我们", pinyin: "women", wubi: "qwu", baseFrequency: 59000, source: 1, length: 2),
+                        entry: DictionaryEntry(id: 2, text: "我们", pinyin: "women", wubi: "qwu", wubiBaseFrequency: 59000, pinyinBaseFrequency: 59000, source: 1, length: 2),
                         matchedCode: "women",
                         matchType: .prefix,
                         codeType: .pinyin

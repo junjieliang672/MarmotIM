@@ -19,7 +19,8 @@ final class RankingIntegrationTests: XCTestCase {
             text: "唬",
             pinyin: "hu",
             wubi: "kham",
-            baseFrequency: 30000,
+            wubiBaseFrequency: 30000,
+            pinyinBaseFrequency: 30000,
             source: 1, // wubi source
             length: 1
         )
@@ -29,7 +30,8 @@ final class RankingIntegrationTests: XCTestCase {
             text: "中英",
             pinyin: "zhongying",
             wubi: "kham",
-            baseFrequency: 30000,
+            wubiBaseFrequency: 30000,
+            pinyinBaseFrequency: 30000,
             source: 1, // wubi source
             length: 2
         )
@@ -112,7 +114,8 @@ final class RankingIntegrationTests: XCTestCase {
             text: "测试",
             pinyin: "ceshi",
             wubi: nil,
-            baseFrequency: 50000,
+            wubiBaseFrequency: 50000,
+            pinyinBaseFrequency: 50000,
             source: 2,
             length: 2
         )
@@ -152,7 +155,8 @@ final class RankingIntegrationTests: XCTestCase {
             text: "累计",
             pinyin: "leiji",
             wubi: nil,
-            baseFrequency: 30000,
+            wubiBaseFrequency: 30000,
+            pinyinBaseFrequency: 30000,
             source: 2,
             length: 2
         )
@@ -183,7 +187,8 @@ final class RankingIntegrationTests: XCTestCase {
             text: "词",
             pinyin: "ci",
             wubi: "cgx",
-            baseFrequency: 30000,
+            wubiBaseFrequency: 30000,
+            pinyinBaseFrequency: 30000,
             source: 1,
             length: 1
         )
@@ -193,7 +198,8 @@ final class RankingIntegrationTests: XCTestCase {
             text: "成功",
             pinyin: "chenggong",
             wubi: "cgx",
-            baseFrequency: 30000,
+            wubiBaseFrequency: 30000,
+            pinyinBaseFrequency: 30000,
             source: 1,
             length: 2
         )

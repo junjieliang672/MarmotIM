@@ -141,7 +141,7 @@ class DictionaryEngine {
 
         // Collect all entry IDs first, then batch fetch entries
         // This avoids N individual database queries
-        var matchInfos: [(entryId: UInt32, matchedCode: String, codeType: DictionaryMatch.CodeType)] = []
+        var matchInfos: [(entryId: UInt32, matchedCode: String, codeType: InputCodeType)] = []
         var seenEntryIds = Set<UInt32>()
 
         // Search wubi Trie FIRST (exact and prefix matches) - wubi has priority for short codes
@@ -307,13 +307,14 @@ class DictionaryEngine {
         let entryId = userDictNextId
         userDictNextId += 1
 
-        // Create entry with specified baseFrequency
+        // Create entry with specified baseFrequency (user entries get same freq in both modes)
         let entry = DictionaryEntry(
             id: entryId,
             text: text,
             pinyin: isWubi ? "" : code,
             wubi: isWubi ? code : nil,
-            baseFrequency: baseFrequency,
+            wubiBaseFrequency: baseFrequency,
+            pinyinBaseFrequency: baseFrequency,
             source: EntrySource.user.rawValue,
             length: text.count
         )

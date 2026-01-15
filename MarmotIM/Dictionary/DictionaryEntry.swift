@@ -7,6 +7,12 @@ enum EntrySource: Int, Codable {
     case user = 3      // From user dictionary (highest priority)
 }
 
+/// Types of input codes - defined at top level for forward reference
+enum InputCodeType {
+    case pinyin
+    case wubi
+}
+
 /// Represents a single dictionary entry
 struct DictionaryEntry: Codable, Identifiable {
     /// Unique identifier for this entry
@@ -21,8 +27,13 @@ struct DictionaryEntry: Codable, Identifiable {
     /// Wubi code (e.g., "qklg"), nil if not available
     let wubi: String?
 
-    /// Base frequency from the original dictionary (0-65535)
-    let baseFrequency: UInt16
+    /// Base frequency when searched via wubi (0-65535)
+    /// Schema version 3: Separate frequencies for each input mode
+    let wubiBaseFrequency: UInt16
+
+    /// Base frequency when searched via pinyin (0-65535)
+    /// Schema version 3: Separate frequencies for each input mode
+    let pinyinBaseFrequency: UInt16
 
     /// Source of this entry (wubi or pinyin dictionary)
     let source: Int?
@@ -38,6 +49,16 @@ struct DictionaryEntry: Codable, Identifiable {
 
     /// Text length for ranking
     var textLength: Int { length ?? text.count }
+
+    /// Get base frequency for a specific code type
+    func baseFrequency(for codeType: InputCodeType) -> UInt16 {
+        switch codeType {
+        case .wubi:
+            return wubiBaseFrequency
+        case .pinyin:
+            return pinyinBaseFrequency
+        }
+    }
 }
 
 /// Represents a match result from dictionary search
@@ -52,18 +73,12 @@ struct DictionaryMatch {
     let matchType: MatchType
 
     /// Type of code matched
-    let codeType: CodeType
+    let codeType: InputCodeType
 
     /// Types of matches
     enum MatchType {
         case full      // Exact match
         case prefix    // Prefix match
-    }
-
-    /// Types of input codes
-    enum CodeType {
-        case pinyin
-        case wubi
     }
 }
 
@@ -79,18 +94,31 @@ struct Candidate: Identifiable {
     let code: String
 
     /// Code type (pinyin/wubi)
-    let codeType: DictionaryMatch.CodeType
+    let codeType: InputCodeType
 
     /// Whether this was a full match
     let isFullMatch: Bool
 
-    /// Base frequency for learning (used in recordSelection)
-    let baseFrequency: UInt16
+    /// Wubi base frequency (used in recordSelection for wubi mode)
+    let wubiBaseFrequency: UInt16
+
+    /// Pinyin base frequency (used in recordSelection for pinyin mode)
+    let pinyinBaseFrequency: UInt16
 
     /// Calculated score for ranking
     var score: Double
 
     var id: UInt32 { entryId }
+
+    /// Get base frequency for the current code type
+    var baseFrequency: UInt16 {
+        switch codeType {
+        case .wubi:
+            return wubiBaseFrequency
+        case .pinyin:
+            return pinyinBaseFrequency
+        }
+    }
 
     init(from match: DictionaryMatch, score: Double = 0) {
         self.entryId = match.entry.id
@@ -98,18 +126,20 @@ struct Candidate: Identifiable {
         self.code = match.matchedCode
         self.codeType = match.codeType
         self.isFullMatch = match.matchType == .full
-        self.baseFrequency = match.entry.baseFrequency
+        self.wubiBaseFrequency = match.entry.wubiBaseFrequency
+        self.pinyinBaseFrequency = match.entry.pinyinBaseFrequency
         self.score = score
     }
 
     /// Direct initializer for filter mode candidates
-    init(entryId: UInt32, text: String, code: String, codeType: DictionaryMatch.CodeType, isFullMatch: Bool, baseFrequency: UInt16, score: Double) {
+    init(entryId: UInt32, text: String, code: String, codeType: InputCodeType, isFullMatch: Bool, wubiBaseFrequency: UInt16, pinyinBaseFrequency: UInt16, score: Double) {
         self.entryId = entryId
         self.text = text
         self.code = code
         self.codeType = codeType
         self.isFullMatch = isFullMatch
-        self.baseFrequency = baseFrequency
+        self.wubiBaseFrequency = wubiBaseFrequency
+        self.pinyinBaseFrequency = pinyinBaseFrequency
         self.score = score
     }
 }

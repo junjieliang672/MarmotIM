@@ -16,7 +16,8 @@ final class VocabularyDatabase {
     private let lock = NSLock()
 
     /// Database schema version for migrations
-    private static let schemaVersion = 1
+    /// Version 3: Separate wubi_base_frequency and pinyin_base_frequency columns
+    private static let schemaVersion = 3
 
     // MARK: - Initialization
 
@@ -122,13 +123,15 @@ final class VocabularyDatabase {
 
     private func createTables() {
         // Main entries table
+        // Schema version 3: Separate base frequencies for wubi and pinyin modes
         let entriesSQL = """
             CREATE TABLE IF NOT EXISTS entries (
                 id INTEGER PRIMARY KEY,
                 text TEXT NOT NULL,
                 pinyin TEXT,
                 wubi TEXT,
-                base_frequency INTEGER NOT NULL DEFAULT 0,
+                wubi_base_frequency INTEGER NOT NULL DEFAULT 0,
+                pinyin_base_frequency INTEGER NOT NULL DEFAULT 0,
                 source INTEGER NOT NULL DEFAULT 1,
                 length INTEGER NOT NULL,
                 created_at INTEGER DEFAULT (strftime('%s', 'now'))
@@ -257,8 +260,8 @@ final class VocabularyDatabase {
         defer { lock.unlock() }
 
         let sql = """
-            INSERT OR REPLACE INTO entries (id, text, pinyin, wubi, base_frequency, source, length)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            INSERT OR REPLACE INTO entries (id, text, pinyin, wubi, wubi_base_frequency, pinyin_base_frequency, source, length)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """
 
         var statement: OpaquePointer?
@@ -275,9 +278,10 @@ final class VocabularyDatabase {
         } else {
             sqlite3_bind_null(statement, 4)
         }
-        sqlite3_bind_int(statement, 5, Int32(entry.baseFrequency))
-        sqlite3_bind_int(statement, 6, Int32(entry.source ?? 1))
-        sqlite3_bind_int(statement, 7, Int32(entry.length ?? entry.text.count))
+        sqlite3_bind_int(statement, 5, Int32(entry.wubiBaseFrequency))
+        sqlite3_bind_int(statement, 6, Int32(entry.pinyinBaseFrequency))
+        sqlite3_bind_int(statement, 7, Int32(entry.source ?? 1))
+        sqlite3_bind_int(statement, 8, Int32(entry.length ?? entry.text.count))
 
         return sqlite3_step(statement) == SQLITE_DONE
     }
@@ -293,8 +297,8 @@ final class VocabularyDatabase {
         executeSQL("BEGIN TRANSACTION")
 
         let sql = """
-            INSERT OR REPLACE INTO entries (id, text, pinyin, wubi, base_frequency, source, length)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            INSERT OR REPLACE INTO entries (id, text, pinyin, wubi, wubi_base_frequency, pinyin_base_frequency, source, length)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """
 
         var statement: OpaquePointer?
@@ -313,9 +317,10 @@ final class VocabularyDatabase {
             } else {
                 sqlite3_bind_null(statement, 4)
             }
-            sqlite3_bind_int(statement, 5, Int32(entry.baseFrequency))
-            sqlite3_bind_int(statement, 6, Int32(entry.source ?? 1))
-            sqlite3_bind_int(statement, 7, Int32(entry.length ?? entry.text.count))
+            sqlite3_bind_int(statement, 5, Int32(entry.wubiBaseFrequency))
+            sqlite3_bind_int(statement, 6, Int32(entry.pinyinBaseFrequency))
+            sqlite3_bind_int(statement, 7, Int32(entry.source ?? 1))
+            sqlite3_bind_int(statement, 8, Int32(entry.length ?? entry.text.count))
 
             if sqlite3_step(statement) == SQLITE_DONE {
                 insertedCount += 1
@@ -340,7 +345,7 @@ final class VocabularyDatabase {
         lock.lock()
         defer { lock.unlock() }
 
-        let sql = "SELECT id, text, pinyin, wubi, base_frequency, source, length FROM entries WHERE id = ?"
+        let sql = "SELECT id, text, pinyin, wubi, wubi_base_frequency, pinyin_base_frequency, source, length FROM entries WHERE id = ?"
 
         var statement: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
@@ -368,7 +373,7 @@ final class VocabularyDatabase {
 
         // Build parameterized query
         let placeholders = ids.map { _ in "?" }.joined(separator: ",")
-        let sql = "SELECT id, text, pinyin, wubi, base_frequency, source, length FROM entries WHERE id IN (\(placeholders))"
+        let sql = "SELECT id, text, pinyin, wubi, wubi_base_frequency, pinyin_base_frequency, source, length FROM entries WHERE id IN (\(placeholders))"
 
         var statement: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
@@ -403,7 +408,7 @@ final class VocabularyDatabase {
         defer { lock.unlock() }
 
         var entries: [DictionaryEntry] = []
-        let sql = "SELECT id, text, pinyin, wubi, base_frequency, source, length FROM entries WHERE source = 3 ORDER BY id"
+        let sql = "SELECT id, text, pinyin, wubi, wubi_base_frequency, pinyin_base_frequency, source, length FROM entries WHERE source = 3 ORDER BY id"
 
         var statement: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
@@ -448,12 +453,14 @@ final class VocabularyDatabase {
         let newId = maxId + 1
 
         // Create and insert entry
+        // User-added entries get high frequency in both modes
         let entry = DictionaryEntry(
             id: newId,
             text: text,
             pinyin: isWubi ? "" : code,
             wubi: isWubi ? code : nil,
-            baseFrequency: 65000,
+            wubiBaseFrequency: 65000,
+            pinyinBaseFrequency: 65000,
             source: 3,  // EntrySource.user
             length: text.count
         )
@@ -477,8 +484,8 @@ final class VocabularyDatabase {
     /// Insert entry without locking (for internal use when already locked)
     private func insertEntryUnlocked(_ entry: DictionaryEntry) -> Bool {
         let sql = """
-            INSERT OR REPLACE INTO entries (id, text, pinyin, wubi, base_frequency, source, length)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            INSERT OR REPLACE INTO entries (id, text, pinyin, wubi, wubi_base_frequency, pinyin_base_frequency, source, length)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """
 
         var statement: OpaquePointer?
@@ -495,9 +502,10 @@ final class VocabularyDatabase {
         } else {
             sqlite3_bind_null(statement, 4)
         }
-        sqlite3_bind_int(statement, 5, Int32(entry.baseFrequency))
-        sqlite3_bind_int(statement, 6, Int32(entry.source ?? 1))
-        sqlite3_bind_int(statement, 7, Int32(entry.length ?? entry.text.count))
+        sqlite3_bind_int(statement, 5, Int32(entry.wubiBaseFrequency))
+        sqlite3_bind_int(statement, 6, Int32(entry.pinyinBaseFrequency))
+        sqlite3_bind_int(statement, 7, Int32(entry.source ?? 1))
+        sqlite3_bind_int(statement, 8, Int32(entry.length ?? entry.text.count))
 
         return sqlite3_step(statement) == SQLITE_DONE
     }
@@ -1124,16 +1132,18 @@ final class VocabularyDatabase {
             wubi = nil
         }
 
-        let baseFrequency = UInt16(sqlite3_column_int(statement, 4))
-        let source = Int(sqlite3_column_int(statement, 5))
-        let length = Int(sqlite3_column_int(statement, 6))
+        let wubiBaseFrequency = UInt16(sqlite3_column_int(statement, 4))
+        let pinyinBaseFrequency = UInt16(sqlite3_column_int(statement, 5))
+        let source = Int(sqlite3_column_int(statement, 6))
+        let length = Int(sqlite3_column_int(statement, 7))
 
         return DictionaryEntry(
             id: id,
             text: text,
             pinyin: pinyin,
             wubi: wubi,
-            baseFrequency: baseFrequency,
+            wubiBaseFrequency: wubiBaseFrequency,
+            pinyinBaseFrequency: pinyinBaseFrequency,
             source: source,
             length: length
         )

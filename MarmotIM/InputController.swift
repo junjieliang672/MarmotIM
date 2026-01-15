@@ -1015,13 +1015,15 @@ class InputController: IMKInputController {
 
         // Convert FilterCandidate to Candidate for display
         allCandidates = filterResults.enumerated().map { (index, fc) in
-            Candidate(
+            let freq = UInt16(min(fc.frequency, Int(UInt16.max)))
+            return Candidate(
                 entryId: UInt32(index),
                 text: fc.text,
                 code: fc.code,
                 codeType: .pinyin,  // Simplified for filter mode
                 isFullMatch: true,
-                baseFrequency: UInt16(min(fc.frequency, Int(UInt16.max))),
+                wubiBaseFrequency: freq,
+                pinyinBaseFrequency: freq,
                 score: Double(fc.frequency)
             )
         }
