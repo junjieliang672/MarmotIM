@@ -977,6 +977,155 @@ final class VocabularyDatabase {
         NSLog("MarmotIM: Created \(insertedPinyin) pinyin indexes, \(insertedWubi) wubi indexes")
     }
 
+    /// Import entries from JSON file with merging logic
+    /// If an entry with the same text exists, it merges wubi/pinyin fields instead of inserting duplicate
+    func importAndMergeFromJSON(url: URL, progressCallback: ((Int, Int) -> Void)? = nil) throws {
+        let data = try Data(contentsOf: url)
+        let entries = try JSONDecoder().decode([DictionaryEntry].self, from: data)
+        
+        NSLog("MarmotIM: Importing and merging \(entries.count) entries from JSON...")
+        
+        lock.lock()
+        defer { lock.unlock() }
+        
+        executeSQL("BEGIN TRANSACTION")
+        
+        // 1. Load existing map
+        var textToIdMap = Dictionary<String, UInt32>()
+        
+        let selectSQL = "SELECT text, id FROM entries"
+        var selectStmt: OpaquePointer?
+        if sqlite3_prepare_v2(db, selectSQL, -1, &selectStmt, nil) == SQLITE_OK {
+            while sqlite3_step(selectStmt) == SQLITE_ROW {
+                if let textPtr = sqlite3_column_text(selectStmt, 0) {
+                    let text = String(cString: textPtr)
+                    let id = UInt32(sqlite3_column_int64(selectStmt, 1))
+                    textToIdMap[text] = id
+                }
+            }
+        }
+        sqlite3_finalize(selectStmt)
+        
+        // 2. Prepare statements
+        let insertSQL = """
+            INSERT INTO entries (id, text, pinyin, wubi, base_frequency, source, length)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """
+        var insertStmt: OpaquePointer?
+        sqlite3_prepare_v2(db, insertSQL, -1, &insertStmt, nil)
+        
+        let updateSQL = "UPDATE entries SET wubi = COALESCE(?, wubi), pinyin = COALESCE(?, pinyin) WHERE id = ?"
+        var updateStmt: OpaquePointer?
+        sqlite3_prepare_v2(db, updateSQL, -1, &updateStmt, nil)
+        
+        // 3. Process entries
+        var insertedCount = 0
+        var updatedCount = 0
+        var pinyinIndexes: [(String, UInt32)] = []
+        var wubiIndexes: [(String, UInt32)] = []
+        
+        let batchSize = 10000
+        
+        for (index, entry) in entries.enumerated() {
+            var finalId = entry.id
+            
+            if let existingId = textToIdMap[entry.text] {
+                // Merge
+                finalId = existingId
+                
+                // Update DB entry (merge fields)
+                if entry.wubi != nil || !entry.pinyin.isEmpty {
+                    if let wubi = entry.wubi {
+                        sqlite3_bind_text(updateStmt, 1, wubi, -1, SQLITE_TRANSIENT)
+                    } else {
+                        sqlite3_bind_null(updateStmt, 1)
+                    }
+                    
+                    if !entry.pinyin.isEmpty {
+                        sqlite3_bind_text(updateStmt, 2, entry.pinyin, -1, SQLITE_TRANSIENT)
+                    } else {
+                        sqlite3_bind_null(updateStmt, 2)
+                    }
+                    
+                    sqlite3_bind_int64(updateStmt, 3, Int64(finalId))
+                    
+                    if sqlite3_step(updateStmt) == SQLITE_DONE {
+                        updatedCount += 1
+                    }
+                    sqlite3_reset(updateStmt)
+                }
+                
+            } else {
+                // Insert new
+                sqlite3_bind_int64(insertStmt, 1, Int64(entry.id))
+                sqlite3_bind_text(insertStmt, 2, entry.text, -1, SQLITE_TRANSIENT)
+                sqlite3_bind_text(insertStmt, 3, entry.pinyin, -1, SQLITE_TRANSIENT)
+                if let wubi = entry.wubi {
+                    sqlite3_bind_text(insertStmt, 4, wubi, -1, SQLITE_TRANSIENT)
+                } else {
+                    sqlite3_bind_null(insertStmt, 4)
+                }
+                sqlite3_bind_int(insertStmt, 5, Int32(entry.baseFrequency))
+                sqlite3_bind_int(insertStmt, 6, Int32(entry.source ?? 1))
+                sqlite3_bind_int(insertStmt, 7, Int32(entry.length ?? entry.text.count))
+                
+                if sqlite3_step(insertStmt) == SQLITE_DONE {
+                    insertedCount += 1
+                    textToIdMap[entry.text] = entry.id
+                }
+                sqlite3_reset(insertStmt)
+            }
+            
+            // Collect indexes using FINAL ID
+            if !entry.pinyin.isEmpty {
+                pinyinIndexes.append((entry.pinyin, finalId))
+            }
+            if let wubi = entry.wubi {
+                wubiIndexes.append((wubi, finalId))
+            }
+            
+            if (index + 1) % batchSize == 0 {
+                progressCallback?(index + 1, entries.count)
+            }
+        }
+        
+        sqlite3_finalize(insertStmt)
+        sqlite3_finalize(updateStmt)
+        
+        executeSQL("COMMIT")
+        
+        // Insert indexes manually inside transaction
+        executeSQL("BEGIN TRANSACTION")
+        let pIndexSQL = "INSERT OR IGNORE INTO pinyin_index (code, entry_id) VALUES (?, ?)"
+        var pStmt: OpaquePointer?
+        sqlite3_prepare_v2(db, pIndexSQL, -1, &pStmt, nil)
+        
+        for (code, id) in pinyinIndexes {
+            sqlite3_bind_text(pStmt, 1, code, -1, SQLITE_TRANSIENT)
+            sqlite3_bind_int64(pStmt, 2, Int64(id))
+            sqlite3_step(pStmt)
+            sqlite3_reset(pStmt)
+        }
+        sqlite3_finalize(pStmt)
+        
+        let wIndexSQL = "INSERT OR IGNORE INTO wubi_index (code, entry_id) VALUES (?, ?)"
+        var wStmt: OpaquePointer?
+        sqlite3_prepare_v2(db, wIndexSQL, -1, &wStmt, nil)
+        
+        for (code, id) in wubiIndexes {
+            sqlite3_bind_text(wStmt, 1, code, -1, SQLITE_TRANSIENT)
+            sqlite3_bind_int64(wStmt, 2, Int64(id))
+            sqlite3_step(wStmt)
+            sqlite3_reset(wStmt)
+        }
+        sqlite3_finalize(wStmt)
+        
+        executeSQL("COMMIT")
+        
+        NSLog("MarmotIM: Merged import complete. Inserted: \(insertedCount), Updated: \(updatedCount). Indexes: P=\(pinyinIndexes.count), W=\(wubiIndexes.count)")
+        progressCallback?(entries.count, entries.count)
+    }
+
     /// Migrate user data from old frecency.db
     func migrateFromFrecencyDB() {
         let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!

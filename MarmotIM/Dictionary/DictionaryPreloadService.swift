@@ -200,7 +200,7 @@ final class DictionaryPreloadService {
 
         if let url = jsonURL {
             do {
-                try db.importFromJSON(url: url) { [weak self] current, total in
+                try db.importAndMergeFromJSON(url: url) { [weak self] current, total in
                     let progress = Double(current) / Double(total) * 0.1 // 10% of total progress for migration
                     self?.updateProgress(progress)
                 }
