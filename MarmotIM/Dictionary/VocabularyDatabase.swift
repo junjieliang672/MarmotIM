@@ -31,18 +31,40 @@ final class VocabularyDatabase {
 
         dbPath = appDir.appendingPathComponent("dictionary.db")
 
+        // Auto-install dictionary from Bundle if not exists
+        if !FileManager.default.fileExists(atPath: dbPath.path) {
+            installFromBundle()
+        }
+
         // Open database
-        if sqlite3_open(dbPath.path, &db) != SQLITE_OK {
-            NSLog("MarmotIM: Failed to open vocabulary database at \(dbPath.path)")
-            return
+        if openDatabase() != SQLITE_OK {
+            // If failed to open, try to recover by deleting and re-installing
+            NSLog("MarmotIM: Database corruption detected during open, attempting recovery...")
+            closeDatabase()
+            try? FileManager.default.removeItem(at: dbPath)
+            installFromBundle()
+            
+            if openDatabase() != SQLITE_OK {
+                NSLog("MarmotIM: Critical failure - could not recover database")
+                return
+            }
+        }
+        
+        // Validate database integrity
+        if !validateDatabase() {
+            NSLog("MarmotIM: Database integrity check failed, rebuilding...")
+            closeDatabase()
+            try? FileManager.default.removeItem(at: dbPath)
+            installFromBundle()
+            _ = openDatabase()
         }
 
         // Configure database
         configureDatabase()
-
+        
         // Create tables
         createTables()
-
+        
         NSLog("MarmotIM: VocabularyDatabase initialized at \(dbPath.path)")
     }
 
@@ -98,6 +120,32 @@ final class VocabularyDatabase {
     }
 
     // MARK: - Database Configuration
+
+    private func installFromBundle() {
+        if let bundleDbPath = Bundle.main.path(forResource: "dictionary", ofType: "db") {
+            do {
+                try FileManager.default.copyItem(atPath: bundleDbPath, toPath: dbPath.path)
+                NSLog("MarmotIM: Installed initial dictionary from Bundle")
+            } catch {
+                NSLog("MarmotIM: Failed to install dictionary from Bundle: \(error)")
+            }
+        }
+    }
+
+    private func openDatabase() -> Int32 {
+        return sqlite3_open(dbPath.path, &db)
+    }
+
+    private func validateDatabase() -> Bool {
+        var stmt: OpaquePointer?
+        // Simple query to check if database is readable
+        if sqlite3_prepare_v2(db, "SELECT count(*) FROM sqlite_master", -1, &stmt, nil) == SQLITE_OK {
+            sqlite3_finalize(stmt)
+            return true
+        }
+        sqlite3_finalize(stmt)
+        return false
+    }
 
     private func configureDatabase() {
         // Enable WAL mode for better concurrent read/write performance

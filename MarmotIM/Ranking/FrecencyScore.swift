@@ -68,7 +68,14 @@ struct FrecencyScore {
 
     /// Permanent frequency multiplier per access
     /// This accumulates and never decays
-    static let frequencyMultiplier: Double = 10_000
+    /// Value: 5,000,000 (5 Million)
+    /// Effect:
+    /// - 1 access: 5M points (vs 1000M recency)
+    /// - 20 accesses: 100M points (10% of recency)
+    /// - 200 accesses: 1000M points (Equals full recency boost)
+    /// This ensures frequently used words (>200 times) become permanently sticky at the top,
+    /// even after recency boost has fully decayed.
+    static let frequencyMultiplier: Double = 5_000_000
 
     // MARK: - Score Calculation
 

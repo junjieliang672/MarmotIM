@@ -129,6 +129,10 @@ struct CandidateRanker {
 
             // Determine if this is a jianma (protected wubi shortcode)
             let isJianma = tierBonus == jianmaTierBonus
+            
+            if inputCode == "a" && (match.entry.text == "工" || match.entry.text == "戈") {
+                NSLog("MarmotIM DEBUG: Candidate '\(match.entry.text)' baseFreq=\(match.entry.baseFrequency(for: match.codeType)) tierBonus=\(tierBonus) isJianma=\(isJianma)")
+            }
 
             let candidate = Candidate(from: match, score: score, isJianma: isJianma)
             candidates.append(candidate)
@@ -180,10 +184,12 @@ struct CandidateRanker {
     ) -> Double {
         let isFullMatch = match.matchType == .full
         let isWubiCode = match.codeType == .wubi
+        let baseFreq = match.entry.baseFrequency(for: match.codeType)
 
         // Check for Wubi 1-2级简码 (protected tier)
         // These are Full Wubi matches where the user input is 1-2 characters
-        if isFullMatch && isWubiCode && inputLength <= 2 {
+        // AND the base frequency is high (>= 45000), indicating it's an official jianma
+        if isFullMatch && isWubiCode && inputLength <= 2 && baseFreq >= 45000 {
             return jianmaTierBonus  // Protected tier - cannot be overridden
         }
 

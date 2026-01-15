@@ -99,33 +99,44 @@ def load_wubi_dict(filepath: str, jianma_table: Optional[Dict[str, set]] = None)
             words = parts[1:]
 
             for word_idx, word in enumerate(words):
-                # Strict jianma filtering
                 code_len = len(code)
-                if jianma_table is not None and code_len <= 2:
-                    if code not in jianma_table:
-                        skipped_jianma += 1
-                        continue
-                    if word not in jianma_table[code]:
-                        skipped_jianma += 1
-                        continue
+                is_valid_jianma = False
 
-                # CRITICAL: Shorter codes get MUCH higher priority
-                # 1-char code (简码): 60000+
-                # 2-char code: 50000+
-                # 3-char code: 40000+
-                # 4-char code: 30000+
-                code_len = len(code)
-                if code_len == 1:
-                    base_freq = 65000  # 一级简码 highest priority
-                elif code_len == 2:
-                    base_freq = 55000  # 二级简码
-                elif code_len == 3:
-                    base_freq = 45000  # 三级简码
+                # Check if this is a valid jianma entry
+                if jianma_table is not None and code in jianma_table:
+                    if word in jianma_table[code]:
+                        is_valid_jianma = True
+
+                # Priority Calculation
+                if is_valid_jianma:
+                    # True Jianma gets MAX priority
+                    if code_len == 1:
+                        base_freq = 65000  # 一级简码
+                    elif code_len == 2:
+                        base_freq = 55000  # 二级简码
+                    else:
+                        base_freq = 45000  # Should not happen for jianma, but fallback
                 else:
-                    base_freq = 35000  # 四码
+                    # Non-Jianma words (even if short code) get lower priority
+                    # This fixes the "a -> 戈" case: 戈 is not in jianma.txt, so it shouldn't get 65000
+                    # but it SHOULD still be included (just ranked lower)
+                    if code_len <= 2 and jianma_table is not None and code in jianma_table:
+                        # If it's a short code that HAS jianma definitions, but THIS word isn't one of them
+                        # Give it significantly lower priority to ensure strict jianma ordering
+                        base_freq = 30000 
+                    elif code_len == 1:
+                        base_freq = 35000 # Fallback for 1-char codes not in jianma table (rare)
+                    elif code_len == 2:
+                        base_freq = 35000 # Standard weight
+                    elif code_len == 3:
+                        base_freq = 45000 # 3-char codes
+                    else:
+                        base_freq = 35000 # 4-char codes
 
                 # First word in line gets priority
-                base_freq -= word_idx * 100
+                # Increase penalty to 500 to strictly enforce wb_table.txt order
+                # e.g. "a 工 戈" -> 工(65000), 戈(64500)
+                base_freq -= word_idx * 500
 
                 # Slight decrease for later lines (minimal effect)
                 base_freq -= min(line_num // 100, 5000)
