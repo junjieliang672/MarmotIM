@@ -362,6 +362,29 @@ final class VocabularyDatabase {
         return extractEntry(from: statement)
     }
 
+    /// Get entry by text (direct lookup ignoring index)
+    /// Used when entry exists in database but may not be indexed for all codes
+    func getEntryByText(text: String) -> DictionaryEntry? {
+        lock.lock()
+        defer { lock.unlock() }
+
+        let sql = "SELECT id, text, pinyin, wubi, wubi_base_frequency, pinyin_base_frequency, source, length FROM entries WHERE text = ?"
+
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
+            return nil
+        }
+        defer { sqlite3_finalize(statement) }
+
+        sqlite3_bind_text(statement, 1, text, -1, SQLITE_TRANSIENT)
+
+        guard sqlite3_step(statement) == SQLITE_ROW else {
+            return nil
+        }
+
+        return extractEntry(from: statement)
+    }
+
     /// Get multiple entries by IDs (batch fetch)
     func getEntries(ids: [UInt32]) -> [UInt32: DictionaryEntry] {
         guard !ids.isEmpty else { return [:] }

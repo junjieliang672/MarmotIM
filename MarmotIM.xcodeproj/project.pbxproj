@@ -7,6 +7,8 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		96D86D02279F29A2CCB3451E /* MarmotLogoView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8614B2A644D450D6AF22833E /* MarmotLogoView.swift */; };
+		A4A9314E072C1845129A0515 /* VisualEffectView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 82937A1A9F7D91EE509602A3 /* VisualEffectView.swift */; };
 		ABOUTVIEW_SWIFT /* AboutView.swift in Sources */ = {isa = PBXBuildFile; fileRef = ABOUTVIEW_SWIFT_REF /* AboutView.swift */; };
 		APPCONFIG_SWIFT /* AppConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = APPCONFIG_SWIFT_REF /* AppConfig.swift */; };
 		APPDELEGATE_SWIFT /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = APPDELEGATE_SWIFT_REF /* AppDelegate.swift */; };
@@ -38,12 +40,13 @@
 		SYNCMERGER_SWIFT /* SyncMerger.swift in Sources */ = {isa = PBXBuildFile; fileRef = SYNCMERGER_SWIFT_REF /* SyncMerger.swift */; };
 		SYNCMODELS_SWIFT /* SyncModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = SYNCMODELS_SWIFT_REF /* SyncModels.swift */; };
 		THEMESETTINGS_SWIFT /* ThemeSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = THEMESETTINGS_SWIFT_REF /* ThemeSettingsView.swift */; };
-		USERDATA_SWIFT /* UserDataStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = USERDATA_SWIFT_REF /* UserDataStore.swift */; };
 		USERDICT_SWIFT /* UserDictView.swift in Sources */ = {isa = PBXBuildFile; fileRef = USERDICT_SWIFT_REF /* UserDictView.swift */; };
 		VOCABDB_SWIFT /* VocabularyDatabase.swift in Sources */ = {isa = PBXBuildFile; fileRef = VOCABDB_SWIFT_REF /* VocabularyDatabase.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		82937A1A9F7D91EE509602A3 /* VisualEffectView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = VisualEffectView.swift; sourceTree = "<group>"; };
+		8614B2A644D450D6AF22833E /* MarmotLogoView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MarmotLogoView.swift; sourceTree = "<group>"; };
 		ABOUTVIEW_SWIFT_REF /* AboutView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AboutView.swift; sourceTree = "<group>"; };
 		APPCONFIG_SWIFT_REF /* AppConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppConfig.swift; sourceTree = "<group>"; };
 		APPDELEGATE_SWIFT_REF /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
@@ -79,7 +82,6 @@
 		SYNCMERGER_SWIFT_REF /* SyncMerger.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncMerger.swift; sourceTree = "<group>"; };
 		SYNCMODELS_SWIFT_REF /* SyncModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncModels.swift; sourceTree = "<group>"; };
 		THEMESETTINGS_SWIFT_REF /* ThemeSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThemeSettingsView.swift; sourceTree = "<group>"; };
-		USERDATA_SWIFT_REF /* UserDataStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UserDataStore.swift; sourceTree = "<group>"; };
 		USERDICT_SWIFT_REF /* UserDictView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UserDictView.swift; sourceTree = "<group>"; };
 		VOCABDB_SWIFT_REF /* VocabularyDatabase.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VocabularyDatabase.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -201,7 +203,6 @@
 				INPUTCONTROLLER_SWIFT_REF /* InputController.swift */,
 				DICTIONARY_GROUP /* Dictionary */,
 				RANKING_GROUP /* Ranking */,
-				STORAGE_GROUP /* Storage */,
 				UI_GROUP /* UI */,
 				CONFIG_GROUP /* Config */,
 				SETTINGS_GROUP /* Settings */,
@@ -214,14 +215,6 @@
 				ASSETS_REF /* Assets.xcassets */,
 			);
 			path = MarmotIM;
-			sourceTree = "<group>";
-		};
-		STORAGE_GROUP /* Storage */ = {
-			isa = PBXGroup;
-			children = (
-				USERDATA_SWIFT_REF /* UserDataStore.swift */,
-			);
-			path = Storage;
 			sourceTree = "<group>";
 		};
 		SYNC_GROUP /* Sync */ = {
@@ -240,6 +233,8 @@
 			children = (
 				CANDIDATEWIN_SWIFT_REF /* CandidateWindow.swift */,
 				MODEINDICATOR_SWIFT_REF /* ModeIndicator.swift */,
+				8614B2A644D450D6AF22833E /* MarmotLogoView.swift */,
+				82937A1A9F7D91EE509602A3 /* VisualEffectView.swift */,
 			);
 			path = UI;
 			sourceTree = "<group>";
@@ -328,7 +323,6 @@
 				PRELOAD_SWIFT /* DictionaryPreloadService.swift in Sources */,
 				FRECENCY_SWIFT /* FrecencyScore.swift in Sources */,
 				RANKER_SWIFT /* CandidateRanker.swift in Sources */,
-				USERDATA_SWIFT /* UserDataStore.swift in Sources */,
 				CANDIDATEWIN_SWIFT /* CandidateWindow.swift in Sources */,
 				APPCONFIG_SWIFT /* AppConfig.swift in Sources */,
 				MODEINDICATOR_SWIFT /* ModeIndicator.swift in Sources */,
@@ -345,6 +339,8 @@
 				SYNCMODELS_SWIFT /* SyncModels.swift in Sources */,
 				SYNCMERGER_SWIFT /* SyncMerger.swift in Sources */,
 				ICLOUDSYNCMGR_SWIFT /* iCloudSyncManager.swift in Sources */,
+				96D86D02279F29A2CCB3451E /* MarmotLogoView.swift in Sources */,
+				A4A9314E072C1845129A0515 /* VisualEffectView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

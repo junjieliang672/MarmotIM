@@ -23,10 +23,16 @@ struct ThemeSettingsView: View {
                     }
                 }
 
-                // Candidate window style
+                // Candidate window style (Terminal Hybrid theme)
                 SettingsSection(title: "候选窗口样式") {
                     // Preview
                     CandidateWindowPreview(style: viewModel.config.candidateWindowStyle)
+                        .padding(.bottom, 12)
+
+                    // Theme description
+                    Text("Terminal Hybrid 主题：简约等宽字体 + 毛玻璃背景")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
                         .padding(.bottom, 8)
 
                     // Font size
@@ -35,7 +41,7 @@ struct ThemeSettingsView: View {
                             .frame(width: 100, alignment: .trailing)
                         Slider(
                             value: $viewModel.config.candidateWindowStyle.fontSize,
-                            in: 10...24,
+                            in: 12...20,
                             step: 1
                         )
                         .frame(width: 150)
@@ -43,42 +49,6 @@ struct ThemeSettingsView: View {
                             viewModel.markDirty()
                         }
                         Text("\(Int(viewModel.config.candidateWindowStyle.fontSize))pt")
-                            .frame(width: 40)
-                            .monospacedDigit()
-                    }
-
-                    // Corner radius
-                    HStack {
-                        Text("圆角大小：")
-                            .frame(width: 100, alignment: .trailing)
-                        Slider(
-                            value: $viewModel.config.candidateWindowStyle.cornerRadius,
-                            in: 0...20,
-                            step: 1
-                        )
-                        .frame(width: 150)
-                        .onChange(of: viewModel.config.candidateWindowStyle.cornerRadius) { _ in
-                            viewModel.markDirty()
-                        }
-                        Text("\(Int(viewModel.config.candidateWindowStyle.cornerRadius))px")
-                            .frame(width: 40)
-                            .monospacedDigit()
-                    }
-
-                    // Background opacity
-                    HStack {
-                        Text("背景透明度：")
-                            .frame(width: 100, alignment: .trailing)
-                        Slider(
-                            value: $viewModel.config.candidateWindowStyle.backgroundOpacity,
-                            in: 0.5...1.0,
-                            step: 0.05
-                        )
-                        .frame(width: 150)
-                        .onChange(of: viewModel.config.candidateWindowStyle.backgroundOpacity) { _ in
-                            viewModel.markDirty()
-                        }
-                        Text("\(Int(viewModel.config.candidateWindowStyle.backgroundOpacity * 100))%")
                             .frame(width: 40)
                             .monospacedDigit()
                     }
@@ -157,29 +127,116 @@ struct ThemeModeButton: View {
     }
 }
 
-// MARK: - Candidate Window Preview
+// MARK: - Candidate Window Preview (Terminal Hybrid Theme)
 
 struct CandidateWindowPreview: View {
     let style: CandidateWindowStyle
+    @Environment(\.colorScheme) var colorScheme
+
+    private var isDark: Bool { colorScheme == .dark }
+
+    private var backgroundColor: Color {
+        isDark ? Color(white: 0.1) : Color(white: 0.96)
+    }
+
+    private var primaryTextColor: Color {
+        isDark ? Color(white: 0.9) : Color(white: 0.1)
+    }
+
+    private var secondaryTextColor: Color {
+        isDark ? Color(white: 0.53) : Color(white: 0.4)
+    }
 
     var body: some View {
-        HStack(spacing: 12) {
-            Text("1.测试")
-            Text("2.测试词")
-            Text("3.测试文字")
+        VStack(alignment: .leading, spacing: 4) {
+            // Top bar with code, logo, page info
+            HStack {
+                Text("wo")
+                    .font(.system(size: CGFloat(style.fontSize - 2), design: .monospaced))
+                    .foregroundColor(secondaryTextColor)
+
+                Spacer()
+
+                MarmotLogoView()
+                    .frame(width: 14, height: 14)
+                    .foregroundColor(secondaryTextColor)
+
+                Spacer()
+
+                Text("1/3")
+                    .font(.system(size: CGFloat(style.fontSize - 3), design: .monospaced))
+                    .foregroundColor(secondaryTextColor)
+                Text("[,/.]")
+                    .font(.system(size: CGFloat(style.fontSize - 4), design: .monospaced))
+                    .foregroundColor(secondaryTextColor.opacity(0.6))
+            }
+            .padding(.horizontal, 10)
+            .padding(.top, 6)
+
+            // Candidates
+            HStack(spacing: 12) {
+                PreviewCandidateItem(index: 1, text: "我", isSelected: true, fontSize: style.fontSize, isDark: isDark)
+                PreviewCandidateItem(index: 2, text: "我们", isSelected: false, fontSize: style.fontSize, isDark: isDark)
+                PreviewCandidateItem(index: 3, text: "我的", isSelected: false, fontSize: style.fontSize, isDark: isDark)
+            }
+            .padding(.horizontal, 10)
+            .padding(.bottom, 8)
         }
-        .font(.system(size: CGFloat(style.fontSize)))
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
         .background(
-            RoundedRectangle(cornerRadius: CGFloat(style.cornerRadius))
-                .fill(Color(NSColor.windowBackgroundColor).opacity(style.backgroundOpacity))
+            ZStack {
+                // Simulated vibrancy effect
+                VisualEffectView(material: .hudWindow, blendingMode: .behindWindow)
+                backgroundColor.opacity(0.85)
+            }
+            .clipShape(RoundedRectangle(cornerRadius: 4))
         )
-        .overlay(
-            RoundedRectangle(cornerRadius: CGFloat(style.cornerRadius))
-                .stroke(Color.gray.opacity(0.3), lineWidth: 1)
+        .shadow(color: .black.opacity(isDark ? 0.4 : 0.15), radius: 8, x: 0, y: 4)
+    }
+}
+
+struct PreviewCandidateItem: View {
+    let index: Int
+    let text: String
+    let isSelected: Bool
+    let fontSize: Double
+    let isDark: Bool
+
+    private var primaryTextColor: Color {
+        isDark ? Color(white: 0.9) : Color(white: 0.1)
+    }
+
+    private var secondaryTextColor: Color {
+        isDark ? Color(white: 0.53) : Color(white: 0.4)
+    }
+
+    private var selectionColor: Color {
+        isDark ? Color.white.opacity(0.1) : Color.black.opacity(0.08)
+    }
+
+    var body: some View {
+        HStack(spacing: 3) {
+            Text("\(index).")
+                .font(.system(size: CGFloat(fontSize - 2), design: .monospaced))
+                .foregroundColor(secondaryTextColor)
+
+            Text(text)
+                .font(.system(size: CGFloat(fontSize + 2), design: .monospaced))
+                .foregroundColor(primaryTextColor)
+
+            Text("py")
+                .font(.system(size: CGFloat(fontSize - 5), design: .monospaced))
+                .foregroundColor(secondaryTextColor.opacity(0.7))
+                .padding(.horizontal, 3)
+                .padding(.vertical, 1)
+                .background(selectionColor)
+                .cornerRadius(2)
+        }
+        .padding(.horizontal, 6)
+        .padding(.vertical, 4)
+        .background(
+            RoundedRectangle(cornerRadius: 3)
+                .fill(isSelected ? selectionColor : Color.clear)
         )
-        .shadow(color: .black.opacity(0.1), radius: 4, x: 0, y: 2)
     }
 }
 

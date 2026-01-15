@@ -132,8 +132,7 @@ com.apple.developer.ubiquity-container-identifiers
 ### 本地数据
 ```
 ~/Library/Application Support/MarmotIM/
-├── vocabulary.db          # 主词库数据库
-└── user_dictionary.json   # 旧版用户词典（已迁移）
+└── dictionary.db          # 主词库数据库（包含词条、索引、用户学习数据）
 ```
 
 ### iCloud 数据

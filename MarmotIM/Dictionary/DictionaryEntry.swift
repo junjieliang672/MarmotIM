@@ -108,6 +108,13 @@ struct Candidate: Identifiable {
     /// Calculated score for ranking
     var score: Double
 
+    /// True if this is a protected Wubi 1-2 char shortcode (简码)
+    var isJianma: Bool
+
+    /// True if this candidate is #1 due to active tier override boost
+    /// (would not be #1 without recent user selection)
+    var isBoosted: Bool
+
     var id: UInt32 { entryId }
 
     /// Get base frequency for the current code type
@@ -120,7 +127,7 @@ struct Candidate: Identifiable {
         }
     }
 
-    init(from match: DictionaryMatch, score: Double = 0) {
+    init(from match: DictionaryMatch, score: Double = 0, isJianma: Bool = false, isBoosted: Bool = false) {
         self.entryId = match.entry.id
         self.text = match.entry.text
         self.code = match.matchedCode
@@ -129,10 +136,12 @@ struct Candidate: Identifiable {
         self.wubiBaseFrequency = match.entry.wubiBaseFrequency
         self.pinyinBaseFrequency = match.entry.pinyinBaseFrequency
         self.score = score
+        self.isJianma = isJianma
+        self.isBoosted = isBoosted
     }
 
     /// Direct initializer for filter mode candidates
-    init(entryId: UInt32, text: String, code: String, codeType: InputCodeType, isFullMatch: Bool, wubiBaseFrequency: UInt16, pinyinBaseFrequency: UInt16, score: Double) {
+    init(entryId: UInt32, text: String, code: String, codeType: InputCodeType, isFullMatch: Bool, wubiBaseFrequency: UInt16, pinyinBaseFrequency: UInt16, score: Double, isJianma: Bool = false, isBoosted: Bool = false) {
         self.entryId = entryId
         self.text = text
         self.code = code
@@ -141,5 +150,7 @@ struct Candidate: Identifiable {
         self.wubiBaseFrequency = wubiBaseFrequency
         self.pinyinBaseFrequency = pinyinBaseFrequency
         self.score = score
+        self.isJianma = isJianma
+        self.isBoosted = isBoosted
     }
 }

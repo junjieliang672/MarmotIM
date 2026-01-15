@@ -122,6 +122,52 @@ class DictionaryEngine {
         NSLog("MarmotIM: Preload finalized - pinyinTrie: \(pinyinTrie.codeCount) codes, wubiTrie: \(wubiTrie.codeCount) codes")
     }
 
+    /// Ensure all user_favorites entries are properly indexed
+    /// This fixes entries that exist in the database but weren't indexed (source=2 entries with wubi codes)
+    /// Returns the number of entries that were fixed
+    func ensureUserFavoritesIndexed() -> Int {
+        let favorites = db.getUserFavorites()
+        var fixedCount = 0
+
+        NSLog("MarmotIM: Checking \(favorites.count) user favorites for missing indexes")
+
+        for (_, text, wubiCode, pinyinCode, _) in favorites {
+            // Try to find the entry in database
+            guard let entry = db.getEntryByText(text: text) else {
+                NSLog("MarmotIM: ensureUserFavoritesIndexed - entry not found for text: %@", text)
+                continue
+            }
+
+            // Check and fix wubi index
+            if let code = wubiCode, !code.isEmpty, code.count <= 4 {
+                // Check if already in trie
+                let existingInTrie = findExistingEntry(text: text, code: code, isWubi: true)
+                if existingInTrie == nil {
+                    // Not indexed - add to index and trie
+                    _ = db.insertWubiIndex(code: code, entryId: entry.id)
+                    wubiTrie.insert(code: code, entryId: entry.id)
+                    NSLog("MarmotIM: ensureUserFavoritesIndexed - added wubi index for '%@' code='%@' (id: %u)", text, code, entry.id)
+                    fixedCount += 1
+                }
+            }
+
+            // Check and fix pinyin index
+            if let code = pinyinCode, !code.isEmpty {
+                // Check if already in trie
+                let existingInTrie = findExistingEntry(text: text, code: code, isWubi: false)
+                if existingInTrie == nil {
+                    // Not indexed - add to index and trie
+                    _ = db.insertPinyinIndex(code: code, entryId: entry.id)
+                    pinyinTrie.insert(code: code, entryId: entry.id)
+                    NSLog("MarmotIM: ensureUserFavoritesIndexed - added pinyin index for '%@' code='%@' (id: %u)", text, code, entry.id)
+                    fixedCount += 1
+                }
+            }
+        }
+
+        return fixedCount
+    }
+
     // MARK: - Search
 
     /// Search for entries matching the given code
@@ -131,6 +177,10 @@ class DictionaryEngine {
     ///   - code: The input code (can be pinyin or wubi)
     ///   - limit: Maximum number of results
     /// - Returns: Array of matches
+    ///
+    /// The limit is distributed with two priorities:
+    /// 1. Full matches before prefix matches
+    /// 2. Even distribution between wubi and pinyin within each match type
     func search(code: String, limit: Int = 50) -> [DictionaryMatch] {
         guard !code.isEmpty else { return [] }
 
@@ -144,8 +194,8 @@ class DictionaryEngine {
         var matchInfos: [(entryId: UInt32, matchedCode: String, codeType: InputCodeType)] = []
         var seenEntryIds = Set<UInt32>()
 
-        // Search wubi Trie FIRST (exact and prefix matches) - wubi has priority for short codes
-        let wubiResults = wubiTrie.search(prefix: code, limit: limit)
+        // Search wubi Trie (exact and prefix matches)
+        let wubiResults = wubiTrie.search(prefix: code, limit: limit * 2)
         for (matchedCode, entryIds) in wubiResults {
             for entryId in entryIds {
                 guard !seenEntryIds.contains(entryId) else { continue }
@@ -155,7 +205,7 @@ class DictionaryEngine {
         }
 
         // Search pinyin Trie (exact and prefix matches)
-        let pinyinResults = pinyinTrie.search(prefix: code, limit: limit)
+        let pinyinResults = pinyinTrie.search(prefix: code, limit: limit * 2)
         for (matchedCode, entryIds) in pinyinResults {
             for entryId in entryIds {
                 guard !seenEntryIds.contains(entryId) else { continue }
@@ -168,21 +218,82 @@ class DictionaryEngine {
         let allIds = matchInfos.map { $0.entryId }
         let entriesMap = getEntries(ids: allIds)
 
-        // Build matches with fetched entries
-        var matches: [DictionaryMatch] = []
+        // Categorize matches into 4 tiers
+        var fullWubiMatches: [DictionaryMatch] = []
+        var fullPinyinMatches: [DictionaryMatch] = []
+        var prefixWubiMatches: [DictionaryMatch] = []
+        var prefixPinyinMatches: [DictionaryMatch] = []
+
         for info in matchInfos {
-            if let entry = entriesMap[info.entryId] {
-                let matchType: DictionaryMatch.MatchType = info.matchedCode == code ? .full : .prefix
-                matches.append(DictionaryMatch(
-                    entry: entry,
-                    matchedCode: info.matchedCode,
-                    matchType: matchType,
-                    codeType: info.codeType
-                ))
+            guard let entry = entriesMap[info.entryId] else { continue }
+            let isFullMatch = info.matchedCode == code
+            let match = DictionaryMatch(
+                entry: entry,
+                matchedCode: info.matchedCode,
+                matchType: isFullMatch ? .full : .prefix,
+                codeType: info.codeType
+            )
+
+            switch (isFullMatch, info.codeType) {
+            case (true, .wubi): fullWubiMatches.append(match)
+            case (true, .pinyin): fullPinyinMatches.append(match)
+            case (false, .wubi): prefixWubiMatches.append(match)
+            case (false, .pinyin): prefixPinyinMatches.append(match)
             }
         }
 
-        return Array(matches.prefix(limit))
+        // Distribute limit evenly across tiers
+        // Priority 1: Full matches (even split between wubi and pinyin)
+        // Priority 2: Prefix matches (even split between wubi and pinyin)
+        var results: [DictionaryMatch] = []
+
+        // Step 1: Add full matches with even distribution
+        let fullWubiCount = fullWubiMatches.count
+        let fullPinyinCount = fullPinyinMatches.count
+        let totalFullMatches = fullWubiCount + fullPinyinCount
+
+        if totalFullMatches > 0 {
+            let fullLimit = min(limit, totalFullMatches)
+            // Calculate even split, but allow overflow to the other category if one has fewer
+            var wubiSlots = fullLimit / 2
+            var pinyinSlots = fullLimit - wubiSlots
+
+            // Redistribute if one category has fewer entries
+            if fullWubiCount < wubiSlots {
+                pinyinSlots += wubiSlots - fullWubiCount
+                wubiSlots = fullWubiCount
+            } else if fullPinyinCount < pinyinSlots {
+                wubiSlots += pinyinSlots - fullPinyinCount
+                pinyinSlots = fullPinyinCount
+            }
+
+            results.append(contentsOf: fullWubiMatches.prefix(wubiSlots))
+            results.append(contentsOf: fullPinyinMatches.prefix(pinyinSlots))
+        }
+
+        // Step 2: Fill remaining slots with prefix matches
+        let remaining = limit - results.count
+        if remaining > 0 {
+            let prefixWubiCount = prefixWubiMatches.count
+            let prefixPinyinCount = prefixPinyinMatches.count
+
+            var wubiSlots = remaining / 2
+            var pinyinSlots = remaining - wubiSlots
+
+            // Redistribute if one category has fewer entries
+            if prefixWubiCount < wubiSlots {
+                pinyinSlots += wubiSlots - prefixWubiCount
+                wubiSlots = prefixWubiCount
+            } else if prefixPinyinCount < pinyinSlots {
+                wubiSlots += pinyinSlots - prefixPinyinCount
+                pinyinSlots = prefixPinyinCount
+            }
+
+            results.append(contentsOf: prefixWubiMatches.prefix(wubiSlots))
+            results.append(contentsOf: prefixPinyinMatches.prefix(pinyinSlots))
+        }
+
+        return results
     }
 
     /// Get entry by ID (from cache or database)
@@ -389,15 +500,28 @@ class DictionaryEngine {
               wubiCode ?? "nil",
               pinyinCode ?? "nil")
 
+        // First, try to find ANY existing entry for this text in the database
+        // This handles the case where entry exists but may not be indexed for all codes
+        let existingEntryByText = findEntryByText(text: text)
+
         // 1. 处理五笔入库
         if let code = wubiCode, code.count >= 1, code.count <= 4 {
-            // 检查是否已存在
+            // 检查是否已在五笔索引中
             if let existingId = findExistingEntry(text: text, code: code, isWubi: true) {
-                // 已存在，仅更新 ranking
+                // 已在索引中，仅更新 ranking
                 result.wubiEntryId = existingId
                 result.wubiWasExisting = true
                 recordSelection(entryId: existingId, baseFrequency: 35000)
-                NSLog("MarmotIM: addDualEntry - wubi entry exists, updated ranking (id: %u)", existingId)
+                NSLog("MarmotIM: addDualEntry - wubi entry exists in index, updated ranking (id: %u)", existingId)
+            } else if let existingEntry = existingEntryByText {
+                // 词条存在但未在五笔索引中，添加索引
+                result.wubiEntryId = existingEntry.id
+                result.wubiWasExisting = true
+                // Add to wubi index and trie
+                _ = db.insertWubiIndex(code: code, entryId: existingEntry.id)
+                wubiTrie.insert(code: code, entryId: existingEntry.id)
+                recordSelection(entryId: existingEntry.id, baseFrequency: 35000)
+                NSLog("MarmotIM: addDualEntry - added existing entry to wubi index (id: %u, code: %@)", existingEntry.id, code)
             } else {
                 // 新增词条，使用 4-char 模式的 baseFrequency
                 if let entryId = addUserEntry(code: code, text: text, isWubi: true, baseFrequency: 35000) {
@@ -411,13 +535,22 @@ class DictionaryEngine {
 
         // 2. 处理拼音入库
         if let code = pinyinCode, !code.isEmpty {
-            // 检查是否已存在
+            // 检查是否已在拼音索引中
             if let existingId = findExistingEntry(text: text, code: code, isWubi: false) {
-                // 已存在，仅更新 ranking
+                // 已在索引中，仅更新 ranking
                 result.pinyinEntryId = existingId
                 result.pinyinWasExisting = true
                 recordSelection(entryId: existingId, baseFrequency: 65000)
-                NSLog("MarmotIM: addDualEntry - pinyin entry exists, updated ranking (id: %u)", existingId)
+                NSLog("MarmotIM: addDualEntry - pinyin entry exists in index, updated ranking (id: %u)", existingId)
+            } else if let existingEntry = existingEntryByText {
+                // 词条存在但未在拼音索引中，添加索引
+                result.pinyinEntryId = existingEntry.id
+                result.pinyinWasExisting = true
+                // Add to pinyin index and trie
+                _ = db.insertPinyinIndex(code: code, entryId: existingEntry.id)
+                pinyinTrie.insert(code: code, entryId: existingEntry.id)
+                recordSelection(entryId: existingEntry.id, baseFrequency: 65000)
+                NSLog("MarmotIM: addDualEntry - added existing entry to pinyin index (id: %u, code: %@)", existingEntry.id, code)
             } else {
                 // 新增词条，使用 first 模式的 baseFrequency
                 if let entryId = addUserEntry(code: code, text: text, isWubi: false, baseFrequency: 65000) {
@@ -437,6 +570,11 @@ class DictionaryEngine {
 
         NSLog("MarmotIM: addDualEntry complete - %@", result.description)
         return result
+    }
+
+    /// Find an entry by its text (direct database lookup, ignoring index)
+    private func findEntryByText(text: String) -> DictionaryEntry? {
+        return db.getEntryByText(text: text)
     }
 
     /// 删除词条结果

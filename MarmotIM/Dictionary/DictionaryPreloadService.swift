@@ -180,6 +180,13 @@ final class DictionaryPreloadService {
 
         // Final setup
         engine.finalizePreload()
+        updateProgress(0.95)
+
+        // Fix user_favorites that may not be indexed (one-time migration)
+        let fixedCount = engine.ensureUserFavoritesIndexed()
+        if fixedCount > 0 {
+            NSLog("MarmotIM: Fixed indexes for \(fixedCount) user favorites")
+        }
         updateProgress(1.0)
 
         NSLog("MarmotIM: Preloaded \(pinyinIndexes.count) pinyin, \(wubiIndexes.count) wubi, \(userLearning.count) user learning entries")

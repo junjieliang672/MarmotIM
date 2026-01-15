@@ -12,9 +12,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     /// Shared dictionary engine instance
     var dictionaryEngine: DictionaryEngine?
 
-    /// Legacy user data store (kept for backward compatibility during migration)
-    static var userDataStore: UserDataStore?
-
     /// Shared configuration
     static var config: AppConfig = AppConfig.default
 
@@ -30,9 +27,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Start background preloading immediately
         // This runs in background and doesn't block the UI
         startPreloading()
-
-        // Initialize legacy user data store (for migration)
-        initializeUserDataStore()
 
         // Load configuration
         loadConfiguration()
@@ -51,9 +45,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Stop iCloud sync service
         iCloudSyncManager.shared.stop()
-
-        // Save any pending user data
-        Self.userDataStore?.save()
 
         // Save configuration
         try? Self.config.save()
@@ -92,17 +83,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             ReverseLookupTable.shared.loadAsync {
                 NSLog("MarmotIM: Reverse lookup table preload complete")
             }
-        }
-    }
-
-    private func initializeUserDataStore() {
-        // This is kept for backward compatibility
-        // New code should use DictionaryEngine.getUserLearning() instead
-        do {
-            Self.userDataStore = try UserDataStore()
-            NSLog("MarmotIM: Legacy user data store initialized")
-        } catch {
-            NSLog("MarmotIM: Failed to initialize legacy user data store: \(error)")
         }
     }
 

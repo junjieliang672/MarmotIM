@@ -110,23 +110,58 @@ struct CandidateRanker {
         }
 
         // STEP 2: Calculate scores for deduplicated matches
+        // Also track tierOverrideBoost for boost detection
         var candidates: [Candidate] = []
+        var tierOverrideBoosts: [UInt32: Double] = [:]  // entryId -> tierOverrideBoost
 
         for (_, (match, userData)) in textToMatch {
-            // Calculate score using tier-based Frecency
+            // Calculate score components
+            let tierBonus = getTierBonus(match: match, inputLength: inputLength)
+            let timestamp = userData?.lastAccessTimestamp ?? 0
+            let tierOverrideBoost = FrecencyScore.calculateTierOverrideBoost(lastAccessTimestamp: timestamp)
+
+            // Calculate full score using tier-based Frecency
             let score = calculateScore(
                 match: match,
                 userData: userData,
                 inputLength: inputLength
             )
 
-            var candidate = Candidate(from: match, score: score)
-            candidate.score = score
+            // Determine if this is a jianma (protected wubi shortcode)
+            let isJianma = tierBonus == jianmaTierBonus
+
+            let candidate = Candidate(from: match, score: score, isJianma: isJianma)
             candidates.append(candidate)
+            tierOverrideBoosts[match.entry.id] = tierOverrideBoost
         }
 
         // Sort by score descending
         candidates.sort { $0.score > $1.score }
+
+        // STEP 3: Detect if #1 is boosted
+        // A candidate is "boosted" if:
+        // 1. It has active tierOverrideBoost (> 0)
+        // 2. It would NOT be #1 without the tierOverrideBoost and recency score
+        if candidates.count >= 2 {
+            let first = candidates[0]
+            let second = candidates[1]
+            let firstBoost = tierOverrideBoosts[first.entryId] ?? 0
+
+            if firstBoost > 0 {
+                // Get the userData for first candidate to calculate actual recency
+                if let (_, userData) = textToMatch[first.text] {
+                    let actualRecency = FrecencyScore.calculateRecencyScore(
+                        lastAccessTimestamp: userData?.lastAccessTimestamp ?? 0
+                    )
+                    let scoreWithoutBoostAndRecency = first.score - firstBoost - actualRecency
+
+                    // If without boost components, #1 would have lower score than #2
+                    if scoreWithoutBoostAndRecency < second.score {
+                        candidates[0].isBoosted = true
+                    }
+                }
+            }
+        }
 
         return candidates
     }
@@ -199,56 +234,7 @@ struct CandidateRanker {
 
         let totalScore = tierBonus + tierOverrideBoost + recencyScore + frequencyScore + baseScore + shortWordBonus
 
-        // Debug logging for top candidates
-        if accessCount > 0 {
-            NSLog("MarmotIM: Score for '%@' (id=%u): tier=%.0fB, override=%.0fB, recency=%.0f, freq=%.0f, base=%.0f, short=%.0f, TOTAL=%.0f (accessCount=%u, ts=%u)",
-                  match.entry.text, match.entry.id,
-                  tierBonus / 1_000_000_000, tierOverrideBoost / 1_000_000_000,
-                  recencyScore, frequencyScore, baseScore, shortWordBonus, totalScore,
-                  accessCount, timestamp)
-        }
-
         return totalScore
-    }
-
-    // MARK: - Legacy Support
-
-    /// Rank matches using UserDataStore (legacy method)
-    /// This method is kept for backward compatibility
-    static func rank(
-        matches: [DictionaryMatch],
-        inputCode: String,
-        userDataStore: UserDataStore?
-    ) -> [Candidate] {
-        let inputLength = inputCode.count
-        var candidates: [Candidate] = []
-
-        for match in matches {
-            // Get user data from legacy store
-            let legacyData = userDataStore?.getData(for: match.entry.id)
-
-            // Convert to new format
-            let userData: UserEntryData?
-            if let data = legacyData {
-                userData = UserEntryData(
-                    entryId: data.entryId,
-                    accessCount: data.accessCount,
-                    lastAccessTimestamp: data.lastAccessTimestamp,
-                    cachedScore: data.cachedScore
-                )
-            } else {
-                userData = nil
-            }
-
-            let score = calculateScore(match: match, userData: userData, inputLength: inputLength)
-
-            var candidate = Candidate(from: match, score: score)
-            candidate.score = score
-            candidates.append(candidate)
-        }
-
-        candidates.sort { $0.score > $1.score }
-        return candidates
     }
 
     // MARK: - Re-ranking
