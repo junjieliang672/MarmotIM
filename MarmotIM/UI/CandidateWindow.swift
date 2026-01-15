@@ -330,6 +330,8 @@ struct CandidateItemView: View {
             Text(candidate.text)
                 .font(.system(size: fontSize + 2, design: .monospaced))
                 .foregroundColor(theme.primaryTextColor)
+                .lineLimit(1) // Ensure text doesn't wrap
+                .layoutPriority(0) // Allow compression if needed
 
             // Code type indicator (optional)
             if AppDelegate.config.showCodeHint {
@@ -340,6 +342,8 @@ struct CandidateItemView: View {
                     .padding(.vertical, 1)
                     .background(theme.selectionColor)
                     .cornerRadius(2)
+                    .fixedSize() // Prevent truncation (shows as "...") when space is tight
+                    .layoutPriority(1) // Prioritize showing the label over candidate text
             }
         }
         .padding(.horizontal, 6)
