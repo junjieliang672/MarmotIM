@@ -67,8 +67,18 @@ class iCloudSyncManager {
 
     /// Manually trigger sync (user clicked sync button)
     func syncNow() {
+        NSLog("MarmotIM: syncNow called - checking conditions...")
         syncQueue.async { [weak self] in
-            self?.performSync()
+            guard let self = self else { return }
+            
+            // Check if iCloud is available before attempting sync
+            self.checkICloudAvailability()
+            
+            if !self.isICloudAvailable {
+                NSLog("MarmotIM: iCloud is NOT available - attempting to initialize anyway to prompt user login/setup")
+            }
+            
+            self.performSync()
         }
     }
 
@@ -91,8 +101,9 @@ class iCloudSyncManager {
     // MARK: - iCloud Availability
 
     private func checkICloudAvailability() {
-        isICloudAvailable = FileManager.default.ubiquityIdentityToken != nil
-        NSLog("MarmotIM: iCloud available: \(isICloudAvailable)")
+        let token = FileManager.default.ubiquityIdentityToken
+        isICloudAvailable = token != nil
+        NSLog("MarmotIM: iCloud available check: \(isICloudAvailable) (token: \(token == nil ? "nil" : "present"))")
     }
 
     // MARK: - Metadata Query (Watch for remote changes)
@@ -128,14 +139,21 @@ class iCloudSyncManager {
     // MARK: - Core Sync Logic
 
     private func performSync() {
-        guard !isSyncing else {
+        if isSyncing {
             NSLog("MarmotIM: Sync already in progress, skipping")
             return
         }
 
         checkICloudAvailability()
+        
+        // If manual sync (user triggered), we should try even if checkICloudAvailability returned false initially,
+        // because accessing the URL might trigger system prompts or reveal status.
+        // But for safety, we still check availability unless we want to force an error.
+        
         guard isICloudAvailable else {
-            NSLog("MarmotIM: iCloud not available, skipping sync")
+            NSLog("MarmotIM: iCloud not available (no identity token), aborting sync")
+            // Update status to reflect failure due to unavailability
+            lastSyncSuccess = false
             return
         }
 
@@ -269,7 +287,7 @@ class iCloudSyncManager {
         defer { sqlite3_close(db) }
 
         var records: [String: FavoriteRecord] = [:]
-        let sql = "SELECT text, wubi_code, pinyin_code, added_timestamp FROM user_favorites"
+        let sql = "SELECT text, wubi_code, pinyin_code, added_timestamp, is_deleted FROM user_favorites"
         var stmt: OpaquePointer?
 
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
@@ -282,11 +300,13 @@ class iCloudSyncManager {
             let wubiCode = sqlite3_column_text(stmt, 1).map { String(cString: $0) }
             let pinyinCode = sqlite3_column_text(stmt, 2).map { String(cString: $0) }
             let addedTimestamp = Int(sqlite3_column_int(stmt, 3))
+            let isDeleted = sqlite3_column_int(stmt, 4) != 0
 
             records[text] = FavoriteRecord(
                 wubiCode: wubiCode,
                 pinyinCode: pinyinCode,
-                addedTimestamp: addedTimestamp
+                addedTimestamp: addedTimestamp,
+                isDeleted: isDeleted
             )
         }
 
@@ -462,8 +482,8 @@ class iCloudSyncManager {
 
         let sql = """
             INSERT OR REPLACE INTO user_favorites
-            (text, wubi_code, pinyin_code, added_timestamp)
-            VALUES (?, ?, ?, ?)
+            (text, wubi_code, pinyin_code, added_timestamp, is_deleted)
+            VALUES (?, ?, ?, ?, ?)
         """
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
@@ -488,6 +508,7 @@ class iCloudSyncManager {
                 sqlite3_bind_null(stmt, 3)
             }
             sqlite3_bind_int(stmt, 4, Int32(record.addedTimestamp))
+            sqlite3_bind_int(stmt, 5, record.isDeleted ? 1 : 0)
             sqlite3_step(stmt)
             sqlite3_reset(stmt)
         }

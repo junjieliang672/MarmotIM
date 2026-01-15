@@ -109,8 +109,15 @@ class InputController: IMKInputController {
         let clientType = sender == nil ? "nil" : String(describing: type(of: sender!))
         let isIMKTextInput = sender is IMKTextInput
         NSLog("MarmotIM: activateServer() - client: \(clientType), isIMKTextInput: \(isIMKTextInput)")
+        
+        // Reset state
         reset()
         resetPairedPunctuationState()
+        
+        // Force Chinese mode on activation to prevent being stuck in English mode
+        // This ensures the IME is ready to type Chinese when selected or app is switched
+        isEnglishMode = false
+        ModeIndicator.shared.hide() // Hide any lingering indicators
     }
 
     override func deactivateServer(_ sender: Any!) {

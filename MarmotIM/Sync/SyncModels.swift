@@ -31,11 +31,23 @@ struct FavoriteRecord: Codable {
     var wubiCode: String?
     var pinyinCode: String?
     var addedTimestamp: Int
+    var isDeleted: Bool
 
-    init(wubiCode: String?, pinyinCode: String?, addedTimestamp: Int) {
+    init(wubiCode: String?, pinyinCode: String?, addedTimestamp: Int, isDeleted: Bool = false) {
         self.wubiCode = wubiCode
         self.pinyinCode = pinyinCode
         self.addedTimestamp = addedTimestamp
+        self.isDeleted = isDeleted
+    }
+    
+    // Custom decoding to handle legacy JSON that doesn't have isDeleted
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        wubiCode = try container.decodeIfPresent(String.self, forKey: .wubiCode)
+        pinyinCode = try container.decodeIfPresent(String.self, forKey: .pinyinCode)
+        addedTimestamp = try container.decode(Int.self, forKey: .addedTimestamp)
+        // Default to false if missing (backward compatibility)
+        isDeleted = try container.decodeIfPresent(Bool.self, forKey: .isDeleted) ?? false
     }
 }
 

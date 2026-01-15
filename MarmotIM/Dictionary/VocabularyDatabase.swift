@@ -16,8 +16,8 @@ final class VocabularyDatabase {
     private let lock = NSLock()
 
     /// Database schema version for migrations
-    /// Version 3: Separate wubi_base_frequency and pinyin_base_frequency columns
-    private static let schemaVersion = 3
+    /// Version 4: Add is_deleted column to user_favorites
+    private static let schemaVersion = 4
 
     // MARK: - Initialization
 
@@ -179,6 +179,7 @@ final class VocabularyDatabase {
                 wubi_code TEXT,
                 pinyin_code TEXT,
                 added_timestamp INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
+                is_deleted INTEGER NOT NULL DEFAULT 0,
                 UNIQUE(text, wubi_code, pinyin_code)
             )
         """
@@ -846,8 +847,11 @@ final class VocabularyDatabase {
         defer { lock.unlock() }
 
         let sql = """
-            INSERT OR REPLACE INTO user_favorites (text, wubi_code, pinyin_code, added_timestamp)
-            VALUES (?, ?, ?, strftime('%s', 'now'))
+            INSERT INTO user_favorites (text, wubi_code, pinyin_code, added_timestamp, is_deleted)
+            VALUES (?, ?, ?, strftime('%s', 'now'), 0)
+            ON CONFLICT(text, wubi_code, pinyin_code) DO UPDATE SET
+                added_timestamp = excluded.added_timestamp,
+                is_deleted = 0
         """
 
         var statement: OpaquePointer?
@@ -871,22 +875,37 @@ final class VocabularyDatabase {
         return sqlite3_step(statement) == SQLITE_DONE
     }
 
-    /// Remove a user favorite entry
+    /// Remove a user favorite entry (Soft Delete)
     func removeUserFavorite(text: String) -> Bool {
         lock.lock()
         defer { lock.unlock() }
 
-        return executeSQL("DELETE FROM user_favorites WHERE text = '\(text.replacingOccurrences(of: "'", with: "''"))'")
+        // Update is_deleted flag and timestamp instead of physical delete
+        let sql = """
+            UPDATE user_favorites
+            SET is_deleted = 1, added_timestamp = strftime('%s', 'now')
+            WHERE text = ?
+        """
+        
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
+            return false
+        }
+        defer { sqlite3_finalize(statement) }
+        
+        sqlite3_bind_text(statement, 1, text, -1, SQLITE_TRANSIENT)
+        
+        return sqlite3_step(statement) == SQLITE_DONE
     }
 
-    /// Get all user favorites
+    /// Get all user favorites (active only)
     func getUserFavorites() -> [(id: Int, text: String, wubiCode: String?, pinyinCode: String?, timestamp: Int)] {
         lock.lock()
         defer { lock.unlock() }
 
         var results: [(Int, String, String?, String?, Int)] = []
 
-        let sql = "SELECT id, text, wubi_code, pinyin_code, added_timestamp FROM user_favorites ORDER BY added_timestamp DESC"
+        let sql = "SELECT id, text, wubi_code, pinyin_code, added_timestamp FROM user_favorites WHERE is_deleted = 0 ORDER BY added_timestamp DESC"
         var statement: OpaquePointer?
 
         guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
@@ -921,12 +940,14 @@ final class VocabularyDatabase {
         return results
     }
 
-    /// Remove a user favorite by ID
+    /// Remove a user favorite by ID (Soft Delete)
     func removeUserFavoriteById(_ id: Int) -> Bool {
         lock.lock()
         defer { lock.unlock() }
 
-        return executeSQL("DELETE FROM user_favorites WHERE id = \(id)")
+        // Update is_deleted flag and timestamp instead of physical delete
+        let sql = "UPDATE user_favorites SET is_deleted = 1, added_timestamp = strftime('%s', 'now') WHERE id = \(id)"
+        return executeSQL(sql)
     }
 
     // MARK: - Migration
@@ -971,10 +992,11 @@ final class VocabularyDatabase {
         // Migration logic for each version
         // Version 1: Initial schema (current)
 
-        // Add future migrations here:
-        // if currentVersion < 2 {
-        //     // Migration to version 2
-        // }
+        // Version 4: Add is_deleted to user_favorites
+        if currentVersion < 4 {
+            NSLog("MarmotIM: Migrating to version 4 (add is_deleted)...")
+            executeSQL("ALTER TABLE user_favorites ADD COLUMN is_deleted INTEGER NOT NULL DEFAULT 0")
+        }
 
         setSchemaVersion(targetVersion)
         NSLog("MarmotIM: Schema migration complete")

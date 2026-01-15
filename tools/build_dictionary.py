@@ -49,20 +49,45 @@ SOURCE_PINYIN = 2
 SOURCE_EXTRA_PINYIN = 3  # cn_en, en, emoji
 
 
-def load_wubi_dict(filepath: str) -> List[dict]:
+def load_jianma_table(filepath: str) -> Dict[str, set]:
+    """
+    Load 1st and 2nd level short codes from jianma.txt.
+    Returns a dict mapping code -> set of allowed words.
+    """
+    jianma = defaultdict(set)
+    if not os.path.exists(filepath):
+        print(f"  Warning: jianma.txt not found at {filepath}")
+        return jianma
+
+    with open(filepath, 'r', encoding='utf-8') as f:
+        for line in f:
+            if line.startswith('#'):
+                continue
+            parts = line.strip().split()
+            if len(parts) >= 2:
+                code = parts[0]
+                word = parts[1]
+                jianma[code].add(word)
+    
+    print(f"  Loaded {len(jianma)} jianma codes")
+    return jianma
+
+
+def load_wubi_dict(filepath: str, jianma_table: Optional[Dict[str, set]] = None) -> List[dict]:
     """
     Load all entries from wb_table.txt.
     Format: code word1 word2 ...
 
     Returns list of entries with wubi code and high priority.
-
-    Frequency priority:
-    1. Shorter code = much higher priority (简码优先)
-    2. First word in line = higher priority
-    3. Line number has minimal effect
+    
+    If jianma_table is provided, strictly enforces 1st and 2nd level short codes:
+    - If code length <= 2:
+        - Only include if code exists in jianma_table
+        - Only include if word matches jianma_table definition
     """
     entries = []
     line_num = 0
+    skipped_jianma = 0
 
     with open(filepath, 'r', encoding='utf-8') as f:
         for line in f:
@@ -74,6 +99,16 @@ def load_wubi_dict(filepath: str) -> List[dict]:
             words = parts[1:]
 
             for word_idx, word in enumerate(words):
+                # Strict jianma filtering
+                code_len = len(code)
+                if jianma_table is not None and code_len <= 2:
+                    if code not in jianma_table:
+                        skipped_jianma += 1
+                        continue
+                    if word not in jianma_table[code]:
+                        skipped_jianma += 1
+                        continue
+
                 # CRITICAL: Shorter codes get MUCH higher priority
                 # 1-char code (简码): 60000+
                 # 2-char code: 50000+
@@ -112,6 +147,8 @@ def load_wubi_dict(filepath: str) -> List[dict]:
                 print(f"  Loaded {line_num} wubi lines...")
 
     print(f"  Total: {len(entries)} wubi entries")
+    if skipped_jianma > 0:
+        print(f"  Skipped {skipped_jianma} entries due to strict jianma filtering")
     return entries
 
 
@@ -763,6 +800,7 @@ def save_sqlite(entries: List[dict], pinyin_index: Dict, wubi_index: Dict, filep
             wubi_code TEXT,
             pinyin_code TEXT,
             added_timestamp INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
+            is_deleted INTEGER NOT NULL DEFAULT 0,
             UNIQUE(text, wubi_code, pinyin_code)
         );
 
@@ -821,8 +859,8 @@ def save_sqlite(entries: List[dict], pinyin_index: Dict, wubi_index: Dict, filep
         CREATE INDEX idx_filter_freq ON filter_user_freq(filter_type, code);
     ''')
 
-    # Set schema version (3 = separate wubi/pinyin base frequencies)
-    cursor.execute("INSERT INTO schema_version (version) VALUES (3)")
+    # Set schema version (4 = add is_deleted to user_favorites)
+    cursor.execute("INSERT INTO schema_version (version) VALUES (4)")
     conn.commit()
 
     # Insert entries in a single transaction for performance
@@ -1153,6 +1191,8 @@ def main():
                         help='Path to py_table.txt (default: vocab/py_table.txt)')
     parser.add_argument('--wubi', default=os.path.join(vocab_dir, 'wb_table.txt'),
                         help='Path to wb_table.txt (default: vocab/wb_table.txt)')
+    parser.add_argument('--jianma', default=os.path.join(vocab_dir, 'jianma.txt'),
+                        help='Path to jianma.txt (default: vocab/jianma.txt)')
     parser.add_argument('--output', default=dict_dir,
                         help='Output directory (default: dict/)')
     parser.add_argument('--corpus', help='Path to corpus frequency file (optional)')
@@ -1189,8 +1229,11 @@ def main():
 
     os.makedirs(args.output, exist_ok=True)
 
+    print("Step 0: Loading Jianma table (Strict Mode)...")
+    jianma_table = load_jianma_table(args.jianma)
+
     print("Step 1: Loading Wubi dictionary (HIGH PRIORITY)...")
-    wubi_entries = load_wubi_dict(args.wubi)
+    wubi_entries = load_wubi_dict(args.wubi, jianma_table)
 
     print("\nStep 2: Loading Wubi character table...")
     char_table = load_wubi_char_table(args.wubi)

@@ -133,8 +133,28 @@ class DictionaryEngine {
 
         for (_, text, wubiCode, pinyinCode, _) in favorites {
             // Try to find the entry in database
-            guard let entry = db.getEntryByText(text: text) else {
-                NSLog("MarmotIM: ensureUserFavoritesIndexed - entry not found for text: %@", text)
+            var entry = db.getEntryByText(text: text)
+            
+            // If entry doesn't exist, create it (Fix for Issue 2: User entries not loading)
+            if entry == nil {
+                // Prioritize wubi code for creation if available, as it's more specific
+                if let wubi = wubiCode, !wubi.isEmpty {
+                    if let newId = addUserEntry(code: wubi, text: text, isWubi: true) {
+                        entry = db.getEntry(id: newId)
+                        NSLog("MarmotIM: ensureUserFavoritesIndexed - created missing entry for '%@' (id: %u)", text, newId)
+                        fixedCount += 1
+                    }
+                } else if let pinyin = pinyinCode, !pinyin.isEmpty {
+                    if let newId = addUserEntry(code: pinyin, text: text, isWubi: false) {
+                        entry = db.getEntry(id: newId)
+                        NSLog("MarmotIM: ensureUserFavoritesIndexed - created missing entry for '%@' (id: %u)", text, newId)
+                        fixedCount += 1
+                    }
+                }
+            }
+            
+            guard let validEntry = entry else {
+                NSLog("MarmotIM: ensureUserFavoritesIndexed - failed to find or create entry for text: %@", text)
                 continue
             }
 
@@ -144,9 +164,9 @@ class DictionaryEngine {
                 let existingInTrie = findExistingEntry(text: text, code: code, isWubi: true)
                 if existingInTrie == nil {
                     // Not indexed - add to index and trie
-                    _ = db.insertWubiIndex(code: code, entryId: entry.id)
-                    wubiTrie.insert(code: code, entryId: entry.id)
-                    NSLog("MarmotIM: ensureUserFavoritesIndexed - added wubi index for '%@' code='%@' (id: %u)", text, code, entry.id)
+                    _ = db.insertWubiIndex(code: code, entryId: validEntry.id)
+                    wubiTrie.insert(code: code, entryId: validEntry.id)
+                    NSLog("MarmotIM: ensureUserFavoritesIndexed - added wubi index for '%@' code='%@' (id: %u)", text, code, validEntry.id)
                     fixedCount += 1
                 }
             }
@@ -157,9 +177,9 @@ class DictionaryEngine {
                 let existingInTrie = findExistingEntry(text: text, code: code, isWubi: false)
                 if existingInTrie == nil {
                     // Not indexed - add to index and trie
-                    _ = db.insertPinyinIndex(code: code, entryId: entry.id)
-                    pinyinTrie.insert(code: code, entryId: entry.id)
-                    NSLog("MarmotIM: ensureUserFavoritesIndexed - added pinyin index for '%@' code='%@' (id: %u)", text, code, entry.id)
+                    _ = db.insertPinyinIndex(code: code, entryId: validEntry.id)
+                    pinyinTrie.insert(code: code, entryId: validEntry.id)
+                    NSLog("MarmotIM: ensureUserFavoritesIndexed - added pinyin index for '%@' code='%@' (id: %u)", text, code, validEntry.id)
                     fixedCount += 1
                 }
             }
@@ -564,6 +584,7 @@ class DictionaryEngine {
 
         // 3. 记录到 user_favorites 表（用于在设置中显示用户入库的词条）
         if result.success {
+            // 注意：addUserFavorite 会重置 is_deleted=0，所以如果是之前删除过的词条，这里会复活
             _ = db.addUserFavorite(text: text, wubiCode: wubiCode, pinyinCode: pinyinCode)
             NSLog("MarmotIM: addDualEntry - added to user_favorites")
         }
@@ -683,10 +704,22 @@ class DictionaryEngine {
                 NSLog("MarmotIM: removeDualEntry - pinyin entry not found for code '%@'", code)
             }
         }
-
-        // 从 user_favorites 表中也删除
+        
+        // 3. 从 user_favorites 表中软删除 (设置 is_deleted = 1)
         _ = db.removeUserFavorite(text: text)
-        NSLog("MarmotIM: removeDualEntry - removed from user_favorites")
+        NSLog("MarmotIM: removeDualEntry - removed from user_favorites (soft delete)")
+        
+        // 4. CRITICAL FIX: 立即从当前内存 Trie 树中移除所有相关索引
+        // 即使 findExistingEntry 没有找到具体的 ID（可能因为编码参数不全），我们也应该
+        // 尝试通过文本反查 ID，并从内存中清理，确保即时生效。
+        if let entry = db.getEntryByText(text: text) {
+             // 只有用户词条才应该被完全移除
+             if entry.id >= DictionaryEngine.userDictStartId {
+                 // 再次确认移除，防止上面的逻辑漏网
+                 removeUserEntry(entryId: entry.id)
+                 NSLog("MarmotIM: removeDualEntry - force removed from cache/trie by text lookup (id: %u)", entry.id)
+             }
+        }
 
         NSLog("MarmotIM: removeDualEntry complete - %@", result.description)
         return result

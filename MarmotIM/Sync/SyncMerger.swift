@@ -131,7 +131,8 @@ struct SyncMerger {
             if let orig = original[key] {
                 if record.addedTimestamp != orig.addedTimestamp ||
                    record.wubiCode != orig.wubiCode ||
-                   record.pinyinCode != orig.pinyinCode {
+                   record.pinyinCode != orig.pinyinCode ||
+                   record.isDeleted != orig.isDeleted {
                     changed.append((key, record))
                 }
             } else {
