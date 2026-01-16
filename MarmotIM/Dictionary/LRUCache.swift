@@ -1,6 +1,6 @@
 import Foundation
 
-/// Thread-safe LRU cache with fixed maximum size
+/// LRU cache with fixed maximum size
 /// Evicts least recently used entries when capacity is reached
 struct LRUCache<Key: Hashable, Value> {
 
