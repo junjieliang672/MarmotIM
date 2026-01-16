@@ -1,0 +1,28 @@
+{
+  "configurations" : [
+    {
+      "id" : "E3BE1A22-01EC-4B14-9DD7-0EA6B1ECB857",
+      "name" : "Configuration 1",
+      "options" : {
+
+      }
+    }
+  ],
+  "defaultOptions" : {
+    "targetForVariableExpansion" : {
+      "containerPath" : "container:MarmotIM.xcodeproj",
+      "identifier" : "2B0D67AC2F187B02008AAC6E",
+      "name" : "MarmotIMTests"
+    }
+  },
+  "testTargets" : [
+    {
+      "target" : {
+        "containerPath" : "container:MarmotIM.xcodeproj",
+        "identifier" : "2B0D67AC2F187B02008AAC6E",
+        "name" : "MarmotIMTests"
+      }
+    }
+  ],
+  "version" : 1
+}
