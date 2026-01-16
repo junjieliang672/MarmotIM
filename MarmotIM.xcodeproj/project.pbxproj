@@ -7,18 +7,22 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		942FAF62E27825F3C56D93D3 /* CompactIndex.swift in Sources */ = {isa = PBXBuildFile; fileRef = F42251310BC5680321494D60 /* CompactIndex.swift */; };
 		96D86D02279F29A2CCB3451E /* MarmotLogoView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8614B2A644D450D6AF22833E /* MarmotLogoView.swift */; };
 		A4A9314E072C1845129A0515 /* VisualEffectView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 82937A1A9F7D91EE509602A3 /* VisualEffectView.swift */; };
 		ABOUTVIEW_SWIFT /* AboutView.swift in Sources */ = {isa = PBXBuildFile; fileRef = ABOUTVIEW_SWIFT_REF /* AboutView.swift */; };
 		APPCONFIG_SWIFT /* AppConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = APPCONFIG_SWIFT_REF /* AppConfig.swift */; };
 		APPDELEGATE_SWIFT /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = APPDELEGATE_SWIFT_REF /* AppDelegate.swift */; };
 		ASSETS_BUILD /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = ASSETS_REF /* Assets.xcassets */; };
+		B5A0FC3FC4AF28737AB0B27D /* LRUCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1610DB0D2564315AA141A20A /* LRUCache.swift */; };
 		BASICSETTINGS_SWIFT /* BasicSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BASICSETTINGS_SWIFT_REF /* BasicSettingsView.swift */; };
 		CANDIDATEWIN_SWIFT /* CandidateWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = CANDIDATEWIN_SWIFT_REF /* CandidateWindow.swift */; };
+		CD79C8E494C4295842A8153C /* UserTierIndex.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2E829BD9C75CF11CD1945BC6 /* UserTierIndex.swift */; };
 		CHARTOPINYIN_JSON /* char_to_pinyin.json in Resources */ = {isa = PBXBuildFile; fileRef = CHARTOPINYIN_JSON_REF /* char_to_pinyin.json */; };
 		CHARTOWUBI_JSON /* char_to_wubi.json in Resources */ = {isa = PBXBuildFile; fileRef = CHARTOWUBI_JSON_REF /* char_to_wubi.json */; };
 		DICTENGINE_SWIFT /* DictionaryEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = DICTENGINE_SWIFT_REF /* DictionaryEngine.swift */; };
 		DICTENTRY_SWIFT /* DictionaryEntry.swift in Sources */ = {isa = PBXBuildFile; fileRef = DICTENTRY_SWIFT_REF /* DictionaryEntry.swift */; };
+		F5FE4749BE7140CABCCD842A /* HotTierIndex.swift in Sources */ = {isa = PBXBuildFile; fileRef = 65A3A4EBE7E620D359EA4DA0 /* HotTierIndex.swift */; };
 		FRECENCY_SWIFT /* FrecencyScore.swift in Sources */ = {isa = PBXBuildFile; fileRef = FRECENCY_SWIFT_REF /* FrecencyScore.swift */; };
 		ICLOUDSYNCMGR_SWIFT /* iCloudSyncManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = ICLOUDSYNCMGR_SWIFT_REF /* iCloudSyncManager.swift */; };
 		IMPORTEXPORT_SWIFT /* ImportExportView.swift in Sources */ = {isa = PBXBuildFile; fileRef = IMPORTEXPORT_SWIFT_REF /* ImportExportView.swift */; };
@@ -45,6 +49,9 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		1610DB0D2564315AA141A20A /* LRUCache.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = LRUCache.swift; path = LRUCache.swift; sourceTree = "<group>"; };
+		2E829BD9C75CF11CD1945BC6 /* UserTierIndex.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = UserTierIndex.swift; path = UserTierIndex.swift; sourceTree = "<group>"; };
+		65A3A4EBE7E620D359EA4DA0 /* HotTierIndex.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = HotTierIndex.swift; path = HotTierIndex.swift; sourceTree = "<group>"; };
 		82937A1A9F7D91EE509602A3 /* VisualEffectView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = VisualEffectView.swift; sourceTree = "<group>"; };
 		8614B2A644D450D6AF22833E /* MarmotLogoView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MarmotLogoView.swift; sourceTree = "<group>"; };
 		ABOUTVIEW_SWIFT_REF /* AboutView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AboutView.swift; sourceTree = "<group>"; };
@@ -59,6 +66,7 @@
 		DICTENGINE_SWIFT_REF /* DictionaryEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DictionaryEngine.swift; sourceTree = "<group>"; };
 		DICTENTRY_SWIFT_REF /* DictionaryEntry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DictionaryEntry.swift; sourceTree = "<group>"; };
 		ENTITLEMENTS_REF /* MarmotIM.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = MarmotIM.entitlements; sourceTree = "<group>"; };
+		F42251310BC5680321494D60 /* CompactIndex.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = CompactIndex.swift; path = CompactIndex.swift; sourceTree = "<group>"; };
 		FRECENCY_SWIFT_REF /* FrecencyScore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FrecencyScore.swift; sourceTree = "<group>"; };
 		ICLOUDSYNCMGR_SWIFT_REF /* iCloudSyncManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = iCloudSyncManager.swift; sourceTree = "<group>"; };
 		IMPORTEXPORT_SWIFT_REF /* ImportExportView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImportExportView.swift; sourceTree = "<group>"; };
@@ -116,6 +124,10 @@
 				VOCABDB_SWIFT_REF /* VocabularyDatabase.swift */,
 				PRELOAD_SWIFT_REF /* DictionaryPreloadService.swift */,
 				REVERSELOOKUP_SWIFT_REF /* ReverseLookupTable.swift */,
+				F42251310BC5680321494D60 /* CompactIndex.swift */,
+				1610DB0D2564315AA141A20A /* LRUCache.swift */,
+				65A3A4EBE7E620D359EA4DA0 /* HotTierIndex.swift */,
+				2E829BD9C75CF11CD1945BC6 /* UserTierIndex.swift */,
 			);
 			path = Dictionary;
 			sourceTree = "<group>";
@@ -341,6 +353,10 @@
 				ICLOUDSYNCMGR_SWIFT /* iCloudSyncManager.swift in Sources */,
 				96D86D02279F29A2CCB3451E /* MarmotLogoView.swift in Sources */,
 				A4A9314E072C1845129A0515 /* VisualEffectView.swift in Sources */,
+				942FAF62E27825F3C56D93D3 /* CompactIndex.swift in Sources */,
+				B5A0FC3FC4AF28737AB0B27D /* LRUCache.swift in Sources */,
+				F5FE4749BE7140CABCCD842A /* HotTierIndex.swift in Sources */,
+				CD79C8E494C4295842A8153C /* UserTierIndex.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

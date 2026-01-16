@@ -34,14 +34,14 @@ class DictionaryEngine {
     /// Database for persistent storage
     private let db = VocabularyDatabase.shared
 
-    /// Pinyin code Trie for fast prefix matching
-    private let pinyinTrie = PrefixTrie()
+    /// Hot tier index for system dictionary (compact, memory-efficient)
+    private var hotTierIndex = HotTierIndex()
 
-    /// Wubi code Trie for fast prefix matching
-    private let wubiTrie = PrefixTrie()
+    /// User tier index for user-added entries (supports instant add/remove)
+    private let userTierIndex = UserTierIndex()
 
-    /// In-memory cache of entries (LRU-style, loaded on demand)
-    private var entriesCache: [UInt32: DictionaryEntry] = [:]
+    /// In-memory LRU cache of entries (bounded size)
+    private var entriesCache = LRUCache<UInt32, DictionaryEntry>(maxSize: 10000)
 
     /// User learning data cache
     private var userLearningCache: [UInt32: UserEntryData] = [:]
@@ -74,12 +74,12 @@ class DictionaryEngine {
     /// Initialize with provided entries (for testing)
     init(entries: [DictionaryEntry]) throws {
         for entry in entries {
-            entriesCache[entry.id] = entry
+            entriesCache.set(entry.id, value: entry)
             if !entry.pinyin.isEmpty {
-                pinyinTrie.insert(code: entry.pinyin, entryId: entry.id)
+                userTierIndex.insert(code: entry.pinyin, entryId: entry.id, codeType: .pinyin)
             }
             if let wubi = entry.wubi {
-                wubiTrie.insert(code: wubi, entryId: entry.id)
+                userTierIndex.insert(code: wubi, entryId: entry.id, codeType: .wubi)
             }
         }
         isPreloaded = true
@@ -88,16 +88,14 @@ class DictionaryEngine {
 
     // MARK: - Preloading (called by DictionaryPreloadService)
 
-    /// Bulk load pinyin indexes into Trie
+    /// Bulk load pinyin indexes into hot tier
     func bulkLoadPinyinIndexes(_ indexes: [(code: String, entryId: UInt32)]) {
-        pinyinTrie.bulkInsert(indexes)
-        NSLog("MarmotIM: Loaded \(pinyinTrie.codeCount) pinyin codes")
+        hotTierIndex.loadPinyinIndexes(indexes)
     }
 
-    /// Bulk load wubi indexes into Trie
+    /// Bulk load wubi indexes into hot tier
     func bulkLoadWubiIndexes(_ indexes: [(code: String, entryId: UInt32)]) {
-        wubiTrie.bulkInsert(indexes)
-        NSLog("MarmotIM: Loaded \(wubiTrie.codeCount) wubi codes")
+        hotTierIndex.loadWubiIndexes(indexes)
     }
 
     /// Load user learning data into cache
@@ -118,8 +116,10 @@ class DictionaryEngine {
 
     /// Finalize preloading
     func finalizePreload() {
+        hotTierIndex.finalizePreload()
         isPreloaded = true
-        NSLog("MarmotIM: Preload finalized - pinyinTrie: \(pinyinTrie.codeCount) codes, wubiTrie: \(wubiTrie.codeCount) codes")
+        let stats = hotTierIndex.statistics
+        NSLog("MarmotIM: Preload finalized - hotTier: pinyin=\(stats.pinyinCodes), wubi=\(stats.wubiCodes)")
     }
 
     /// Ensure all user_favorites entries are properly indexed
@@ -160,12 +160,12 @@ class DictionaryEngine {
 
             // Check and fix wubi index
             if let code = wubiCode, !code.isEmpty, code.count <= 4 {
-                // Check if already in trie
+                // Check if already indexed
                 let existingInTrie = findExistingEntry(text: text, code: code, isWubi: true)
                 if existingInTrie == nil {
-                    // Not indexed - add to index and trie
+                    // Not indexed - add to index and userTierIndex
                     _ = db.insertWubiIndex(code: code, entryId: validEntry.id)
-                    wubiTrie.insert(code: code, entryId: validEntry.id)
+                    userTierIndex.insert(code: code, entryId: validEntry.id, codeType: .wubi)
                     NSLog("MarmotIM: ensureUserFavoritesIndexed - added wubi index for '%@' code='%@' (id: %u)", text, code, validEntry.id)
                     fixedCount += 1
                 }
@@ -173,12 +173,12 @@ class DictionaryEngine {
 
             // Check and fix pinyin index
             if let code = pinyinCode, !code.isEmpty {
-                // Check if already in trie
+                // Check if already indexed
                 let existingInTrie = findExistingEntry(text: text, code: code, isWubi: false)
                 if existingInTrie == nil {
-                    // Not indexed - add to index and trie
+                    // Not indexed - add to index and userTierIndex
                     _ = db.insertPinyinIndex(code: code, entryId: validEntry.id)
-                    pinyinTrie.insert(code: code, entryId: validEntry.id)
+                    userTierIndex.insert(code: code, entryId: validEntry.id, codeType: .pinyin)
                     NSLog("MarmotIM: ensureUserFavoritesIndexed - added pinyin index for '%@' code='%@' (id: %u)", text, code, validEntry.id)
                     fixedCount += 1
                 }
@@ -191,7 +191,7 @@ class DictionaryEngine {
     // MARK: - Search
 
     /// Search for entries matching the given code
-    /// Uses Trie for O(k) prefix matching
+    /// Uses tiered architecture: user tier first, then hot tier
     ///
     /// - Parameters:
     ///   - code: The input code (can be pinyin or wubi)
@@ -214,23 +214,23 @@ class DictionaryEngine {
         var matchInfos: [(entryId: UInt32, matchedCode: String, codeType: InputCodeType)] = []
         var seenEntryIds = Set<UInt32>()
 
-        // Search wubi Trie (exact and prefix matches)
-        let wubiResults = wubiTrie.search(prefix: code, limit: limit * 2)
-        for (matchedCode, entryIds) in wubiResults {
-            for entryId in entryIds {
+        // TIER 1: User tier first (user entries get priority)
+        let userResults = userTierIndex.search(prefix: code, limit: limit * 2)
+        for result in userResults {
+            for entryId in result.entryIds {
                 guard !seenEntryIds.contains(entryId) else { continue }
                 seenEntryIds.insert(entryId)
-                matchInfos.append((entryId, matchedCode, .wubi))
+                matchInfos.append((entryId, result.code, result.codeType))
             }
         }
 
-        // Search pinyin Trie (exact and prefix matches)
-        let pinyinResults = pinyinTrie.search(prefix: code, limit: limit * 2)
-        for (matchedCode, entryIds) in pinyinResults {
-            for entryId in entryIds {
+        // TIER 2: Hot tier
+        let hotResults = hotTierIndex.search(prefix: code, limit: limit * 2)
+        for result in hotResults {
+            for entryId in result.entryIds {
                 guard !seenEntryIds.contains(entryId) else { continue }
                 seenEntryIds.insert(entryId)
-                matchInfos.append((entryId, matchedCode, .pinyin))
+                matchInfos.append((entryId, result.code, result.codeType))
             }
         }
 
@@ -319,7 +319,7 @@ class DictionaryEngine {
     /// Get entry by ID (from cache or database)
     func getEntry(id: UInt32) -> DictionaryEntry? {
         cacheLock.lock()
-        if let cached = entriesCache[id] {
+        if let cached = entriesCache.get(id) {
             cacheLock.unlock()
             return cached
         }
@@ -328,7 +328,7 @@ class DictionaryEngine {
         // Fetch from database
         if let entry = db.getEntry(id: id) {
             cacheLock.lock()
-            entriesCache[id] = entry
+            entriesCache.set(id, value: entry)
             cacheLock.unlock()
             return entry
         }
@@ -343,7 +343,7 @@ class DictionaryEngine {
 
         cacheLock.lock()
         for id in ids {
-            if let cached = entriesCache[id] {
+            if let cached = entriesCache.get(id) {
                 results[id] = cached
             } else {
                 uncachedIds.append(id)
@@ -356,7 +356,7 @@ class DictionaryEngine {
             let fetched = db.getEntries(ids: uncachedIds)
             cacheLock.lock()
             for (id, entry) in fetched {
-                entriesCache[id] = entry
+                entriesCache.set(id, value: entry)
                 results[id] = entry
             }
             cacheLock.unlock()
@@ -463,16 +463,16 @@ class DictionaryEngine {
             _ = db.insertPinyinIndex(code: code, entryId: entryId)
         }
 
-        // Update Trie immediately (available for next search)
+        // Update userTierIndex immediately (available for next search)
         if isWubi {
-            wubiTrie.insert(code: code, entryId: entryId)
+            userTierIndex.insert(code: code, entryId: entryId, codeType: .wubi)
         } else {
-            pinyinTrie.insert(code: code, entryId: entryId)
+            userTierIndex.insert(code: code, entryId: entryId, codeType: .pinyin)
         }
 
         // Add to cache
         cacheLock.lock()
-        entriesCache[entryId] = entry
+        entriesCache.set(entryId, value: entry)
         cacheLock.unlock()
 
         NSLog("MarmotIM: Added user entry '\(text)' with code '\(code)' (id: \(entryId), baseFreq: \(baseFrequency))")
@@ -537,9 +537,9 @@ class DictionaryEngine {
                 // 词条存在但未在五笔索引中，添加索引
                 result.wubiEntryId = existingEntry.id
                 result.wubiWasExisting = true
-                // Add to wubi index and trie
+                // Add to wubi index and userTierIndex
                 _ = db.insertWubiIndex(code: code, entryId: existingEntry.id)
-                wubiTrie.insert(code: code, entryId: existingEntry.id)
+                userTierIndex.insert(code: code, entryId: existingEntry.id, codeType: .wubi)
                 recordSelection(entryId: existingEntry.id, baseFrequency: 35000)
                 NSLog("MarmotIM: addDualEntry - added existing entry to wubi index (id: %u, code: %@)", existingEntry.id, code)
             } else {
@@ -566,9 +566,9 @@ class DictionaryEngine {
                 // 词条存在但未在拼音索引中，添加索引
                 result.pinyinEntryId = existingEntry.id
                 result.pinyinWasExisting = true
-                // Add to pinyin index and trie
+                // Add to pinyin index and userTierIndex
                 _ = db.insertPinyinIndex(code: code, entryId: existingEntry.id)
-                pinyinTrie.insert(code: code, entryId: existingEntry.id)
+                userTierIndex.insert(code: code, entryId: existingEntry.id, codeType: .pinyin)
                 recordSelection(entryId: existingEntry.id, baseFrequency: 65000)
                 NSLog("MarmotIM: addDualEntry - added existing entry to pinyin index (id: %u, code: %@)", existingEntry.id, code)
             } else {
@@ -733,16 +733,26 @@ class DictionaryEngine {
     ///   - isWubi: 是否是五笔编码
     /// - Returns: 已存在词条的ID，如果不存在则返回nil
     private func findExistingEntry(text: String, code: String, isWubi: Bool) -> UInt32? {
-        // 搜索该编码
-        let trie = isWubi ? wubiTrie : pinyinTrie
-        let results = trie.search(prefix: code, limit: 200)
+        let codeType: InputCodeType = isWubi ? .wubi : .pinyin
 
-        // 查找完全匹配的词条（编码完全匹配 + 文本完全匹配）
-        for (matchedCode, entryIds) in results {
-            // 编码必须完全匹配
-            guard matchedCode == code else { continue }
+        // Search user tier first
+        let userResults = userTierIndex.search(prefix: code, limit: 200)
+        for result in userResults {
+            guard result.code == code else { continue }
+            guard result.codeType == codeType else { continue }
+            for entryId in result.entryIds {
+                if let entry = getEntry(id: entryId), entry.text == text {
+                    return entryId
+                }
+            }
+        }
 
-            for entryId in entryIds {
+        // Search hot tier
+        let hotResults = hotTierIndex.search(prefix: code, limit: 200)
+        for result in hotResults {
+            guard result.code == code else { continue }
+            guard result.codeType == codeType else { continue }
+            for entryId in result.entryIds {
                 if let entry = getEntry(id: entryId), entry.text == text {
                     return entryId
                 }
@@ -779,17 +789,17 @@ class DictionaryEngine {
             return false
         }
 
-        // Remove from Trie
+        // Remove from userTierIndex
         if !entry.pinyin.isEmpty {
-            pinyinTrie.remove(code: entry.pinyin, entryId: entryId)
+            userTierIndex.remove(code: entry.pinyin, entryId: entryId, codeType: .pinyin)
         }
         if let wubi = entry.wubi {
-            wubiTrie.remove(code: wubi, entryId: entryId)
+            userTierIndex.remove(code: wubi, entryId: entryId, codeType: .wubi)
         }
 
         // Remove from cache
         cacheLock.lock()
-        entriesCache.removeValue(forKey: entryId)
+        entriesCache.remove(entryId)
         userLearningCache.removeValue(forKey: entryId)
         cacheLock.unlock()
 
@@ -852,11 +862,13 @@ class DictionaryEngine {
 
     // MARK: - Statistics
 
-    /// Get Trie statistics for debugging
+    /// Get index statistics for debugging (combines hot tier and user tier)
     var trieStatistics: (pinyin: (codes: Int, entries: Int), wubi: (codes: Int, entries: Int)) {
+        let hotStats = hotTierIndex.statistics
+        let userStats = userTierIndex.statistics
         return (
-            (pinyinTrie.codeCount, pinyinTrie.entryCount),
-            (wubiTrie.codeCount, wubiTrie.entryCount)
+            (hotStats.pinyinCodes + userStats.pinyinCodes, hotStats.pinyinEntries),
+            (hotStats.wubiCodes + userStats.wubiCodes, hotStats.wubiEntries)
         )
     }
 
