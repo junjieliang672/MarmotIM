@@ -154,7 +154,16 @@ final class VocabularyDatabase {
         // Use FULL synchronous to ensure data survives process termination (pkill)
         // This is critical because quick_update.sh uses pkill to stop the app
         executeSQL("PRAGMA synchronous=FULL")
-        executeSQL("PRAGMA cache_size=-64000")  // 64MB cache
+
+        // Enable memory-mapped I/O for the database
+        // This allows the OS to manage page caching efficiently
+        // 1GB mmap size covers the entire dictionary.db
+        executeSQL("PRAGMA mmap_size=1073741824")
+
+        // Reduce SQLite's internal page cache since mmap handles caching
+        // 8MB is enough for write operations and non-mmap fallback
+        executeSQL("PRAGMA cache_size=-8000")  // 8MB cache (reduced from 64MB)
+
         executeSQL("PRAGMA temp_store=MEMORY")
 
         // Enable foreign keys
