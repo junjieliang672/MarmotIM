@@ -327,6 +327,34 @@ final class CandidateRankerTests: XCTestCase {
         XCTAssertEqual(candidates[0].text, "甲", "3码时1字词应该优先")
     }
 
+    /// Test 3.4: 4码完全匹配 - 基础分相等时频率分决定排名
+    /// Scenario: "eset" → "彩"(1字,44861) vs "采用"(2字,34861)
+    /// Base + ShortWord: 彩=44861+40000=84861, 采用=34861+50000=84861 (相等!)
+    /// 此时频率分(accessCount)应该决定排名
+    func testWubi4Char_EqualBaseScore_FrequencyWins() {
+        // 模拟 "eset" 场景: 彩 vs 采用
+        let cai = makeEntry(id: 16095, text: "彩", wubi: "eset", wubiBaseFrequency: 44861, length: 1)
+        let caiyong = makeEntry(id: 16097, text: "采用", wubi: "eset", wubiBaseFrequency: 34861, length: 2)
+
+        // "采用" 被选择更多次 (7次 vs 6次)
+        let now = UInt32(Date().timeIntervalSince1970) - 100  // 稍早以便频率分主导
+        engine.setUserLearning(entryId: 16095, accessCount: 6, lastAccessTimestamp: now + 1)  // 彩
+        engine.setUserLearning(entryId: 16097, accessCount: 7, lastAccessTimestamp: now)       // 采用
+
+        let matches = [
+            makeMatch(entry: cai, matchedCode: "eset", matchType: .full, codeType: .wubi),
+            makeMatch(entry: caiyong, matchedCode: "eset", matchType: .full, codeType: .wubi),
+        ]
+
+        let candidates = rankMatches(matches, inputCode: "eset")
+
+        // 虽然 "彩" 的 recency 稍高 (1秒差距约8K分)
+        // 但 "采用" 的频率分高 5M (7×5M - 6×5M)
+        // 所以 "采用" 应该排第一
+        XCTAssertEqual(candidates[0].text, "采用", "频率分更高的词应该排第一")
+        XCTAssertEqual(candidates[1].text, "彩", "频率分更低的词应该排第二")
+    }
+
     // MARK: - Part 4: Frecency Behavior Tests
 
     /// Test 4.1: 刚选择的词在层级内排第一
