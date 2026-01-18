@@ -1275,10 +1275,12 @@ def main():
             emoji_path = os.path.join(base_dir, 'emoji_table.txt')
 
     # Load each extra dictionary
+    # NOTE: en_table.txt is NOT loaded here because:
+    # 1. English words are not pinyin - they shouldn't be in the pinyin index
+    # 2. en_table.txt is loaded separately by DictionaryEngine.loadEnglishWords()
+    #    into englishWordIndex with correct codeType=.english
     if cn_en_path:
         extra_entries.extend(load_extra_pinyin_dict(cn_en_path, char_table, 'cn_en'))
-    if en_path:
-        extra_entries.extend(load_extra_pinyin_dict(en_path, char_table, 'en'))
     if emoji_path:
         extra_entries.extend(load_extra_pinyin_dict(emoji_path, char_table, 'emoji'))
 

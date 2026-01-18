@@ -410,11 +410,15 @@ class DictionaryEngine {
             results.append(contentsOf: prefixPinyinMatches.prefix(pinyinSlots))
         }
 
-        // 添加英文完全匹配（如果存在且不重复）
+        // 添加英文完全匹配
+        // 如果已存在相同文本的候选词（可能是历史数据中错误存储为pinyin的英文词），
+        // 用正确的 English match 替换，确保显示正确的 "en" 指示器
         if let englishMatch = searchEnglishExact(code: code) {
-            // 检查是否已存在相同文本的候选词
             let englishText = englishMatch.entry.text
-            if !results.contains(where: { $0.entry.text == englishText }) {
+            if let existingIndex = results.firstIndex(where: { $0.entry.text == englishText }) {
+                // 替换已存在的条目（优先使用正确的 codeType=.english）
+                results[existingIndex] = englishMatch
+            } else {
                 results.append(englishMatch)
             }
         }
