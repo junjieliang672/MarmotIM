@@ -10,7 +10,7 @@ import Foundation
 ///
 /// ### Regular Tiers (CAN be overridden by tierOverrideBoost):
 /// When input length <= 4 (Wubi-priority mode):
-/// - Tier 1: Full Wubi match (+100B) - 3-4 character codes
+/// - Tier 1: Full Wubi match / Full English match (+100B) - 3-4 character codes or exact English word
 /// - Tier 2: Full Pinyin match (+10B)
 /// - Tier 3: Prefix Wubi match (+1B)
 /// - Tier 4: Prefix Pinyin match (0)
@@ -191,6 +191,7 @@ struct CandidateRanker {
     ) -> Double {
         let isFullMatch = match.matchType == .full
         let isWubiCode = match.codeType == .wubi
+        let isEnglishCode = match.codeType == .english
         let inputLength = inputCode.count
 
         // Check for Protected Tier (jianma) using jianma table
@@ -205,6 +206,11 @@ struct CandidateRanker {
                     return jianmaLevel2Bonus  // P1: 二级简码
                 }
             }
+        }
+
+        // English full match -> Tier 1 (same as Wubi full match)
+        if isFullMatch && isEnglishCode {
+            return tier1Bonus
         }
 
         if inputLength <= 4 {
