@@ -305,7 +305,7 @@ struct CandidateItemView: View {
     let theme: TerminalHybridTheme
 
     /// Determine the indicator label based on candidate properties
-    /// Priority: bo > jm > wb/py
+    /// Priority: bo > jm > wb/py/en
     private var indicatorLabel: String {
         // "bo" only shows for #1 candidate that was boosted
         if candidate.isBoosted && index == 1 {
@@ -316,7 +316,11 @@ struct CandidateItemView: View {
             return "jm"
         }
         // Default: show code type
-        return candidate.codeType == .pinyin ? "py" : "wb"
+        switch candidate.codeType {
+        case .pinyin: return "py"
+        case .wubi: return "wb"
+        case .english: return "en"
+        }
     }
 
     var body: some View {
