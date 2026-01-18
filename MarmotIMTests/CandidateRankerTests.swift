@@ -646,4 +646,169 @@ final class CandidateRankerTests: XCTestCase {
         candidates = rankMatches(matches, inputCode: "kham")
         XCTAssertEqual(candidates[0].text, "唬", "选择 '唬' 后：用户选择应被尊重")
     }
+
+    // MARK: - Part 8: English Tier Tests
+    //
+    // English full match is at Tier 1 (same as Wubi full match, +100B)
+    // P0/P1 protected tier still ranks above English
+
+    /// Test 8.1: English full match gets Tier 1 bonus
+    func testEnglish_FullMatch_GetsTier1Bonus() {
+        // English word "hello"
+        let englishEntry = makeEntry(id: 1, text: "hello", pinyin: "hello")
+        let englishMatch = makeMatch(entry: englishEntry, matchedCode: "hello", matchType: .full, codeType: .english)
+
+        let tierBonus = CandidateRanker.getTierBonus(match: englishMatch, inputCode: "hello", engine: engine)
+
+        XCTAssertEqual(tierBonus, CandidateRanker.tier1Bonus, "English full match should get tier1Bonus")
+    }
+
+    /// Test 8.2: P0 (一级简码) ranks above English
+    func testEnglish_P0_RanksAboveEnglish() {
+        // "a" is a P0 jianma for "工"
+        engine.addJianmaEntry(code: "a", text: "工")
+
+        let gong = makeEntry(id: 1, text: "工", wubi: "a", wubiBaseFrequency: 65000)
+        let englishA = makeEntry(id: 2, text: "a", pinyin: "a")
+
+        let matches = [
+            makeMatch(entry: gong, matchedCode: "a", matchType: .full, codeType: .wubi),
+            makeMatch(entry: englishA, matchedCode: "a", matchType: .full, codeType: .english),
+        ]
+
+        let candidates = rankMatches(matches, inputCode: "a")
+        XCTAssertEqual(candidates[0].text, "工", "P0 '工' should rank above English 'a'")
+    }
+
+    /// Test 8.3: P1 (二级简码) ranks above English
+    func testEnglish_P1_RanksAboveEnglish() {
+        // "we" is a P1 jianma for "我"
+        engine.addJianmaEntry(code: "we", text: "我")
+
+        let wo = makeEntry(id: 1, text: "我", wubi: "we", wubiBaseFrequency: 55000)
+        let englishWe = makeEntry(id: 2, text: "we", pinyin: "we")
+
+        let matches = [
+            makeMatch(entry: wo, matchedCode: "we", matchType: .full, codeType: .wubi),
+            makeMatch(entry: englishWe, matchedCode: "we", matchType: .full, codeType: .english),
+        ]
+
+        let candidates = rankMatches(matches, inputCode: "we")
+        XCTAssertEqual(candidates[0].text, "我", "P1 '我' should rank above English 'we'")
+    }
+
+    /// Test 8.4: English ranks same as Wubi full match (Tier 1)
+    func testEnglish_SameTierAsWubiFullMatch() {
+        // No jianma protection, so wubi full match and english should compete on Frecency
+        let wubiEntry = makeEntry(id: 1, text: "好", wubi: "test", wubiBaseFrequency: 35000)
+        let englishEntry = makeEntry(id: 2, text: "test", pinyin: "test", pinyinBaseFrequency: 50000)
+
+        let wubiMatch = makeMatch(entry: wubiEntry, matchedCode: "test", matchType: .full, codeType: .wubi)
+        let englishMatch = makeMatch(entry: englishEntry, matchedCode: "test", matchType: .full, codeType: .english)
+
+        let wubiBonus = CandidateRanker.getTierBonus(match: wubiMatch, inputCode: "test", engine: engine)
+        let englishBonus = CandidateRanker.getTierBonus(match: englishMatch, inputCode: "test", engine: engine)
+
+        XCTAssertEqual(wubiBonus, englishBonus, "Wubi full match and English full match should have same tier bonus")
+    }
+
+    /// Test 8.5: English ranks above Pinyin full match (Tier 1 > Tier 2)
+    func testEnglish_RanksAbovePinyinFullMatch() {
+        let pinyinEntry = makeEntry(id: 1, text: "你好", pinyin: "nihao", pinyinBaseFrequency: 60000)
+        let englishEntry = makeEntry(id: 2, text: "nihao", pinyin: "nihao", pinyinBaseFrequency: 50000)
+
+        let matches = [
+            makeMatch(entry: pinyinEntry, matchedCode: "niha", matchType: .full, codeType: .pinyin),
+            makeMatch(entry: englishEntry, matchedCode: "niha", matchType: .full, codeType: .english),
+        ]
+
+        let candidates = rankMatches(matches, inputCode: "niha")
+        // English tier1 (100B) > Pinyin tier2 (10B)
+        XCTAssertEqual(candidates[0].text, "nihao", "English should rank above Pinyin full match")
+    }
+
+    /// Test 8.6: English ranks above Wubi prefix match (Tier 1 > Tier 3)
+    func testEnglish_RanksAboveWubiPrefixMatch() {
+        let wubiEntry = makeEntry(id: 1, text: "你", wubi: "they", wubiBaseFrequency: 50000)
+        let englishEntry = makeEntry(id: 2, text: "the", pinyin: "the", pinyinBaseFrequency: 50000)
+
+        let matches = [
+            makeMatch(entry: wubiEntry, matchedCode: "the", matchType: .prefix, codeType: .wubi),
+            makeMatch(entry: englishEntry, matchedCode: "the", matchType: .full, codeType: .english),
+        ]
+
+        let candidates = rankMatches(matches, inputCode: "the")
+        XCTAssertEqual(candidates[0].text, "the", "English full match should rank above Wubi prefix match")
+    }
+
+    /// Test 8.7: Frecency can boost English within tier
+    func testEnglish_FrecencyCanBoostWithinTier() {
+        let wubiEntry = makeEntry(id: 1, text: "好", wubi: "test", wubiBaseFrequency: 50000)
+        let englishEntry = makeEntry(id: 2, text: "test", pinyin: "test", pinyinBaseFrequency: 30000)
+
+        // Give English entry a recent selection
+        let now = UInt32(Date().timeIntervalSince1970)
+        engine.setUserLearning(entryId: 2, accessCount: 1, lastAccessTimestamp: now)
+
+        let matches = [
+            makeMatch(entry: wubiEntry, matchedCode: "test", matchType: .full, codeType: .wubi),
+            makeMatch(entry: englishEntry, matchedCode: "test", matchType: .full, codeType: .english),
+        ]
+
+        let candidates = rankMatches(matches, inputCode: "test")
+        XCTAssertEqual(candidates[0].text, "test", "Recently selected English should rank first within same tier")
+    }
+
+    /// Test 8.8: English and Chinese can coexist in results
+    func testEnglish_CoexistsWithChinese() {
+        let wubiEntry = makeEntry(id: 1, text: "好", wubi: "hello", wubiBaseFrequency: 50000)
+        let pinyinEntry = makeEntry(id: 2, text: "你好", pinyin: "hello", pinyinBaseFrequency: 60000)
+        let englishEntry = makeEntry(id: 3, text: "hello", pinyin: "hello", pinyinBaseFrequency: 50000)
+
+        let matches = [
+            makeMatch(entry: wubiEntry, matchedCode: "hello", matchType: .full, codeType: .wubi),
+            makeMatch(entry: pinyinEntry, matchedCode: "hello", matchType: .full, codeType: .pinyin),
+            makeMatch(entry: englishEntry, matchedCode: "hello", matchType: .full, codeType: .english),
+        ]
+
+        let candidates = rankMatches(matches, inputCode: "hello")
+        XCTAssertEqual(candidates.count, 3, "All three candidates should be in results")
+
+        let texts = Set(candidates.map { $0.text })
+        XCTAssertTrue(texts.contains("好"), "Wubi entry should be present")
+        XCTAssertTrue(texts.contains("你好"), "Pinyin entry should be present")
+        XCTAssertTrue(texts.contains("hello"), "English entry should be present")
+    }
+
+    /// Test 8.9: Protected tier cannot be overridden by English boost
+    func testEnglish_ProtectedTierCannotBeOverridden() {
+        // "a" is P0 for "工"
+        engine.addJianmaEntry(code: "a", text: "工")
+
+        let gong = makeEntry(id: 1, text: "工", wubi: "a", wubiBaseFrequency: 65000)
+        let englishA = makeEntry(id: 2, text: "a", pinyin: "a")
+
+        // Give English maximum boost
+        let now = UInt32(Date().timeIntervalSince1970)
+        engine.setUserLearning(entryId: 2, accessCount: 10000, lastAccessTimestamp: now)
+
+        let matches = [
+            makeMatch(entry: gong, matchedCode: "a", matchType: .full, codeType: .wubi),
+            makeMatch(entry: englishA, matchedCode: "a", matchType: .full, codeType: .english),
+        ]
+
+        let candidates = rankMatches(matches, inputCode: "a")
+        XCTAssertEqual(candidates[0].text, "工", "P0 '工' should still rank first even with max English boost")
+    }
+
+    /// Test 8.10: Long code mode - English still gets Tier 1
+    func testEnglish_LongCodeMode_StillGetsTier1() {
+        // Input length > 4, long code mode
+        let englishEntry = makeEntry(id: 1, text: "hello", pinyin: "hello")
+        let englishMatch = makeMatch(entry: englishEntry, matchedCode: "hello", matchType: .full, codeType: .english)
+
+        let tierBonus = CandidateRanker.getTierBonus(match: englishMatch, inputCode: "hello", engine: engine)
+
+        XCTAssertEqual(tierBonus, CandidateRanker.tier1Bonus, "English full match in long code mode should still get tier1Bonus")
+    }
 }
