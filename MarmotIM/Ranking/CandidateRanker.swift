@@ -41,11 +41,20 @@ struct CandidateRanker {
 
     // MARK: - Tier Bonus Constants
 
-    /// Tier 0: Wubi 1-2级简码 (Protected tier - CANNOT be overridden)
-    /// This is set to 1T (1,000,000,000,000) which is higher than:
+    /// Protected Tier P0: 一级简码 (1-char jianma from jianma.txt)
+    /// This is set to 10T which is higher than:
+    /// - jianmaLevel2Bonus (1T) + tierOverrideBoost (500B) = ~1.5T
+    /// So 一级简码 will ALWAYS rank above 二级简码 regardless of user history.
+    static let jianmaLevel1Bonus: Double = 10_000_000_000_000
+
+    /// Protected Tier P1: 二级简码 (2-char jianma from jianma.txt)
+    /// This is set to 1T which is higher than:
     /// - tier1Bonus (100B) + tierOverrideBoost (500B) = 600B
-    /// So jiǎnmǎ will ALWAYS rank first regardless of user history.
-    static let jianmaTierBonus: Double = 1_000_000_000_000
+    /// So 二级简码 will ALWAYS rank above regular tiers regardless of user history.
+    static let jianmaLevel2Bonus: Double = 1_000_000_000_000
+
+    /// Legacy constant for backward compatibility
+    static let jianmaTierBonus: Double = jianmaLevel2Bonus
 
     /// Tier 1: Full Wubi (short) or Full (long) - highest regular priority
     static let tier1Bonus: Double = 100_000_000_000
@@ -75,8 +84,6 @@ struct CandidateRanker {
         inputCode: String,
         engine: DictionaryEngine
     ) -> [Candidate] {
-        let inputLength = inputCode.count
-
         // STEP 1: Deduplicate by text, preferring entries with user data
         // This fixes the bug where duplicate entries for the same word have different IDs
         var textToMatch: [String: (match: DictionaryMatch, userData: UserEntryData?)] = [:]
@@ -97,8 +104,8 @@ struct CandidateRanker {
                     // Existing has userData - keep existing
                 } else {
                     // Both have or both lack userData - prefer higher tier match
-                    let existingTier = getTierBonus(match: existing.match, inputLength: inputLength)
-                    let newTier = getTierBonus(match: match, inputLength: inputLength)
+                    let existingTier = getTierBonus(match: existing.match, inputCode: inputCode, engine: engine)
+                    let newTier = getTierBonus(match: match, inputCode: inputCode, engine: engine)
                     if newTier > existingTier {
                         textToMatch[text] = (match, userData)
                     }
@@ -116,7 +123,7 @@ struct CandidateRanker {
 
         for (_, (match, userData)) in textToMatch {
             // Calculate score components
-            let tierBonus = getTierBonus(match: match, inputLength: inputLength)
+            let tierBonus = getTierBonus(match: match, inputCode: inputCode, engine: engine)
             let timestamp = userData?.lastAccessTimestamp ?? 0
             let tierOverrideBoost = FrecencyScore.calculateTierOverrideBoost(lastAccessTimestamp: timestamp)
 
@@ -124,15 +131,13 @@ struct CandidateRanker {
             let score = calculateScore(
                 match: match,
                 userData: userData,
-                inputLength: inputLength
+                inputCode: inputCode,
+                engine: engine
             )
 
             // Determine if this is a jianma (protected wubi shortcode)
-            let isJianma = tierBonus == jianmaTierBonus
-            
-            if inputCode == "a" && (match.entry.text == "工" || match.entry.text == "戈") {
-                NSLog("MarmotIM DEBUG: Candidate '\(match.entry.text)' baseFreq=\(match.entry.baseFrequency(for: match.codeType)) tierBonus=\(tierBonus) isJianma=\(isJianma)")
-            }
+            // Protected tier includes both level 1 (10T) and level 2 (1T)
+            let isJianma = tierBonus >= jianmaLevel2Bonus
 
             let candidate = Candidate(from: match, score: score, isJianma: isJianma)
             candidates.append(candidate)
@@ -172,25 +177,34 @@ struct CandidateRanker {
 
     // MARK: - Tier Calculation
 
-    /// Determine tier bonus based on match type, code type, and input length
+    /// Determine tier bonus based on match type, code type, and jianma table
     ///
     /// - Parameters:
     ///   - match: The dictionary match
-    ///   - inputLength: Length of the input code
+    ///   - inputCode: The actual input code string
+    ///   - engine: Dictionary engine for jianma validation
     /// - Returns: Tier bonus value
     static func getTierBonus(
         match: DictionaryMatch,
-        inputLength: Int
+        inputCode: String,
+        engine: DictionaryEngine
     ) -> Double {
         let isFullMatch = match.matchType == .full
         let isWubiCode = match.codeType == .wubi
-        let baseFreq = match.entry.baseFrequency(for: match.codeType)
+        let inputLength = inputCode.count
 
-        // Check for Wubi 1-2级简码 (protected tier)
-        // These are Full Wubi matches where the user input is 1-2 characters
-        // AND the base frequency is high (>= 45000), indicating it's an official jianma
-        if isFullMatch && isWubiCode && inputLength <= 2 && baseFreq >= 45000 {
-            return jianmaTierBonus  // Protected tier - cannot be overridden
+        // Check for Protected Tier (jianma) using jianma table
+        // Only full wubi matches with 1-2 char codes can be jianma
+        if isFullMatch && isWubiCode && inputLength <= 2 {
+            let text = match.entry.text
+            if engine.isOfficialJianma(code: inputCode, text: text) {
+                // This is an official jianma from jianma.txt
+                if inputLength == 1 {
+                    return jianmaLevel1Bonus  // P0: 一级简码
+                } else {
+                    return jianmaLevel2Bonus  // P1: 二级简码
+                }
+            }
         }
 
         if inputLength <= 4 {
@@ -213,10 +227,15 @@ struct CandidateRanker {
     private static func calculateScore(
         match: DictionaryMatch,
         userData: UserEntryData?,
-        inputLength: Int
+        inputCode: String,
+        engine: DictionaryEngine
     ) -> Double {
+        let inputLength = inputCode.count
+        let isFullMatch = match.matchType == .full
+        let isWubiCode = match.codeType == .wubi
+
         // 1. Tier bonus (absolute, determines tier)
-        let tierBonus = getTierBonus(match: match, inputLength: inputLength)
+        let tierBonus = getTierBonus(match: match, inputCode: inputCode, engine: engine)
 
         // 2. Core Frecency score (recency + frequency + base)
         let accessCount = userData?.accessCount ?? 0
@@ -232,9 +251,14 @@ struct CandidateRanker {
         let tierOverrideBoost = FrecencyScore.calculateTierOverrideBoost(lastAccessTimestamp: timestamp)
 
         // 4. Short word bonus (prefer shorter words within tier)
+        // Special case: Wubi 4-char full match prefers 2-char words over 1-char words
         var shortWordBonus: Double = 0
         let textLength = match.entry.textLength
-        if textLength < 5 {
+        if isFullMatch && isWubiCode && inputLength == 4 && textLength == 2 {
+            // Wubi 4-char full match: 2-char words get higher bonus than 1-char words
+            shortWordBonus = 50_000
+        } else if textLength < 5 {
+            // Default: shorter words get higher bonus
             shortWordBonus = Double(5 - textLength) * shortWordBonusPerChar
         }
 
@@ -266,9 +290,11 @@ extension CandidateRanker {
     static func printScoreBreakdown(
         match: DictionaryMatch,
         userData: UserEntryData?,
-        inputLength: Int = 4
+        inputCode: String,
+        engine: DictionaryEngine
     ) {
-        let tierBonus = getTierBonus(match: match, inputLength: inputLength)
+        let inputLength = inputCode.count
+        let tierBonus = getTierBonus(match: match, inputCode: inputCode, engine: engine)
         let recency = FrecencyScore.calculateRecencyScore(
             lastAccessTimestamp: userData?.lastAccessTimestamp ?? 0
         )
@@ -279,23 +305,32 @@ extension CandidateRanker {
             baseFrequency: match.entry.baseFrequency(for: match.codeType)
         )
 
+        let isFullMatch = match.matchType == .full
+        let isWubiCode = match.codeType == .wubi
         var shortWordBonus: Double = 0
-        if match.entry.textLength < 5 {
-            shortWordBonus = Double(5 - match.entry.textLength) * shortWordBonusPerChar
+        let textLength = match.entry.textLength
+        if isFullMatch && isWubiCode && inputLength == 4 && textLength == 2 {
+            shortWordBonus = 50_000
+        } else if textLength < 5 {
+            shortWordBonus = Double(5 - textLength) * shortWordBonusPerChar
         }
 
         let total = tierBonus + recency + frequency + base + shortWordBonus
 
         let tierName: String
-        if inputLength <= 4 {
-            switch (match.matchType == .full, match.codeType == .wubi) {
+        if tierBonus >= jianmaLevel1Bonus {
+            tierName = "P0 (一级简码)"
+        } else if tierBonus >= jianmaLevel2Bonus {
+            tierName = "P1 (二级简码)"
+        } else if inputLength <= 4 {
+            switch (isFullMatch, isWubiCode) {
             case (true, true): tierName = "Tier 1 (Full Wubi)"
             case (true, false): tierName = "Tier 2 (Full Pinyin)"
             case (false, true): tierName = "Tier 3 (Prefix Wubi)"
             case (false, false): tierName = "Tier 4 (Prefix Pinyin)"
             }
         } else {
-            tierName = match.matchType == .full ? "Tier 1 (Full)" : "Tier 2 (Prefix)"
+            tierName = isFullMatch ? "Tier 1 (Full)" : "Tier 2 (Prefix)"
         }
 
         NSLog("Score breakdown for '\(match.entry.text)' [\(tierName)]:")

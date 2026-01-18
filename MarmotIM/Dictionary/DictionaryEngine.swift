@@ -61,6 +61,10 @@ class DictionaryEngine {
     /// Counter for user dictionary entry IDs
     private var userDictNextId: UInt32 = DictionaryEngine.userDictStartId
 
+    /// Jianma (简码) table for protected tier validation
+    /// Maps code -> Set of texts that are official jianma for that code
+    private var jianmaTable: [String: Set<String>] = [:]
+
     // MARK: - Initialization
 
     /// Initialize the dictionary engine
@@ -120,6 +124,51 @@ class DictionaryEngine {
         isPreloaded = true
         let stats = hotTierIndex.statistics
         NSLog("MarmotIM: Preload finalized - hotTier: pinyin=\(stats.pinyinCodes), wubi=\(stats.wubiCodes)")
+    }
+
+    // MARK: - Jianma Table
+
+    /// Load jianma table from bundle resource
+    /// Called during preloading to enable protected tier validation
+    func loadJianmaTable() {
+        guard let url = Bundle.main.url(forResource: "jianma", withExtension: "txt") else {
+            NSLog("MarmotIM: Warning - jianma.txt not found in bundle")
+            return
+        }
+
+        guard let content = try? String(contentsOf: url, encoding: .utf8) else {
+            NSLog("MarmotIM: Warning - failed to read jianma.txt")
+            return
+        }
+
+        var table: [String: Set<String>] = [:]
+        for line in content.components(separatedBy: .newlines) {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            guard !trimmed.isEmpty, !trimmed.hasPrefix("#") else { continue }
+
+            let parts = trimmed.split(separator: " ", maxSplits: 1, omittingEmptySubsequences: true)
+            guard parts.count >= 2 else { continue }
+
+            let code = String(parts[0])
+            let text = String(parts[1])
+
+            if table[code] == nil {
+                table[code] = Set<String>()
+            }
+            table[code]?.insert(text)
+        }
+
+        jianmaTable = table
+        NSLog("MarmotIM: Loaded jianma table with \(table.count) codes")
+    }
+
+    /// Check if a (code, text) combination is an official jianma
+    /// - Parameters:
+    ///   - code: The input code
+    ///   - text: The candidate text
+    /// - Returns: true if this is an official jianma entry
+    func isOfficialJianma(code: String, text: String) -> Bool {
+        return jianmaTable[code]?.contains(text) ?? false
     }
 
     /// Ensure all user_favorites entries are properly indexed
@@ -1025,5 +1074,53 @@ class DictionaryEngine {
         sqlite3_finalize(stmt)
 
         return results
+    }
+}
+
+// MARK: - Test Helpers
+//
+// These methods are intended for unit testing only.
+// They allow tests to set up jianma table and user learning data without
+// loading from disk or database.
+
+extension DictionaryEngine {
+    /// Set jianma table for testing purposes
+    /// - Parameter table: Dictionary mapping code to set of texts
+    func setJianmaTable(_ table: [String: Set<String>]) {
+        jianmaTable = table
+    }
+
+    /// Add a single jianma entry for testing
+    /// - Parameters:
+    ///   - code: The jianma code
+    ///   - text: The text for this code
+    func addJianmaEntry(code: String, text: String) {
+        if jianmaTable[code] == nil {
+            jianmaTable[code] = Set<String>()
+        }
+        jianmaTable[code]?.insert(text)
+    }
+
+    /// Set user learning data for testing
+    /// - Parameters:
+    ///   - entryId: The entry ID
+    ///   - accessCount: Number of times selected
+    ///   - lastAccessTimestamp: Last selection timestamp
+    func setUserLearning(entryId: UInt32, accessCount: UInt32, lastAccessTimestamp: UInt32) {
+        cacheLock.lock()
+        defer { cacheLock.unlock() }
+        userLearningCache[entryId] = UserEntryData(
+            entryId: entryId,
+            accessCount: accessCount,
+            lastAccessTimestamp: lastAccessTimestamp,
+            cachedScore: 0
+        )
+    }
+
+    /// Clear all user learning data for testing
+    func clearUserLearning() {
+        cacheLock.lock()
+        defer { cacheLock.unlock() }
+        userLearningCache.removeAll()
     }
 }

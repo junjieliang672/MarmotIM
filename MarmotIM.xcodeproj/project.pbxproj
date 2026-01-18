@@ -20,6 +20,7 @@
 		CD79C8E494C4295842A8153C /* UserTierIndex.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2E829BD9C75CF11CD1945BC6 /* UserTierIndex.swift */; };
 		CHARTOPINYIN_JSON /* char_to_pinyin.json in Resources */ = {isa = PBXBuildFile; fileRef = CHARTOPINYIN_JSON_REF /* char_to_pinyin.json */; };
 		CHARTOWUBI_JSON /* char_to_wubi.json in Resources */ = {isa = PBXBuildFile; fileRef = CHARTOWUBI_JSON_REF /* char_to_wubi.json */; };
+		JIANMA_TXT /* jianma.txt in Resources */ = {isa = PBXBuildFile; fileRef = JIANMA_TXT_REF /* jianma.txt */; };
 		DICTENGINE_SWIFT /* DictionaryEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = DICTENGINE_SWIFT_REF /* DictionaryEngine.swift */; };
 		DICTENTRY_SWIFT /* DictionaryEntry.swift in Sources */ = {isa = PBXBuildFile; fileRef = DICTENTRY_SWIFT_REF /* DictionaryEntry.swift */; };
 		F5FE4749BE7140CABCCD842A /* HotTierIndex.swift in Sources */ = {isa = PBXBuildFile; fileRef = 65A3A4EBE7E620D359EA4DA0 /* HotTierIndex.swift */; };
@@ -63,6 +64,7 @@
 		CANDIDATEWIN_SWIFT_REF /* CandidateWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CandidateWindow.swift; sourceTree = "<group>"; };
 		CHARTOPINYIN_JSON_REF /* char_to_pinyin.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = char_to_pinyin.json; sourceTree = "<group>"; };
 		CHARTOWUBI_JSON_REF /* char_to_wubi.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = char_to_wubi.json; sourceTree = "<group>"; };
+		JIANMA_TXT_REF /* jianma.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = jianma.txt; sourceTree = "<group>"; };
 		DICTENGINE_SWIFT_REF /* DictionaryEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DictionaryEngine.swift; sourceTree = "<group>"; };
 		DICTENTRY_SWIFT_REF /* DictionaryEntry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DictionaryEntry.swift; sourceTree = "<group>"; };
 		ENTITLEMENTS_REF /* MarmotIM.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = MarmotIM.entitlements; sourceTree = "<group>"; };
@@ -164,6 +166,7 @@
 				CHARTOWUBI_JSON_REF /* char_to_wubi.json */,
 				CHARTOPINYIN_JSON_REF /* char_to_pinyin.json */,
 				POLYPHONEWORDS_JSON_REF /* polyphone_words.json */,
+				JIANMA_TXT_REF /* jianma.txt */,
 			);
 			path = Resources;
 			sourceTree = "<group>";
@@ -315,6 +318,7 @@
 				CHARTOWUBI_JSON /* char_to_wubi.json in Resources */,
 				CHARTOPINYIN_JSON /* char_to_pinyin.json in Resources */,
 				POLYPHONEWORDS_JSON /* polyphone_words.json in Resources */,
+				JIANMA_TXT /* jianma.txt in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

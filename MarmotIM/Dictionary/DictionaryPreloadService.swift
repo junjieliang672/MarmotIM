@@ -159,6 +159,11 @@ final class DictionaryPreloadService {
             performMigration(db: db)
         }
 
+        // Load jianma table for protected tier validation
+        updateProgress(0.05)
+        NSLog("MarmotIM: Loading jianma table...")
+        engine.loadJianmaTable()
+
         // Load pinyin indexes into Trie
         updateProgress(0.1)
         NSLog("MarmotIM: Loading pinyin indexes...")
