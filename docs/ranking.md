@@ -354,7 +354,7 @@ struct RankingWeights: Codable {
 
 | 快捷键 | 功能 | 条件 |
 |--------|------|------|
-| `Command + Backspace` | 清空所有已输入的编码 | 输入缓冲区非空时 |
+| `Option + Backspace` | 清空所有已输入的编码 | 输入缓冲区非空时 |
 | `Backspace` | 删除最后一个字符 | 输入缓冲区非空时 |
 | `Space` | 选择第一个候选词上屏 | 有候选词时 |
 | `Enter` | 直接上屏原始输入 | 输入缓冲区非空时 |

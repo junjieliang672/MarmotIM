@@ -149,8 +149,8 @@ class InputController: IMKInputController {
         let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
         let characters = event.characters ?? ""
 
-        // Command + Backspace: Clear all input buffer
-        if modifiers.contains(.command) && keyCode == 51 { // 51 = Backspace
+        // Option + Backspace: Clear all input buffer
+        if modifiers.contains(.option) && keyCode == 51 { // 51 = Backspace
             if isComposing && !inputBuffer.isEmpty {
                 reset()
                 hideCandidateWindow()
