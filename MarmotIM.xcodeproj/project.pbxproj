@@ -21,6 +21,7 @@
 		CHARTOPINYIN_JSON /* char_to_pinyin.json in Resources */ = {isa = PBXBuildFile; fileRef = CHARTOPINYIN_JSON_REF /* char_to_pinyin.json */; };
 		CHARTOWUBI_JSON /* char_to_wubi.json in Resources */ = {isa = PBXBuildFile; fileRef = CHARTOWUBI_JSON_REF /* char_to_wubi.json */; };
 		JIANMA_TXT /* jianma.txt in Resources */ = {isa = PBXBuildFile; fileRef = JIANMA_TXT_REF /* jianma.txt */; };
+		ENTABLE_TXT /* en_table.txt in Resources */ = {isa = PBXBuildFile; fileRef = ENTABLE_TXT_REF /* en_table.txt */; };
 		DICTENGINE_SWIFT /* DictionaryEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = DICTENGINE_SWIFT_REF /* DictionaryEngine.swift */; };
 		DICTENTRY_SWIFT /* DictionaryEntry.swift in Sources */ = {isa = PBXBuildFile; fileRef = DICTENTRY_SWIFT_REF /* DictionaryEntry.swift */; };
 		ENGLISHWORDINDEX_SWIFT /* EnglishWordIndex.swift in Sources */ = {isa = PBXBuildFile; fileRef = ENGLISHWORDINDEX_SWIFT_REF /* EnglishWordIndex.swift */; };
@@ -66,6 +67,7 @@
 		CHARTOPINYIN_JSON_REF /* char_to_pinyin.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = char_to_pinyin.json; sourceTree = "<group>"; };
 		CHARTOWUBI_JSON_REF /* char_to_wubi.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = char_to_wubi.json; sourceTree = "<group>"; };
 		JIANMA_TXT_REF /* jianma.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = jianma.txt; sourceTree = "<group>"; };
+		ENTABLE_TXT_REF /* en_table.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = en_table.txt; sourceTree = "<group>"; };
 		DICTENGINE_SWIFT_REF /* DictionaryEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DictionaryEngine.swift; sourceTree = "<group>"; };
 		DICTENTRY_SWIFT_REF /* DictionaryEntry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DictionaryEntry.swift; sourceTree = "<group>"; };
 		ENGLISHWORDINDEX_SWIFT_REF /* EnglishWordIndex.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EnglishWordIndex.swift; sourceTree = "<group>"; };
@@ -170,6 +172,7 @@
 				CHARTOPINYIN_JSON_REF /* char_to_pinyin.json */,
 				POLYPHONEWORDS_JSON_REF /* polyphone_words.json */,
 				JIANMA_TXT_REF /* jianma.txt */,
+				ENTABLE_TXT_REF /* en_table.txt */,
 			);
 			path = Resources;
 			sourceTree = "<group>";
@@ -322,6 +325,7 @@
 				CHARTOPINYIN_JSON /* char_to_pinyin.json in Resources */,
 				POLYPHONEWORDS_JSON /* polyphone_words.json in Resources */,
 				JIANMA_TXT /* jianma.txt in Resources */,
+				ENTABLE_TXT /* en_table.txt in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
