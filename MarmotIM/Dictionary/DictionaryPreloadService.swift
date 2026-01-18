@@ -164,6 +164,10 @@ final class DictionaryPreloadService {
         NSLog("MarmotIM: Loading jianma table...")
         engine.loadJianmaTable()
 
+        // Load English words
+        NSLog("MarmotIM: Loading English words...")
+        engine.loadEnglishWords()
+
         // Load pinyin indexes into Trie
         updateProgress(0.1)
         NSLog("MarmotIM: Loading pinyin indexes...")

@@ -65,6 +65,9 @@ class DictionaryEngine {
     /// Maps code -> Set of texts that are official jianma for that code
     private var jianmaTable: [String: Set<String>] = [:]
 
+    /// 英文单词索引
+    private var englishWordIndex = EnglishWordIndex()
+
     // MARK: - Initialization
 
     /// Initialize the dictionary engine
@@ -169,6 +172,49 @@ class DictionaryEngine {
     /// - Returns: true if this is an official jianma entry
     func isOfficialJianma(code: String, text: String) -> Bool {
         return jianmaTable[code]?.contains(text) ?? false
+    }
+
+    // MARK: - English Words
+
+    /// 加载英文词典
+    func loadEnglishWords() {
+        guard let url = Bundle.main.url(forResource: "en_table", withExtension: "txt") else {
+            NSLog("MarmotIM: en_table.txt not found in bundle")
+            return
+        }
+        do {
+            try englishWordIndex.load(from: url)
+            NSLog("MarmotIM: Loaded \(englishWordIndex.count) English words")
+        } catch {
+            NSLog("MarmotIM: Failed to load English words: \(error)")
+        }
+    }
+
+    /// 英文完全匹配搜索
+    func searchEnglishExact(code: String) -> DictionaryMatch? {
+        guard englishWordIndex.isLoaded else { return nil }
+        guard let matchedWord = englishWordIndex.exactMatch(code) else {
+            return nil
+        }
+
+        // 创建一个虚拟的 DictionaryEntry 用于英文匹配
+        let entry = DictionaryEntry(
+            id: 0,  // 英文词条使用特殊 ID
+            text: matchedWord,
+            pinyin: code.lowercased(),
+            wubi: nil,
+            wubiBaseFrequency: 0,
+            pinyinBaseFrequency: 50000,
+            source: nil,
+            length: matchedWord.count
+        )
+
+        return DictionaryMatch(
+            entry: entry,
+            matchedCode: code,
+            matchType: .full,
+            codeType: .english
+        )
     }
 
     /// Ensure all user_favorites entries are properly indexed
@@ -362,6 +408,15 @@ class DictionaryEngine {
 
             results.append(contentsOf: prefixWubiMatches.prefix(wubiSlots))
             results.append(contentsOf: prefixPinyinMatches.prefix(pinyinSlots))
+        }
+
+        // 添加英文完全匹配（如果存在且不重复）
+        if let englishMatch = searchEnglishExact(code: code) {
+            // 检查是否已存在相同文本的候选词
+            let englishText = englishMatch.entry.text
+            if !results.contains(where: { $0.entry.text == englishText }) {
+                results.append(englishMatch)
+            }
         }
 
         return results
