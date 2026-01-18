@@ -413,9 +413,12 @@ class InputController: IMKInputController {
             return selectCandidate(at: 0, client: sender)
         }
 
-        // Otherwise commit the raw input
-        commitText(inputBuffer, client: sender)
+        // No candidates - clear input without committing (unlike Enter which respects settings)
         reset()
+        hideCandidateWindow()
+        if let client = sender as? IMKTextInput {
+            client.setMarkedText("", selectionRange: NSRange(location: 0, length: 0), replacementRange: NSRange(location: NSNotFound, length: 0))
+        }
         return true
     }
 
