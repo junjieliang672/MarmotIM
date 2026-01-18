@@ -149,7 +149,21 @@ class InputController: IMKInputController {
         let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
         let characters = event.characters ?? ""
 
-        // Pass through Command key shortcuts (Cmd+C, Cmd+V, Cmd+A, etc.)
+        // Command + Backspace: Clear all input buffer
+        if modifiers.contains(.command) && keyCode == 51 { // 51 = Backspace
+            if isComposing && !inputBuffer.isEmpty {
+                reset()
+                hideCandidateWindow()
+                if let client = sender as? IMKTextInput {
+                    client.setMarkedText("", selectionRange: NSRange(location: 0, length: 0),
+                                        replacementRange: NSRange(location: NSNotFound, length: 0))
+                }
+                return true
+            }
+            return false  // No input to clear, let system handle it
+        }
+
+        // Pass through other Command key shortcuts (Cmd+C, Cmd+V, Cmd+A, etc.)
         // These should be handled by the system, not the input method
         if modifiers.contains(.command) {
             return false
