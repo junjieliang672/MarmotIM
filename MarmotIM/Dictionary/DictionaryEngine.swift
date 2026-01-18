@@ -308,6 +308,8 @@ class DictionaryEngine {
             case (true, .pinyin): fullPinyinMatches.append(match)
             case (false, .wubi): prefixWubiMatches.append(match)
             case (false, .pinyin): prefixPinyinMatches.append(match)
+            case (true, .english): fullWubiMatches.append(match)  // English full match same tier as wubi
+            case (false, .english): break  // English has no prefix match
             }
         }
 

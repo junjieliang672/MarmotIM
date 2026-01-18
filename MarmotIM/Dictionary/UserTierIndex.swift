@@ -41,6 +41,8 @@ final class UserTierIndex {
             pinyinTrie.insert(code: code, entryId: entryId)
         case .wubi:
             wubiTrie.insert(code: code, entryId: entryId)
+        case .english:
+            break  // English not stored in user tier
         }
     }
 
@@ -54,6 +56,8 @@ final class UserTierIndex {
             pinyinTrie.remove(code: code, entryId: entryId)
         case .wubi:
             wubiTrie.remove(code: code, entryId: entryId)
+        case .english:
+            break  // English not stored in user tier
         }
     }
 

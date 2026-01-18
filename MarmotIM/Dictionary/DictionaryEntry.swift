@@ -11,6 +11,7 @@ enum EntrySource: Int, Codable {
 enum InputCodeType {
     case pinyin
     case wubi
+    case english
 }
 
 /// Represents a single dictionary entry
@@ -57,6 +58,8 @@ struct DictionaryEntry: Codable, Identifiable {
             return wubiBaseFrequency
         case .pinyin:
             return pinyinBaseFrequency
+        case .english:
+            return 50000  // 英文默认词频
         }
     }
 }
@@ -124,6 +127,8 @@ struct Candidate: Identifiable {
             return wubiBaseFrequency
         case .pinyin:
             return pinyinBaseFrequency
+        case .english:
+            return 50000  // 英文默认词频
         }
     }
 

@@ -123,6 +123,8 @@ struct HotTierIndex {
             return pinyinIndex.contains(code: code)
         case .wubi:
             return wubiIndex.contains(code: code)
+        case .english:
+            return false  // English handled by EnglishWordIndex
         }
     }
 }
