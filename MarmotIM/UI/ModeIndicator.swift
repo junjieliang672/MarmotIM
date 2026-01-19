@@ -94,14 +94,6 @@ class ModeIndicator {
         }
     }
 
-    /// Show the mode indicator at the current cursor position
-    /// - Parameter isEnglishMode: Whether the current mode is English
-    func showAtCursor(isEnglishMode: Bool) {
-        // Get cursor position from the system
-        let mouseLocation = NSEvent.mouseLocation
-        show(isEnglishMode: isEnglishMode, at: mouseLocation)
-    }
-
     /// Show a message notification at the specified position
     /// - Parameters:
     ///   - message: The message to display

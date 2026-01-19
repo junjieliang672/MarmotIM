@@ -135,7 +135,6 @@ class InputController: IMKInputController {
 
         // Log client type for debugging
         let clientType = sender == nil ? "nil" : String(describing: type(of: sender!))
-        let isIMKTextInput = sender is IMKTextInput
 
         // Handle flags changed events (for Shift toggle)
         if event.type == .flagsChanged {

@@ -9,23 +9,6 @@ struct BasicSettingsView: View {
             VStack(alignment: .leading, spacing: 20) {
                 // Encoding section
                 SettingsSection(title: "编码") {
-                    // Empty code behavior
-                    HStack {
-                        Text("空码时：")
-                            .frame(width: 80, alignment: .trailing)
-                        Picker("", selection: $viewModel.config.emptyCodeBehavior) {
-                            ForEach(EmptyCodeBehavior.allCases, id: \.self) { behavior in
-                                Text(behavior.displayName).tag(behavior)
-                            }
-                        }
-                        .labelsHidden()
-                        .frame(width: 150)
-                        .onChange(of: viewModel.config.emptyCodeBehavior) { _ in
-                            viewModel.save()
-                        }
-                        Spacer()
-                    }
-
                     // Enter key behavior
                     HStack {
                         Text("Enter键：")
@@ -65,40 +48,6 @@ struct BasicSettingsView: View {
                         Text("\(viewModel.config.candidateCount)")
                             .frame(width: 30)
                             .monospacedDigit()
-                        Spacer()
-                    }
-
-                    // Page keys
-                    HStack {
-                        Text("翻页：")
-                            .frame(width: 100, alignment: .trailing)
-                        ForEach(PageKeyOption.allCases, id: \.self) { option in
-                            RadioButton(
-                                title: option.displayName,
-                                isSelected: viewModel.config.pageKeys == option,
-                                action: {
-                                    viewModel.config.pageKeys = option
-                                    viewModel.save()
-                                }
-                            )
-                        }
-                        Spacer()
-                    }
-
-                    // Mode switch key
-                    HStack {
-                        Text("状态切换：")
-                            .frame(width: 100, alignment: .trailing)
-                        ForEach(ModeSwitchKey.allCases, id: \.self) { key in
-                            RadioButton(
-                                title: key.displayName,
-                                isSelected: viewModel.config.modeSwitchKey == key,
-                                action: {
-                                    viewModel.config.modeSwitchKey = key
-                                    viewModel.save()
-                                }
-                            )
-                        }
                         Spacer()
                     }
                 }

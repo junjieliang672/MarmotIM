@@ -2,19 +2,6 @@ import Foundation
 
 // MARK: - Configuration Enums
 
-/// Behavior when input code matches nothing
-enum EmptyCodeBehavior: String, Codable, CaseIterable {
-    case switchToEnglish = "switchToEnglish"  // Switch to temporary English mode
-    case clearCode = "clearCode"              // Automatically clear the input code
-
-    var displayName: String {
-        switch self {
-        case .switchToEnglish: return "转临时英文状态"
-        case .clearCode: return "自动清除编码"
-        }
-    }
-}
-
 /// Behavior when Enter key is pressed
 enum EnterKeyBehavior: String, Codable, CaseIterable {
     case clearCode = "clearCode"    // Clear the input code
@@ -24,38 +11,6 @@ enum EnterKeyBehavior: String, Codable, CaseIterable {
         switch self {
         case .clearCode: return "清除编码"
         case .outputCode: return "输出编码"
-        }
-    }
-}
-
-/// Page navigation key options
-enum PageKeyOption: String, Codable, CaseIterable {
-    case commaDot = "commaDot"       // , and .
-    case minusEqual = "minusEqual"   // - and =
-    case brackets = "brackets"       // [ and ]
-
-    var displayName: String {
-        switch self {
-        case .commaDot: return ", ."
-        case .minusEqual: return "- ="
-        case .brackets: return "[ ]"
-        }
-    }
-}
-
-/// Key for switching between Chinese and English mode
-enum ModeSwitchKey: String, Codable, CaseIterable {
-    case shift = "shift"
-    case control = "control"
-    case fn = "fn"
-    case disabled = "disabled"
-
-    var displayName: String {
-        switch self {
-        case .shift: return "shift键"
-        case .control: return "control键"
-        case .fn: return "fn键"
-        case .disabled: return "禁用"
         }
     }
 }
@@ -204,9 +159,6 @@ struct AppConfig: Codable {
 
     // MARK: - Basic Settings (编码)
 
-    /// Behavior when input code matches nothing
-    var emptyCodeBehavior: EmptyCodeBehavior
-
     /// Behavior when Enter key is pressed
     var enterKeyBehavior: EnterKeyBehavior
 
@@ -214,12 +166,6 @@ struct AppConfig: Codable {
 
     /// Number of candidates to show (3-9)
     var candidateCount: Int
-
-    /// Page navigation keys
-    var pageKeys: PageKeyOption
-
-    /// Key for switching between Chinese/English mode
-    var modeSwitchKey: ModeSwitchKey
 
     // MARK: - Icon Settings (图标)
 
@@ -253,9 +199,6 @@ struct AppConfig: Codable {
     /// All ranking weight parameters
     var rankingWeights: RankingWeights
 
-    /// Custom ranking formula in Python (optional)
-    var customRankingFormula: String?
-
     // MARK: - Fuzzy Pinyin Settings (模糊拼音)
 
     /// Fuzzy pinyin configuration
@@ -263,29 +206,17 @@ struct AppConfig: Codable {
 
     // MARK: - Legacy Settings (现有设置)
 
-    /// Enable auto-commit when there's a unique high-frequency match
-    var enableAutoCommit: Bool
-
     /// Show code type hint (pinyin/wubi) in candidate window
     var showCodeHint: Bool
-
-    /// Maximum total score before aging (default 10000)
-    var frecencyMaxScore: Double
-
-    /// Aging factor - what percentage to retain after aging (default 0.9)
-    var frecencyAgingFactor: Double
 
     // MARK: - Default Configuration
 
     static let `default` = AppConfig(
         // Basic Settings
-        emptyCodeBehavior: .switchToEnglish,
         enterKeyBehavior: .clearCode,
 
         // Candidate Settings
         candidateCount: 9,
-        pageKeys: .commaDot,
-        modeSwitchKey: .shift,
 
         // Icon Settings
         showStatusBarIcon: false,
@@ -302,16 +233,12 @@ struct AppConfig: Codable {
 
         // Ranking Settings
         rankingWeights: .default,
-        customRankingFormula: nil,
 
         // Fuzzy Pinyin Settings
         fuzzyPinyin: .default,
 
         // Legacy Settings
-        enableAutoCommit: false,
-        showCodeHint: true,
-        frecencyMaxScore: 10000.0,
-        frecencyAgingFactor: 0.9
+        showCodeHint: true
     )
 
     // MARK: - Backward Compatibility
@@ -353,22 +280,16 @@ struct AppConfig: Codable {
     private static func decodeLegacyConfig(from data: Data, decoder: JSONDecoder) throws -> AppConfig {
         // Try to decode as a partial config and fill in defaults
         struct LegacyConfig: Codable {
-            var enableAutoCommit: Bool?
             var showCodeHint: Bool?
             var candidateCount: Int?
-            var frecencyMaxScore: Double?
-            var frecencyAgingFactor: Double?
             var theme: String?
         }
 
         let legacy = try decoder.decode(LegacyConfig.self, from: data)
 
         var config = AppConfig.default
-        config.enableAutoCommit = legacy.enableAutoCommit ?? config.enableAutoCommit
         config.showCodeHint = legacy.showCodeHint ?? config.showCodeHint
         config.candidateCount = legacy.candidateCount ?? config.candidateCount
-        config.frecencyMaxScore = legacy.frecencyMaxScore ?? config.frecencyMaxScore
-        config.frecencyAgingFactor = legacy.frecencyAgingFactor ?? config.frecencyAgingFactor
         if let themeStr = legacy.theme {
             config.themeMode = ThemeMode(rawValue: themeStr) ?? .system
         }
@@ -423,11 +344,8 @@ struct AppConfig: Codable {
 
 extension AppConfig {
     enum CodingKeys: String, CodingKey {
-        case emptyCodeBehavior
         case enterKeyBehavior
         case candidateCount
-        case pageKeys
-        case modeSwitchKey
         case showStatusBarIcon
         case showModeIndicator
         case punctuationMode
@@ -436,11 +354,7 @@ extension AppConfig {
         case themeMode
         case candidateWindowStyle
         case rankingWeights
-        case customRankingFormula
         case fuzzyPinyin
-        case enableAutoCommit
         case showCodeHint
-        case frecencyMaxScore
-        case frecencyAgingFactor
     }
 }

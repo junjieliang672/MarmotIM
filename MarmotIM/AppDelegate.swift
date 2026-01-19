@@ -90,8 +90,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         do {
             Self.config = try AppConfig.load()
             Self.config.validate()
-            NSLog("MarmotIM: Configuration loaded - enterKeyBehavior=%@, modeSwitchKey=%@",
-                  Self.config.enterKeyBehavior.rawValue, Self.config.modeSwitchKey.rawValue)
+            NSLog("MarmotIM: Configuration loaded - enterKeyBehavior=%@",
+                  Self.config.enterKeyBehavior.rawValue)
         } catch {
             NSLog("MarmotIM: Using default configuration: \(error)")
             Self.config = .default

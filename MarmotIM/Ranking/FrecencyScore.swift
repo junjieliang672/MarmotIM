@@ -178,30 +178,6 @@ struct FrecencyScore {
         let timeSince = hoursAgo * 3600
         return recencyInitialBoost * exp(-lambda * timeSince)
     }
-
-    /// Estimate how long until recency score falls below a threshold
-    ///
-    /// - Parameter threshold: Score threshold
-    /// - Returns: Time in seconds, or nil if already below threshold
-    static func timeUntilRecencyBelowThreshold(_ threshold: Double) -> TimeInterval? {
-        guard threshold < recencyInitialBoost else { return 0 }
-        guard threshold > 0 else { return nil }
-
-        // Solve: threshold = initialBoost × e^(-λ × t)
-        // t = -ln(threshold / initialBoost) / λ
-        return -log(threshold / recencyInitialBoost) / lambda
-    }
-
-    /// Check if an entry would rank #1 based on recency alone
-    /// (i.e., recency score exceeds typical base frequency range)
-    ///
-    /// - Parameter lastAccessTimestamp: Unix timestamp of last access
-    /// - Returns: True if entry would likely rank #1
-    static func wouldRankFirst(lastAccessTimestamp: UInt32) -> Bool {
-        let recencyScore = calculateRecencyScore(lastAccessTimestamp: lastAccessTimestamp)
-        // Compare against max possible base score (65535) plus some buffer
-        return recencyScore > 100_000
-    }
 }
 
 // MARK: - User Entry Data

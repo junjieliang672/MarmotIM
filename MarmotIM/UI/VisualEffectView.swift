@@ -30,36 +30,6 @@ struct VisualEffectView: NSViewRepresentable {
     }
 }
 
-/// A view modifier that adds a visual effect background
-struct VisualEffectBackground: ViewModifier {
-    let material: NSVisualEffectView.Material
-    let blendingMode: NSVisualEffectView.BlendingMode
-    let cornerRadius: CGFloat
-
-    func body(content: Content) -> some View {
-        content
-            .background(
-                VisualEffectView(material: material, blendingMode: blendingMode)
-                    .clipShape(RoundedRectangle(cornerRadius: cornerRadius))
-            )
-    }
-}
-
-extension View {
-    /// Apply a visual effect (blur) background to the view
-    func visualEffectBackground(
-        material: NSVisualEffectView.Material = .hudWindow,
-        blendingMode: NSVisualEffectView.BlendingMode = .behindWindow,
-        cornerRadius: CGFloat = 0
-    ) -> some View {
-        modifier(VisualEffectBackground(
-            material: material,
-            blendingMode: blendingMode,
-            cornerRadius: cornerRadius
-        ))
-    }
-}
-
 #if DEBUG
 struct VisualEffectView_Previews: PreviewProvider {
     static var previews: some View {
@@ -79,7 +49,10 @@ struct VisualEffectView_Previews: PreviewProvider {
                     .font(.system(.body, design: .monospaced))
             }
             .padding()
-            .visualEffectBackground(material: .hudWindow, cornerRadius: 4)
+            .background(
+                VisualEffectView(material: .hudWindow)
+                    .clipShape(RoundedRectangle(cornerRadius: 4))
+            )
         }
         .frame(width: 400, height: 200)
     }
