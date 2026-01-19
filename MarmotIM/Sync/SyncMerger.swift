@@ -37,6 +37,7 @@ struct SyncMerger {
 
     /// Merge user_favorites records
     /// Conflict resolution: keep record with newer addedTimestamp
+    /// IMPORTANT: Respects is_deleted flag to prevent resurrecting deleted entries
     /// - Parameters:
     ///   - local: Local records (key: text)
     ///   - remote: Remote records from iCloud
@@ -50,12 +51,18 @@ struct SyncMerger {
         for (key, remoteRecord) in remote {
             if let localRecord = result[key] {
                 // Conflict: keep the one with newer timestamp
+                // The newer timestamp wins, regardless of is_deleted state
+                // This ensures that a deletion with newer timestamp takes precedence
                 if remoteRecord.addedTimestamp > localRecord.addedTimestamp {
                     result[key] = remoteRecord
                 }
             } else {
-                // Only exists in remote: add it
-                result[key] = remoteRecord
+                // Only exists in remote: only add if NOT deleted
+                // This prevents resurrecting entries that were deleted locally
+                // and the local deletion record was purged
+                if !remoteRecord.isDeleted {
+                    result[key] = remoteRecord
+                }
             }
         }
 

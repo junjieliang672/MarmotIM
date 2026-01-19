@@ -17,7 +17,8 @@ final class VocabularyDatabase {
 
     /// Database schema version for migrations
     /// Version 4: Add is_deleted column to user_favorites
-    private static let schemaVersion = 4
+    /// Version 5: Add reverse lookup tables (char_to_wubi, char_to_pinyin, polyphone_words)
+    private static let schemaVersion = 5
 
     // MARK: - Initialization
 
@@ -1007,6 +1008,46 @@ final class VocabularyDatabase {
         return executeSQL(sql)
     }
 
+    /// Get all deleted user favorites (for cleanup purposes)
+    func getDeletedUserFavorites() -> [(id: Int, text: String, wubiCode: String?, pinyinCode: String?)] {
+        lock.lock()
+        defer { lock.unlock() }
+
+        var results: [(Int, String, String?, String?)] = []
+
+        let sql = "SELECT id, text, wubi_code, pinyin_code FROM user_favorites WHERE is_deleted = 1"
+        var statement: OpaquePointer?
+
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
+            return []
+        }
+        defer { sqlite3_finalize(statement) }
+
+        while sqlite3_step(statement) == SQLITE_ROW {
+            let id = Int(sqlite3_column_int(statement, 0))
+            let textPtr = sqlite3_column_text(statement, 1)
+            let text = textPtr != nil ? String(cString: textPtr!) : ""
+
+            let wubiCode: String?
+            if let ptr = sqlite3_column_text(statement, 2) {
+                wubiCode = String(cString: ptr)
+            } else {
+                wubiCode = nil
+            }
+
+            let pinyinCode: String?
+            if let ptr = sqlite3_column_text(statement, 3) {
+                pinyinCode = String(cString: ptr)
+            } else {
+                pinyinCode = nil
+            }
+
+            results.append((id, text, wubiCode, pinyinCode))
+        }
+
+        return results
+    }
+
     // MARK: - Migration
 
     /// Check if database needs migration from JSON
@@ -1053,6 +1094,35 @@ final class VocabularyDatabase {
         if currentVersion < 4 {
             NSLog("MarmotIM: Migrating to version 4 (add is_deleted)...")
             executeSQL("ALTER TABLE user_favorites ADD COLUMN is_deleted INTEGER NOT NULL DEFAULT 0")
+        }
+
+        // Version 5: Add reverse lookup tables (char_to_wubi, char_to_pinyin, polyphone_words)
+        if currentVersion < 5 {
+            NSLog("MarmotIM: Migrating to version 5 (add reverse lookup tables)...")
+            executeSQL("""
+                CREATE TABLE IF NOT EXISTS char_to_wubi (
+                    char TEXT PRIMARY KEY,
+                    wubi_code TEXT NOT NULL
+                )
+            """)
+            executeSQL("CREATE INDEX IF NOT EXISTS idx_char_wubi ON char_to_wubi(char)")
+
+            executeSQL("""
+                CREATE TABLE IF NOT EXISTS char_to_pinyin (
+                    char TEXT NOT NULL,
+                    pinyin TEXT NOT NULL,
+                    is_primary INTEGER DEFAULT 1,
+                    PRIMARY KEY (char, pinyin)
+                )
+            """)
+            executeSQL("CREATE INDEX IF NOT EXISTS idx_char_pinyin ON char_to_pinyin(char)")
+
+            executeSQL("""
+                CREATE TABLE IF NOT EXISTS polyphone_words (
+                    word TEXT PRIMARY KEY,
+                    pinyin TEXT NOT NULL
+                )
+            """)
         }
 
         setSchemaVersion(targetVersion)
@@ -1193,6 +1263,85 @@ final class VocabularyDatabase {
         sqlite3_finalize(stmt)
 
         return results
+    }
+
+    // MARK: - Reverse Lookup (for 划词入库 feature)
+
+    /// Get wubi code for a single character
+    func getWubiCode(for char: Character) -> String? {
+        guard let db = db else { return nil }
+
+        let sql = "SELECT wubi_code FROM char_to_wubi WHERE char = ?"
+        var statement: OpaquePointer?
+
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
+            return nil
+        }
+        defer { sqlite3_finalize(statement) }
+
+        let charStr = String(char)
+        sqlite3_bind_text(statement, 1, charStr, -1, SQLITE_TRANSIENT)
+
+        guard sqlite3_step(statement) == SQLITE_ROW else {
+            return nil
+        }
+
+        guard let codePtr = sqlite3_column_text(statement, 0) else {
+            return nil
+        }
+
+        return String(cString: codePtr)
+    }
+
+    /// Get all pinyin codes for a single character (supports polyphones)
+    /// Returns pinyins sorted by is_primary (primary first)
+    func getPinyinCodes(for char: Character) -> [String] {
+        guard let db = db else { return [] }
+
+        let sql = "SELECT pinyin FROM char_to_pinyin WHERE char = ? ORDER BY is_primary DESC"
+        var statement: OpaquePointer?
+
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
+            return []
+        }
+        defer { sqlite3_finalize(statement) }
+
+        let charStr = String(char)
+        sqlite3_bind_text(statement, 1, charStr, -1, SQLITE_TRANSIENT)
+
+        var pinyins: [String] = []
+        while sqlite3_step(statement) == SQLITE_ROW {
+            if let pinyinPtr = sqlite3_column_text(statement, 0) {
+                pinyins.append(String(cString: pinyinPtr))
+            }
+        }
+
+        return pinyins
+    }
+
+    /// Get pinyin for a word (polyphone disambiguation)
+    func getWordPinyin(for word: String) -> String? {
+        guard let db = db else { return nil }
+
+        let sql = "SELECT pinyin FROM polyphone_words WHERE word = ?"
+        var statement: OpaquePointer?
+
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
+            return nil
+        }
+        defer { sqlite3_finalize(statement) }
+
+        sqlite3_bind_text(statement, 1, word, -1, SQLITE_TRANSIENT)
+
+        guard sqlite3_step(statement) == SQLITE_ROW else {
+            return nil
+        }
+
+        guard let pinyinPtr = sqlite3_column_text(statement, 0) else {
+            return nil
+        }
+
+        return String(cString: pinyinPtr)
     }
 
     // MARK: - Helpers

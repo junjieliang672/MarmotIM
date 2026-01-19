@@ -217,6 +217,54 @@ class DictionaryEngine {
         )
     }
 
+    /// Cleanup deleted user favorites at startup
+    /// This ensures that deleted entries don't remain in the entries table or trie indexes
+    /// Returns the number of entries that were cleaned up
+    func cleanupDeletedUserFavorites() -> Int {
+        let deletedFavorites = db.getDeletedUserFavorites()
+        var cleanedCount = 0
+
+        NSLog("MarmotIM: Checking \(deletedFavorites.count) deleted user favorites for cleanup")
+
+        for (_, text, wubiCode, pinyinCode) in deletedFavorites {
+            // Try to find and remove the entry from entries table and indexes
+            if let entry = db.getEntryByText(text: text) {
+                // Only remove user entries (source=3), not system entries
+                if entry.id >= DictionaryEngine.userDictStartId {
+                    // Remove from database
+                    if db.deleteEntry(id: entry.id) {
+                        cleanedCount += 1
+                        NSLog("MarmotIM: cleanupDeletedUserFavorites - removed entry '%@' (id: %u)", text, entry.id)
+                    }
+
+                    // Remove from userTierIndex
+                    if let code = wubiCode, !code.isEmpty {
+                        userTierIndex.remove(code: code, entryId: entry.id, codeType: .wubi)
+                    }
+                    if let code = pinyinCode, !code.isEmpty {
+                        userTierIndex.remove(code: code, entryId: entry.id, codeType: .pinyin)
+                    }
+
+                    // Also try to remove by entry's stored codes
+                    if !entry.pinyin.isEmpty {
+                        userTierIndex.remove(code: entry.pinyin, entryId: entry.id, codeType: .pinyin)
+                    }
+                    if let wubi = entry.wubi {
+                        userTierIndex.remove(code: wubi, entryId: entry.id, codeType: .wubi)
+                    }
+
+                    // Remove from cache
+                    cacheLock.lock()
+                    entriesCache.remove(entry.id)
+                    userLearningCache.removeValue(forKey: entry.id)
+                    cacheLock.unlock()
+                }
+            }
+        }
+
+        return cleanedCount
+    }
+
     /// Ensure all user_favorites entries are properly indexed
     /// This fixes entries that exist in the database but weren't indexed (source=2 entries with wubi codes)
     /// Returns the number of entries that were fixed

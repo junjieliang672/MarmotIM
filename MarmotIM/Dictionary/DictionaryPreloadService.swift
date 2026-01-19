@@ -189,7 +189,14 @@ final class DictionaryPreloadService {
 
         // Final setup
         engine.finalizePreload()
-        updateProgress(0.95)
+        updateProgress(0.93)
+
+        // Cleanup deleted user favorites (entries that were soft-deleted but still have orphaned data)
+        let cleanedCount = engine.cleanupDeletedUserFavorites()
+        if cleanedCount > 0 {
+            NSLog("MarmotIM: Cleaned up \(cleanedCount) deleted user favorites")
+        }
+        updateProgress(0.96)
 
         // Fix user_favorites that may not be indexed (one-time migration)
         let fixedCount = engine.ensureUserFavoritesIndexed()

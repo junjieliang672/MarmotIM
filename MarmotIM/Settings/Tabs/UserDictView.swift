@@ -222,11 +222,32 @@ struct UserDictView: View {
         guard !selectedIds.isEmpty else { return }
 
         var deletedCount = 0
-        let db = VocabularyDatabase.shared
 
         for id in selectedIds {
-            if db.removeUserFavoriteById(id) {
-                deletedCount += 1
+            // Find the entry in our list to get text/codes for complete deletion
+            guard let entry = userFavorites.first(where: { $0.id == id }) else {
+                continue
+            }
+
+            // Use DictionaryEngine for complete deletion (entries table + trie + user_favorites)
+            // This ensures the entry won't reappear in search results
+            if let engine = AppDelegate.shared?.dictionaryEngine {
+                let result = engine.removeDualEntry(
+                    text: entry.text,
+                    wubiCode: entry.wubiCode,
+                    pinyinCode: entry.pinyinCode
+                )
+                if result.success || !result.notFound {
+                    // Even if it wasn't a user entry (system entry), mark as success
+                    // because the soft delete in user_favorites was done
+                    deletedCount += 1
+                }
+            } else {
+                // Engine not available (e.g., settings window standalone)
+                // Fall back to soft delete only
+                if VocabularyDatabase.shared.removeUserFavoriteById(id) {
+                    deletedCount += 1
+                }
             }
         }
 
