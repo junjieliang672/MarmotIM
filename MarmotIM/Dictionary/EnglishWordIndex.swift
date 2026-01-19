@@ -13,16 +13,24 @@ struct EnglishWordIndex {
     var count: Int { variants.count }
 
     /// 从文件加载英文词典
-    /// 格式: "小写形式 变体1 变体2 ..."
+    /// 格式: "小写形式\t变体1\t变体2..." (tab-separated)
+    /// 例如: "code\tcode" 或 "code runner\tCode Runner"
     mutating func load(from url: URL) throws {
         let content = try String(contentsOf: url, encoding: .utf8)
         for line in content.components(separatedBy: .newlines) {
             let trimmed = line.trimmingCharacters(in: .whitespaces)
             guard !trimmed.isEmpty else { continue }
-            let parts = trimmed.split(separator: " ").map(String.init)
+
+            // Split on TAB: first part is key, rest are variants
+            // This handles multi-word keys like "code runner" correctly
+            let parts = trimmed.split(separator: "\t").map(String.init)
             guard parts.count >= 2 else { continue }
+
             let key = parts[0].lowercased()
+            // All parts after the first are variants (each can contain spaces)
             let values = Array(parts.dropFirst())
+            guard !values.isEmpty else { continue }
+
             variants[key] = values
         }
         isLoaded = true

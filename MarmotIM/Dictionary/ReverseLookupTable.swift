@@ -5,10 +5,14 @@
 //  反查表：汉字/词组 → 编码
 //  用于划词入库功能
 //
+//  Refactored to use SQLite database instead of in-memory dictionaries
+//  to eliminate memory spikes from JSON loading.
+//
 
 import Foundation
 
 /// 反查表管理器：提供汉字到五笔/拼音编码的转换
+/// 使用 VocabularyDatabase 进行查询，无需加载到内存
 final class ReverseLookupTable {
 
     // MARK: - Singleton
@@ -17,100 +21,12 @@ final class ReverseLookupTable {
 
     // MARK: - Properties
 
-    /// 汉字 → 五笔编码表（单字）
-    private var charToWubi: [Character: String] = [:]
-
-    /// 汉字 → 拼音编码表（单字，包含多音）
-    /// 格式: '行' -> ["xing", "hang"]
-    private var charToPinyin: [Character: [String]] = [:]
-
-    /// 多音字词组表：用于确定正确读音
-    /// 格式: "银行" -> "yinhang"
-    private var polyphoneWords: [String: String] = [:]
-
-    /// 是否已加载
-    private(set) var isLoaded = false
-
-    /// 加载锁
-    private let loadLock = NSLock()
+    /// Database reference
+    private let database = VocabularyDatabase.shared
 
     // MARK: - Initialization
 
     private init() {}
-
-    // MARK: - Loading
-
-    /// 从资源文件加载反查表（同步加载）
-    func loadIfNeeded() {
-        loadLock.lock()
-        defer { loadLock.unlock() }
-
-        guard !isLoaded else { return }
-
-        let startTime = CFAbsoluteTimeGetCurrent()
-
-        loadCharToWubi()
-        loadCharToPinyin()
-        loadPolyphoneWords()
-
-        isLoaded = true
-
-        let elapsed = CFAbsoluteTimeGetCurrent() - startTime
-        NSLog("MarmotIM: ReverseLookupTable loaded in %.2f ms", elapsed * 1000)
-        NSLog("MarmotIM: ReverseLookupTable - %d wubi chars, %d pinyin chars, %d polyphone words",
-              charToWubi.count, charToPinyin.count, polyphoneWords.count)
-    }
-
-    /// 异步加载反查表
-    func loadAsync(completion: (() -> Void)? = nil) {
-        DispatchQueue.global(qos: .utility).async { [weak self] in
-            self?.loadIfNeeded()
-            DispatchQueue.main.async {
-                completion?()
-            }
-        }
-    }
-
-    private func loadCharToWubi() {
-        guard let url = Bundle.main.url(forResource: "char_to_wubi", withExtension: "json"),
-              let data = try? Data(contentsOf: url),
-              let dict = try? JSONSerialization.jsonObject(with: data) as? [String: String] else {
-            NSLog("MarmotIM: Failed to load char_to_wubi.json")
-            return
-        }
-
-        for (charStr, code) in dict {
-            if let char = charStr.first, charStr.count == 1 {
-                charToWubi[char] = code
-            }
-        }
-    }
-
-    private func loadCharToPinyin() {
-        guard let url = Bundle.main.url(forResource: "char_to_pinyin", withExtension: "json"),
-              let data = try? Data(contentsOf: url),
-              let dict = try? JSONSerialization.jsonObject(with: data) as? [String: [String]] else {
-            NSLog("MarmotIM: Failed to load char_to_pinyin.json")
-            return
-        }
-
-        for (charStr, pinyins) in dict {
-            if let char = charStr.first, charStr.count == 1 {
-                charToPinyin[char] = pinyins
-            }
-        }
-    }
-
-    private func loadPolyphoneWords() {
-        guard let url = Bundle.main.url(forResource: "polyphone_words", withExtension: "json"),
-              let data = try? Data(contentsOf: url),
-              let dict = try? JSONSerialization.jsonObject(with: data) as? [String: String] else {
-            NSLog("MarmotIM: Failed to load polyphone_words.json")
-            return
-        }
-
-        polyphoneWords = dict
-    }
 
     // MARK: - Lookup Methods
 
@@ -125,17 +41,13 @@ final class ReverseLookupTable {
     /// - Parameter text: 要查询的中文文本
     /// - Returns: 五笔编码，如果有任何字无法转换则返回 nil
     func getWubiCode(for text: String) -> String? {
-        if !isLoaded {
-            loadIfNeeded()
-        }
-
         let chars = Array(text)
         guard !chars.isEmpty else { return nil }
 
         // 获取每个字的五笔全码
         var codes: [String] = []
         for char in chars {
-            guard let code = charToWubi[char], !code.isEmpty else {
+            guard let code = database.getWubiCode(for: char), !code.isEmpty else {
                 NSLog("MarmotIM: No wubi code for character: %@", String(char))
                 return nil
             }
@@ -181,12 +93,8 @@ final class ReverseLookupTable {
     /// - Parameter text: 要查询的中文文本
     /// - Returns: 拼音编码，如果有任何字无法转换则返回 nil
     func getPinyinCode(for text: String) -> String? {
-        if !isLoaded {
-            loadIfNeeded()
-        }
-
         // 1. 先检查是否整词在 polyphone_words 中
-        if let wordPinyin = polyphoneWords[text] {
+        if let wordPinyin = database.getWordPinyin(for: text) {
             return wordPinyin
         }
 
@@ -195,7 +103,8 @@ final class ReverseLookupTable {
         var result = ""
 
         for (index, char) in chars.enumerated() {
-            guard let pinyins = charToPinyin[char], !pinyins.isEmpty else {
+            let pinyins = database.getPinyinCodes(for: char)
+            guard !pinyins.isEmpty else {
                 NSLog("MarmotIM: No pinyin for character: %@", String(char))
                 return nil
             }
@@ -235,7 +144,7 @@ final class ReverseLookupTable {
                 let endIdx = startIdx + windowSize
                 if endIdx <= charCount {
                     let subWord = String(chars[startIdx..<endIdx])
-                    if let wordPinyin = polyphoneWords[subWord] {
+                    if let wordPinyin = database.getWordPinyin(for: subWord) {
                         // 从词组拼音中提取该字位置的拼音
                         let charPosInSubword = index - startIdx
                         if let extractedPinyin = extractPinyinAtPosition(
@@ -269,11 +178,9 @@ final class ReverseLookupTable {
         // 获取子词中每个字的所有可能拼音
         var possiblePinyins: [[String]] = []
         for char in subChars {
-            if let pinyins = charToPinyin[char], !pinyins.isEmpty {
-                possiblePinyins.append(pinyins)
-            } else {
-                return nil
-            }
+            let pinyins = database.getPinyinCodes(for: char)
+            guard !pinyins.isEmpty else { return nil }
+            possiblePinyins.append(pinyins)
         }
 
         // 尝试找到与 wordPinyin 匹配的拼音组合
@@ -342,21 +249,22 @@ final class ReverseLookupTable {
 
     /// 检查单个字符是否有五笔编码
     func hasWubiCode(for char: Character) -> Bool {
-        return charToWubi[char] != nil
+        return database.getWubiCode(for: char) != nil
     }
 
     /// 检查单个字符是否有拼音编码
     func hasPinyinCode(for char: Character) -> Bool {
-        return charToPinyin[char] != nil
+        return !database.getPinyinCodes(for: char).isEmpty
     }
 
     /// 获取单个字符的五笔编码
     func getWubiCode(for char: Character) -> String? {
-        return charToWubi[char]
+        return database.getWubiCode(for: char)
     }
 
     /// 获取单个字符的所有拼音
     func getAllPinyins(for char: Character) -> [String]? {
-        return charToPinyin[char]
+        let pinyins = database.getPinyinCodes(for: char)
+        return pinyins.isEmpty ? nil : pinyins
     }
 }

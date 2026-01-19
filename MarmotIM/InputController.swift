@@ -627,10 +627,7 @@ class InputController: IMKInputController {
 
         NSLog("MarmotIM: Filtered Chinese text: '%@'", chineseText)
 
-        // 4. 确保反查表已加载
-        ReverseLookupTable.shared.loadIfNeeded()
-
-        // 5. 生成编码
+        // 4. 生成编码 (queries database directly)
         let wubiCode = ReverseLookupTable.shared.getWubiCode(for: chineseText)
         let pinyinCode = ReverseLookupTable.shared.getPinyinCode(for: chineseText)
 
@@ -719,10 +716,7 @@ class InputController: IMKInputController {
 
         NSLog("MarmotIM: Filtered Chinese text: '%@'", chineseText)
 
-        // 3. 确保反查表已加载
-        ReverseLookupTable.shared.loadIfNeeded()
-
-        // 4. 生成编码
+        // 3. 生成编码 (queries database directly)
         let wubiCode = ReverseLookupTable.shared.getWubiCode(for: chineseText)
         let pinyinCode = ReverseLookupTable.shared.getPinyinCode(for: chineseText)
 

@@ -78,11 +78,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             // Migrate legacy user dictionary if it exists
             engine.loadUserDictionary()
 
-            // Preload reverse lookup table for 划词入库 feature
-            // This runs asynchronously to avoid blocking
-            ReverseLookupTable.shared.loadAsync {
-                NSLog("MarmotIM: Reverse lookup table preload complete")
-            }
+            // Note: ReverseLookupTable now queries database directly
+            // No preloading needed
         }
     }
 

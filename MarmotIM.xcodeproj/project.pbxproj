@@ -18,8 +18,6 @@
 		BASICSETTINGS_SWIFT /* BasicSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BASICSETTINGS_SWIFT_REF /* BasicSettingsView.swift */; };
 		CANDIDATEWIN_SWIFT /* CandidateWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = CANDIDATEWIN_SWIFT_REF /* CandidateWindow.swift */; };
 		CD79C8E494C4295842A8153C /* UserTierIndex.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2E829BD9C75CF11CD1945BC6 /* UserTierIndex.swift */; };
-		CHARTOPINYIN_JSON /* char_to_pinyin.json in Resources */ = {isa = PBXBuildFile; fileRef = CHARTOPINYIN_JSON_REF /* char_to_pinyin.json */; };
-		CHARTOWUBI_JSON /* char_to_wubi.json in Resources */ = {isa = PBXBuildFile; fileRef = CHARTOWUBI_JSON_REF /* char_to_wubi.json */; };
 		JIANMA_TXT /* jianma.txt in Resources */ = {isa = PBXBuildFile; fileRef = JIANMA_TXT_REF /* jianma.txt */; };
 		ENTABLE_TXT /* en_table.txt in Resources */ = {isa = PBXBuildFile; fileRef = ENTABLE_TXT_REF /* en_table.txt */; };
 		DICTENGINE_SWIFT /* DictionaryEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = DICTENGINE_SWIFT_REF /* DictionaryEngine.swift */; };
@@ -34,7 +32,6 @@
 		INPUTMETHOD_FW /* InputMethodKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = INPUTMETHOD_FW_REF /* InputMethodKit.framework */; };
 		MAIN_SWIFT /* main.swift in Sources */ = {isa = PBXBuildFile; fileRef = MAIN_SWIFT_REF /* main.swift */; };
 		MODEINDICATOR_SWIFT /* ModeIndicator.swift in Sources */ = {isa = PBXBuildFile; fileRef = MODEINDICATOR_SWIFT_REF /* ModeIndicator.swift */; };
-		POLYPHONEWORDS_JSON /* polyphone_words.json in Resources */ = {isa = PBXBuildFile; fileRef = POLYPHONEWORDS_JSON_REF /* polyphone_words.json */; };
 		PREFIXTRIE_SWIFT /* PrefixTrie.swift in Sources */ = {isa = PBXBuildFile; fileRef = PREFIXTRIE_SWIFT_REF /* PrefixTrie.swift */; };
 		PRELOAD_SWIFT /* DictionaryPreloadService.swift in Sources */ = {isa = PBXBuildFile; fileRef = PRELOAD_SWIFT_REF /* DictionaryPreloadService.swift */; };
 		PUNCTUATION_SWIFT /* PunctuationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = PUNCTUATION_SWIFT_REF /* PunctuationView.swift */; };
@@ -64,8 +61,6 @@
 		ASSETS_REF /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		BASICSETTINGS_SWIFT_REF /* BasicSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BasicSettingsView.swift; sourceTree = "<group>"; };
 		CANDIDATEWIN_SWIFT_REF /* CandidateWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CandidateWindow.swift; sourceTree = "<group>"; };
-		CHARTOPINYIN_JSON_REF /* char_to_pinyin.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = char_to_pinyin.json; sourceTree = "<group>"; };
-		CHARTOWUBI_JSON_REF /* char_to_wubi.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = char_to_wubi.json; sourceTree = "<group>"; };
 		JIANMA_TXT_REF /* jianma.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = jianma.txt; sourceTree = "<group>"; };
 		ENTABLE_TXT_REF /* en_table.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = en_table.txt; sourceTree = "<group>"; };
 		DICTENGINE_SWIFT_REF /* DictionaryEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DictionaryEngine.swift; sourceTree = "<group>"; };
@@ -83,7 +78,6 @@
 		INPUTMETHOD_FW_REF /* InputMethodKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = InputMethodKit.framework; path = System/Library/Frameworks/InputMethodKit.framework; sourceTree = SDKROOT; };
 		MAIN_SWIFT_REF /* main.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = main.swift; sourceTree = "<group>"; };
 		MODEINDICATOR_SWIFT_REF /* ModeIndicator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModeIndicator.swift; sourceTree = "<group>"; };
-		POLYPHONEWORDS_JSON_REF /* polyphone_words.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = polyphone_words.json; sourceTree = "<group>"; };
 		PREFIXTRIE_SWIFT_REF /* PrefixTrie.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrefixTrie.swift; sourceTree = "<group>"; };
 		PRELOAD_SWIFT_REF /* DictionaryPreloadService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DictionaryPreloadService.swift; sourceTree = "<group>"; };
 		PUNCTUATION_SWIFT_REF /* PunctuationView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PunctuationView.swift; sourceTree = "<group>"; };
@@ -168,9 +162,6 @@
 		RESOURCES_JSON_GROUP /* Resources */ = {
 			isa = PBXGroup;
 			children = (
-				CHARTOWUBI_JSON_REF /* char_to_wubi.json */,
-				CHARTOPINYIN_JSON_REF /* char_to_pinyin.json */,
-				POLYPHONEWORDS_JSON_REF /* polyphone_words.json */,
 				JIANMA_TXT_REF /* jianma.txt */,
 				ENTABLE_TXT_REF /* en_table.txt */,
 			);
@@ -321,9 +312,6 @@
 			files = (
 				INFOPLIST_STRINGS /* InfoPlist.strings in Resources */,
 				ASSETS_BUILD /* Assets.xcassets in Resources */,
-				CHARTOWUBI_JSON /* char_to_wubi.json in Resources */,
-				CHARTOPINYIN_JSON /* char_to_pinyin.json in Resources */,
-				POLYPHONEWORDS_JSON /* polyphone_words.json in Resources */,
 				JIANMA_TXT /* jianma.txt in Resources */,
 				ENTABLE_TXT /* en_table.txt in Resources */,
 			);

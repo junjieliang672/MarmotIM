@@ -868,10 +868,34 @@ def save_sqlite(entries: List[dict], pinyin_index: Dict, wubi_index: Dict, filep
         CREATE INDEX idx_fuzzy_code ON fuzzy_pinyin(fuzzy_code);
         CREATE INDEX idx_symbol_code ON symbol_index(code);
         CREATE INDEX idx_filter_freq ON filter_user_freq(filter_type, code);
+
+        -- Reverse lookup tables (for 划词入库 feature)
+        -- Single character to wubi code
+        CREATE TABLE char_to_wubi (
+            char TEXT PRIMARY KEY,
+            wubi_code TEXT NOT NULL
+        );
+        CREATE INDEX idx_char_wubi ON char_to_wubi(char);
+
+        -- Single character to pinyin (supports multiple readings)
+        CREATE TABLE char_to_pinyin (
+            char TEXT NOT NULL,
+            pinyin TEXT NOT NULL,
+            is_primary INTEGER DEFAULT 1,
+            PRIMARY KEY (char, pinyin)
+        );
+        CREATE INDEX idx_char_pinyin ON char_to_pinyin(char);
+
+        -- Multi-character polyphone disambiguation
+        CREATE TABLE polyphone_words (
+            word TEXT PRIMARY KEY,
+            pinyin TEXT NOT NULL
+        );
     ''')
 
     # Set schema version (4 = add is_deleted to user_favorites)
-    cursor.execute("INSERT INTO schema_version (version) VALUES (4)")
+    # Schema version 5: Add reverse lookup tables (char_to_wubi, char_to_pinyin, polyphone_words)
+    cursor.execute("INSERT INTO schema_version (version) VALUES (5)")
     conn.commit()
 
     # Insert entries in a single transaction for performance
@@ -1115,6 +1139,69 @@ def save_symbol_index_txt(entries: list, vocab_dir: str):
     print(f"  Saved symbol index to {output_path}")
 
 
+def build_reverse_lookup_tables(cursor, vocab_dir: str):
+    """Build reverse lookup tables from JSON files for 划词入库 feature."""
+    print("Building reverse lookup tables...")
+
+    # Load char_to_wubi.json
+    char_to_wubi_path = os.path.join(vocab_dir, 'char_to_wubi.json')
+    if os.path.exists(char_to_wubi_path):
+        with open(char_to_wubi_path, 'r', encoding='utf-8') as f:
+            char_to_wubi = json.load(f)
+
+        cursor.execute("DELETE FROM char_to_wubi")
+        count = 0
+        for char, code in char_to_wubi.items():
+            if len(char) == 1:  # Only single characters
+                cursor.execute(
+                    "INSERT OR IGNORE INTO char_to_wubi (char, wubi_code) VALUES (?, ?)",
+                    (char, code)
+                )
+                count += 1
+        print(f"  Added {count} char_to_wubi entries")
+    else:
+        print(f"  Warning: {char_to_wubi_path} not found")
+
+    # Load char_to_pinyin.json
+    char_to_pinyin_path = os.path.join(vocab_dir, 'char_to_pinyin.json')
+    if os.path.exists(char_to_pinyin_path):
+        with open(char_to_pinyin_path, 'r', encoding='utf-8') as f:
+            char_to_pinyin = json.load(f)
+
+        cursor.execute("DELETE FROM char_to_pinyin")
+        count = 0
+        for char, pinyins in char_to_pinyin.items():
+            if len(char) == 1 and isinstance(pinyins, list):
+                for idx, pinyin in enumerate(pinyins):
+                    is_primary = 1 if idx == 0 else 0
+                    cursor.execute(
+                        "INSERT OR IGNORE INTO char_to_pinyin (char, pinyin, is_primary) VALUES (?, ?, ?)",
+                        (char, pinyin, is_primary)
+                    )
+                    count += 1
+        print(f"  Added {count} char_to_pinyin entries")
+    else:
+        print(f"  Warning: {char_to_pinyin_path} not found")
+
+    # Load polyphone_words.json
+    polyphone_path = os.path.join(vocab_dir, 'polyphone_words.json')
+    if os.path.exists(polyphone_path):
+        with open(polyphone_path, 'r', encoding='utf-8') as f:
+            polyphone_words = json.load(f)
+
+        cursor.execute("DELETE FROM polyphone_words")
+        count = 0
+        for word, pinyin in polyphone_words.items():
+            cursor.execute(
+                "INSERT OR IGNORE INTO polyphone_words (word, pinyin) VALUES (?, ?)",
+                (word, pinyin)
+            )
+            count += 1
+        print(f"  Added {count} polyphone_words entries")
+    else:
+        print(f"  Warning: {polyphone_path} not found")
+
+
 def load_corpus_frequencies(filepath: str) -> Dict[str, float]:
     """
     Load word frequency data from a corpus file.
@@ -1332,6 +1419,9 @@ def main():
                 build_symbol_index(cursor, symbol_path, vocab_dir)
             else:
                 print(f"Warning: symbols.yaml not found at {symbol_path}")
+
+        # Build reverse lookup tables for 划词入库 feature
+        build_reverse_lookup_tables(cursor, vocab_dir)
 
         conn.commit()
         conn.close()
