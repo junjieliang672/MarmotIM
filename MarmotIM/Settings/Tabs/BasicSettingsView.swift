@@ -50,6 +50,13 @@ struct BasicSettingsView: View {
                             .monospacedDigit()
                         Spacer()
                     }
+
+                    Toggle(isOn: $viewModel.config.addSpaceAfterEnglish) {
+                        Text("选中英文候选词后自动添加空格")
+                    }
+                    .onChange(of: viewModel.config.addSpaceAfterEnglish) { _ in
+                        viewModel.save()
+                    }
                 }
 
                 // Icon section

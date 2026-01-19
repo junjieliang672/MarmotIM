@@ -894,7 +894,15 @@ class InputController: IMKInputController {
         let candidate = currentCandidates[index]
         NSLog("MarmotIM: selectCandidate - text='%@', entryId=%u, baseFreq=%u, inputCode='%@'",
               candidate.text, candidate.entryId, candidate.baseFrequency, inputBuffer)
-        commitText(candidate.text, client: sender)
+
+        // Add space after English candidate if setting is enabled
+        let outputText: String
+        if candidate.codeType == .english && AppDelegate.config.addSpaceAfterEnglish {
+            outputText = candidate.text + " "
+        } else {
+            outputText = candidate.text
+        }
+        commitText(outputText, client: sender)
 
         // If in filter mode, exit after selection
         if filterMode != .none {

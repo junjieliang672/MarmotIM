@@ -167,6 +167,9 @@ struct AppConfig: Codable {
     /// Number of candidates to show (3-9)
     var candidateCount: Int
 
+    /// Add a space after selecting an English candidate
+    var addSpaceAfterEnglish: Bool
+
     // MARK: - Icon Settings (图标)
 
     /// Show extra icon in status bar
@@ -217,6 +220,7 @@ struct AppConfig: Codable {
 
         // Candidate Settings
         candidateCount: 9,
+        addSpaceAfterEnglish: false,
 
         // Icon Settings
         showStatusBarIcon: false,
@@ -346,6 +350,7 @@ extension AppConfig {
     enum CodingKeys: String, CodingKey {
         case enterKeyBehavior
         case candidateCount
+        case addSpaceAfterEnglish
         case showStatusBarIcon
         case showModeIndicator
         case punctuationMode
