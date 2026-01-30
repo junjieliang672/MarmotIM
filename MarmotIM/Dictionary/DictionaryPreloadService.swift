@@ -185,6 +185,11 @@ final class DictionaryPreloadService {
         NSLog("MarmotIM: Loading user learning data...")
         let userLearning = db.loadAllUserLearning()
         engine.loadUserLearningData(userLearning)
+        updateProgress(0.88)
+
+        // Load suppressed words cache
+        NSLog("MarmotIM: Loading suppressed words cache...")
+        engine.loadSuppressedWordsCache()
         updateProgress(0.9)
 
         // Final setup

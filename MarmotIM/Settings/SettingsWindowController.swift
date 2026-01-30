@@ -74,6 +74,7 @@ enum SettingsTab: String, CaseIterable, Identifiable {
     case userDict = "用户词库"
     case punctuation = "标点符号"
     case theme = "主题"
+    case suppressedWords = "降权词库"
     case importExport = "导入导出"
     case about = "关于"
 
@@ -85,6 +86,7 @@ enum SettingsTab: String, CaseIterable, Identifiable {
         case .userDict: return "doc.text"
         case .punctuation: return "number"
         case .theme: return "paintbrush"
+        case .suppressedWords: return "arrow.down.circle"
         case .importExport: return "arrow.up.arrow.down.circle"
         case .about: return "info.circle"
         }
@@ -127,6 +129,8 @@ struct SettingsView: View {
                     PunctuationView(viewModel: viewModel)
                 case .theme:
                     ThemeSettingsView(viewModel: viewModel)
+                case .suppressedWords:
+                    SuppressedWordsView(viewModel: viewModel)
                 case .importExport:
                     ImportExportView()
                 case .about:

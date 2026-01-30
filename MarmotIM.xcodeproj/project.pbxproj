@@ -18,11 +18,11 @@
 		BASICSETTINGS_SWIFT /* BasicSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BASICSETTINGS_SWIFT_REF /* BasicSettingsView.swift */; };
 		CANDIDATEWIN_SWIFT /* CandidateWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = CANDIDATEWIN_SWIFT_REF /* CandidateWindow.swift */; };
 		CD79C8E494C4295842A8153C /* UserTierIndex.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2E829BD9C75CF11CD1945BC6 /* UserTierIndex.swift */; };
-		JIANMA_TXT /* jianma.txt in Resources */ = {isa = PBXBuildFile; fileRef = JIANMA_TXT_REF /* jianma.txt */; };
-		ENTABLE_TXT /* en_table.txt in Resources */ = {isa = PBXBuildFile; fileRef = ENTABLE_TXT_REF /* en_table.txt */; };
+		D1E9902BFDE961700B841B88 /* SuppressedWordsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 30978ACAE0C248DBDF722697 /* SuppressedWordsView.swift */; };
 		DICTENGINE_SWIFT /* DictionaryEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = DICTENGINE_SWIFT_REF /* DictionaryEngine.swift */; };
 		DICTENTRY_SWIFT /* DictionaryEntry.swift in Sources */ = {isa = PBXBuildFile; fileRef = DICTENTRY_SWIFT_REF /* DictionaryEntry.swift */; };
 		ENGLISHWORDINDEX_SWIFT /* EnglishWordIndex.swift in Sources */ = {isa = PBXBuildFile; fileRef = ENGLISHWORDINDEX_SWIFT_REF /* EnglishWordIndex.swift */; };
+		ENTABLE_TXT /* en_table.txt in Resources */ = {isa = PBXBuildFile; fileRef = ENTABLE_TXT_REF /* en_table.txt */; };
 		F5FE4749BE7140CABCCD842A /* HotTierIndex.swift in Sources */ = {isa = PBXBuildFile; fileRef = 65A3A4EBE7E620D359EA4DA0 /* HotTierIndex.swift */; };
 		FRECENCY_SWIFT /* FrecencyScore.swift in Sources */ = {isa = PBXBuildFile; fileRef = FRECENCY_SWIFT_REF /* FrecencyScore.swift */; };
 		ICLOUDSYNCMGR_SWIFT /* iCloudSyncManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = ICLOUDSYNCMGR_SWIFT_REF /* iCloudSyncManager.swift */; };
@@ -30,6 +30,7 @@
 		INFOPLIST_STRINGS /* InfoPlist.strings in Resources */ = {isa = PBXBuildFile; fileRef = INFOPLIST_STRINGS_REF /* InfoPlist.strings */; };
 		INPUTCONTROLLER_SWIFT /* InputController.swift in Sources */ = {isa = PBXBuildFile; fileRef = INPUTCONTROLLER_SWIFT_REF /* InputController.swift */; };
 		INPUTMETHOD_FW /* InputMethodKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = INPUTMETHOD_FW_REF /* InputMethodKit.framework */; };
+		JIANMA_TXT /* jianma.txt in Resources */ = {isa = PBXBuildFile; fileRef = JIANMA_TXT_REF /* jianma.txt */; };
 		MAIN_SWIFT /* main.swift in Sources */ = {isa = PBXBuildFile; fileRef = MAIN_SWIFT_REF /* main.swift */; };
 		MODEINDICATOR_SWIFT /* ModeIndicator.swift in Sources */ = {isa = PBXBuildFile; fileRef = MODEINDICATOR_SWIFT_REF /* ModeIndicator.swift */; };
 		PREFIXTRIE_SWIFT /* PrefixTrie.swift in Sources */ = {isa = PBXBuildFile; fileRef = PREFIXTRIE_SWIFT_REF /* PrefixTrie.swift */; };
@@ -51,6 +52,7 @@
 /* Begin PBXFileReference section */
 		1610DB0D2564315AA141A20A /* LRUCache.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = LRUCache.swift; path = LRUCache.swift; sourceTree = "<group>"; };
 		2E829BD9C75CF11CD1945BC6 /* UserTierIndex.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = UserTierIndex.swift; path = UserTierIndex.swift; sourceTree = "<group>"; };
+		30978ACAE0C248DBDF722697 /* SuppressedWordsView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SuppressedWordsView.swift; sourceTree = "<group>"; };
 		65A3A4EBE7E620D359EA4DA0 /* HotTierIndex.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = HotTierIndex.swift; path = HotTierIndex.swift; sourceTree = "<group>"; };
 		82937A1A9F7D91EE509602A3 /* VisualEffectView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = VisualEffectView.swift; sourceTree = "<group>"; };
 		8614B2A644D450D6AF22833E /* MarmotLogoView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MarmotLogoView.swift; sourceTree = "<group>"; };
@@ -61,11 +63,10 @@
 		ASSETS_REF /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		BASICSETTINGS_SWIFT_REF /* BasicSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BasicSettingsView.swift; sourceTree = "<group>"; };
 		CANDIDATEWIN_SWIFT_REF /* CandidateWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CandidateWindow.swift; sourceTree = "<group>"; };
-		JIANMA_TXT_REF /* jianma.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = jianma.txt; sourceTree = "<group>"; };
-		ENTABLE_TXT_REF /* en_table.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = en_table.txt; sourceTree = "<group>"; };
 		DICTENGINE_SWIFT_REF /* DictionaryEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DictionaryEngine.swift; sourceTree = "<group>"; };
 		DICTENTRY_SWIFT_REF /* DictionaryEntry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DictionaryEntry.swift; sourceTree = "<group>"; };
 		ENGLISHWORDINDEX_SWIFT_REF /* EnglishWordIndex.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EnglishWordIndex.swift; sourceTree = "<group>"; };
+		ENTABLE_TXT_REF /* en_table.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = en_table.txt; sourceTree = "<group>"; };
 		ENTITLEMENTS_REF /* MarmotIM.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = MarmotIM.entitlements; sourceTree = "<group>"; };
 		F42251310BC5680321494D60 /* CompactIndex.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = CompactIndex.swift; path = CompactIndex.swift; sourceTree = "<group>"; };
 		FRECENCY_SWIFT_REF /* FrecencyScore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FrecencyScore.swift; sourceTree = "<group>"; };
@@ -76,6 +77,7 @@
 		INFO_PLIST_REF /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		INPUTCONTROLLER_SWIFT_REF /* InputController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InputController.swift; sourceTree = "<group>"; };
 		INPUTMETHOD_FW_REF /* InputMethodKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = InputMethodKit.framework; path = System/Library/Frameworks/InputMethodKit.framework; sourceTree = SDKROOT; };
+		JIANMA_TXT_REF /* jianma.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = jianma.txt; sourceTree = "<group>"; };
 		MAIN_SWIFT_REF /* main.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = main.swift; sourceTree = "<group>"; };
 		MODEINDICATOR_SWIFT_REF /* ModeIndicator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModeIndicator.swift; sourceTree = "<group>"; };
 		PREFIXTRIE_SWIFT_REF /* PrefixTrie.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrefixTrie.swift; sourceTree = "<group>"; };
@@ -203,6 +205,7 @@
 				THEMESETTINGS_SWIFT_REF /* ThemeSettingsView.swift */,
 				IMPORTEXPORT_SWIFT_REF /* ImportExportView.swift */,
 				ABOUTVIEW_SWIFT_REF /* AboutView.swift */,
+				30978ACAE0C248DBDF722697 /* SuppressedWordsView.swift */,
 			);
 			path = Tabs;
 			sourceTree = "<group>";
@@ -357,6 +360,7 @@
 				B5A0FC3FC4AF28737AB0B27D /* LRUCache.swift in Sources */,
 				F5FE4749BE7140CABCCD842A /* HotTierIndex.swift in Sources */,
 				CD79C8E494C4295842A8153C /* UserTierIndex.swift in Sources */,
+				D1E9902BFDE961700B841B88 /* SuppressedWordsView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

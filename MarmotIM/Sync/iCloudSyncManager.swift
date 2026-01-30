@@ -33,6 +33,7 @@ class iCloudSyncManager {
     private let learningFileName = "user_learning.json"
     private let favoritesFileName = "user_favorites.json"
     private let filterFreqFileName = "filter_user_freq.json"
+    private let suppressedWordsFileName = "user_suppressed_words.json"
 
     // MARK: - Initialization
 
@@ -175,6 +176,7 @@ class iCloudSyncManager {
             try syncLearningData(documentsURL: documentsURL)
             try syncFavoritesData(documentsURL: documentsURL)
             try syncFilterFreqData(documentsURL: documentsURL)
+            try syncSuppressedWordsData(documentsURL: documentsURL)
 
             // 3. Update status
             lastSyncTime = Date()
@@ -246,6 +248,28 @@ class iCloudSyncManager {
         }
 
         try writeRemoteFilterFreq(merged, to: remoteURL)
+    }
+
+    // MARK: - Sync Suppressed Words
+
+    private func syncSuppressedWordsData(documentsURL: URL) throws {
+        let remoteURL = documentsURL.appendingPathComponent(suppressedWordsFileName)
+
+        let localRecords = try readLocalSuppressedWords()
+        let remoteRecords = try readRemoteSuppressedWords(from: remoteURL)
+        let merged = SyncMerger.mergeSuppressedWords(local: localRecords, remote: remoteRecords)
+
+        let changed = SyncMerger.findChangedSuppressedWords(merged: merged, original: localRecords)
+        if !changed.isEmpty {
+            try writeLocalSuppressedWords(changed)
+            NSLog("MarmotIM: Updated \(changed.count) suppressed word records")
+            // Post notification to update suppressed words cache
+            DispatchQueue.main.async {
+                NotificationCenter.default.post(name: .suppressedWordsDidChange, object: nil)
+            }
+        }
+
+        try writeRemoteSuppressedWords(merged, to: remoteURL)
     }
 
     // MARK: - Read Local Database
@@ -343,6 +367,36 @@ class iCloudSyncManager {
         return records
     }
 
+    private func readLocalSuppressedWords() throws -> [String: SuppressedWordRecord] {
+        var db: OpaquePointer?
+        guard sqlite3_open_v2(localDBPath.path, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else {
+            throw SyncError.databaseOpenFailed
+        }
+        defer { sqlite3_close(db) }
+
+        var records: [String: SuppressedWordRecord] = [:]
+        let sql = "SELECT text, suppressed_timestamp, is_deleted FROM user_suppressed_words"
+        var stmt: OpaquePointer?
+
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            throw SyncError.queryFailed
+        }
+        defer { sqlite3_finalize(stmt) }
+
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            let text = String(cString: sqlite3_column_text(stmt, 0))
+            let suppressedTimestamp = Int(sqlite3_column_int(stmt, 1))
+            let isDeleted = sqlite3_column_int(stmt, 2) != 0
+
+            records[text] = SuppressedWordRecord(
+                suppressedTimestamp: suppressedTimestamp,
+                isDeleted: isDeleted
+            )
+        }
+
+        return records
+    }
+
     // MARK: - Read Remote (iCloud)
 
     private func readRemoteLearning(from url: URL) throws -> [String: LearningRecord] {
@@ -419,6 +473,36 @@ class iCloudSyncManager {
             do {
                 let data = try Data(contentsOf: coordURL)
                 let syncFile = try JSONDecoder().decode(SyncFile<FilterFreqRecord>.self, from: data)
+                records = syncFile.records
+            } catch {
+                readError = error
+            }
+        }
+
+        if let error = coordinatorError {
+            throw SyncError.fileCoordinationFailed(underlying: error)
+        }
+        if let error = readError {
+            throw error
+        }
+
+        return records
+    }
+
+    private func readRemoteSuppressedWords(from url: URL) throws -> [String: SuppressedWordRecord] {
+        guard FileManager.default.fileExists(atPath: url.path) else {
+            return [:]
+        }
+
+        var coordinatorError: NSError?
+        var readError: Error?
+        var records: [String: SuppressedWordRecord] = [:]
+
+        let coordinator = NSFileCoordinator()
+        coordinator.coordinate(readingItemAt: url, options: [], error: &coordinatorError) { coordURL in
+            do {
+                let data = try Data(contentsOf: coordURL)
+                let syncFile = try JSONDecoder().decode(SyncFile<SuppressedWordRecord>.self, from: data)
                 records = syncFile.records
             } catch {
                 readError = error
@@ -554,6 +638,39 @@ class iCloudSyncManager {
         sqlite3_exec(db, "COMMIT", nil, nil, nil)
     }
 
+    private func writeLocalSuppressedWords(_ records: [(String, SuppressedWordRecord)]) throws {
+        var db: OpaquePointer?
+        guard sqlite3_open(localDBPath.path, &db) == SQLITE_OK else {
+            throw SyncError.databaseOpenFailed
+        }
+        defer { sqlite3_close(db) }
+
+        sqlite3_exec(db, "BEGIN TRANSACTION", nil, nil, nil)
+
+        let sql = """
+            INSERT OR REPLACE INTO user_suppressed_words
+            (text, suppressed_timestamp, is_deleted)
+            VALUES (?, ?, ?)
+        """
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            sqlite3_exec(db, "ROLLBACK", nil, nil, nil)
+            throw SyncError.queryFailed
+        }
+        defer { sqlite3_finalize(stmt) }
+
+        for (text, record) in records {
+            let textNS = text as NSString
+            sqlite3_bind_text(stmt, 1, textNS.utf8String, -1, nil)
+            sqlite3_bind_int(stmt, 2, Int32(record.suppressedTimestamp))
+            sqlite3_bind_int(stmt, 3, record.isDeleted ? 1 : 0)
+            sqlite3_step(stmt)
+            sqlite3_reset(stmt)
+        }
+
+        sqlite3_exec(db, "COMMIT", nil, nil, nil)
+    }
+
     // MARK: - Write Remote (iCloud)
 
     private func writeRemoteLearning(_ records: [String: LearningRecord], to url: URL) throws {
@@ -627,4 +744,35 @@ class iCloudSyncManager {
             throw error
         }
     }
+
+    private func writeRemoteSuppressedWords(_ records: [String: SuppressedWordRecord], to url: URL) throws {
+        let syncFile = SyncFile(records: records)
+        let data = try JSONEncoder().encode(syncFile)
+
+        var coordinatorError: NSError?
+        var writeError: Error?
+
+        let coordinator = NSFileCoordinator()
+        coordinator.coordinate(writingItemAt: url, options: .forReplacing, error: &coordinatorError) { coordURL in
+            do {
+                try data.write(to: coordURL, options: .atomic)
+            } catch {
+                writeError = error
+            }
+        }
+
+        if let error = coordinatorError {
+            throw SyncError.fileCoordinationFailed(underlying: error)
+        }
+        if let error = writeError {
+            throw error
+        }
+    }
+}
+
+// MARK: - Notification Names
+
+extension Notification.Name {
+    /// Posted when suppressed words are updated via sync
+    static let suppressedWordsDidChange = Notification.Name("MarmotIMSuppressedWordsDidChange")
 }

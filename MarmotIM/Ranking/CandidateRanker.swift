@@ -78,12 +78,16 @@ struct CandidateRanker {
     ///   - matches: Dictionary matches to rank
     ///   - inputCode: The input code used for matching
     ///   - engine: Dictionary engine for user learning data
+    ///   - suppressedWords: Set of words that should ignore user behavior scores (optional)
     /// - Returns: Ranked and sorted candidates
     static func rank(
         matches: [DictionaryMatch],
         inputCode: String,
-        engine: DictionaryEngine
+        engine: DictionaryEngine,
+        suppressedWords: Set<String>? = nil
     ) -> [Candidate] {
+        // Get suppressed words from engine if not provided
+        let suppressedSet = suppressedWords ?? engine.getSuppressedWords()
         // STEP 1: Deduplicate by text, preferring entries with user data
         // This fixes the bug where duplicate entries for the same word have different IDs
         var textToMatch: [String: (match: DictionaryMatch, userData: UserEntryData?)] = [:]
@@ -124,15 +128,18 @@ struct CandidateRanker {
         for (_, (match, userData)) in textToMatch {
             // Calculate score components
             let tierBonus = getTierBonus(match: match, inputCode: inputCode, engine: engine)
+            let isSuppressed = suppressedSet.contains(match.entry.text)
             let timestamp = userData?.lastAccessTimestamp ?? 0
-            let tierOverrideBoost = FrecencyScore.calculateTierOverrideBoost(lastAccessTimestamp: timestamp)
+            // Suppressed words have no tierOverrideBoost
+            let tierOverrideBoost = isSuppressed ? 0.0 : FrecencyScore.calculateTierOverrideBoost(lastAccessTimestamp: timestamp)
 
             // Calculate full score using tier-based Frecency
             let score = calculateScore(
                 match: match,
                 userData: userData,
                 inputCode: inputCode,
-                engine: engine
+                engine: engine,
+                isSuppressed: isSuppressed
             )
 
             // Determine if this is a jianma (protected wubi shortcode)
@@ -151,12 +158,14 @@ struct CandidateRanker {
         // A candidate is "boosted" if:
         // 1. It has active tierOverrideBoost (> 0)
         // 2. It would NOT be #1 without the tierOverrideBoost and recency score
+        // Note: Suppressed words never have boost, so they can't be "boosted"
         if candidates.count >= 2 {
             let first = candidates[0]
             let second = candidates[1]
             let firstBoost = tierOverrideBoosts[first.entryId] ?? 0
 
-            if firstBoost > 0 {
+            // Only check for boost if this word is not suppressed
+            if firstBoost > 0 && !suppressedSet.contains(first.text) {
                 // Get the userData for first candidate to calculate actual recency
                 if let (_, userData) = textToMatch[first.text] {
                     let actualRecency = FrecencyScore.calculateRecencyScore(
@@ -230,34 +239,35 @@ struct CandidateRanker {
     // MARK: - Score Calculation
 
     /// Calculate score for a single match
+    ///
+    /// For suppressed words, only word-intrinsic scores are used:
+    /// - TierBonus: tier level from match type (kept)
+    /// - BaseScore: dictionary base frequency (kept)
+    /// - ShortWordBonus: shorter word preference (kept)
+    ///
+    /// User behavior scores are ignored for suppressed words:
+    /// - TierOverrideBoost: recent selection boost
+    /// - RecencyScore: time since last use
+    /// - FrequencyScore: total usage count
     private static func calculateScore(
         match: DictionaryMatch,
         userData: UserEntryData?,
         inputCode: String,
-        engine: DictionaryEngine
+        engine: DictionaryEngine,
+        isSuppressed: Bool = false
     ) -> Double {
         let inputLength = inputCode.count
         let isFullMatch = match.matchType == .full
         let isWubiCode = match.codeType == .wubi
 
-        // 1. Tier bonus (absolute, determines tier)
+        // 1. Tier bonus (absolute, determines tier) - KEPT for suppressed words
         let tierBonus = getTierBonus(match: match, inputCode: inputCode, engine: engine)
 
-        // 2. Core Frecency score (recency + frequency + base)
-        let accessCount = userData?.accessCount ?? 0
-        let timestamp = userData?.lastAccessTimestamp ?? 0
-        let recencyScore = FrecencyScore.calculateRecencyScore(lastAccessTimestamp: timestamp)
-        let frequencyScore = FrecencyScore.calculateFrequencyScore(accessCount: accessCount)
-        // Use mode-specific base frequency based on how this match was found
+        // 2. Base score from dictionary frequency - KEPT for suppressed words
         let baseFrequency = match.entry.baseFrequency(for: match.codeType)
         let baseScore = FrecencyScore.calculateBaseScore(baseFrequency: baseFrequency)
 
-        // 3. Tier override boost (short-term, can override tier priority)
-        // This allows recently selected entries to temporarily rank above higher-tier entries
-        let tierOverrideBoost = FrecencyScore.calculateTierOverrideBoost(lastAccessTimestamp: timestamp)
-
-        // 4. Short word bonus (prefer shorter words within tier)
-        // Special case: Wubi 4-char full match prefers 2-char words over 1-char words
+        // 3. Short word bonus (prefer shorter words within tier) - KEPT for suppressed words
         var shortWordBonus: Double = 0
         let textLength = match.entry.textLength
         if isFullMatch && isWubiCode && inputLength == 4 && textLength == 2 {
@@ -266,6 +276,19 @@ struct CandidateRanker {
         } else if textLength < 5 {
             // Default: shorter words get higher bonus
             shortWordBonus = Double(5 - textLength) * shortWordBonusPerChar
+        }
+
+        // 4. User behavior scores - IGNORED for suppressed words
+        var tierOverrideBoost: Double = 0
+        var recencyScore: Double = 0
+        var frequencyScore: Double = 0
+
+        if !isSuppressed {
+            let accessCount = userData?.accessCount ?? 0
+            let timestamp = userData?.lastAccessTimestamp ?? 0
+            tierOverrideBoost = FrecencyScore.calculateTierOverrideBoost(lastAccessTimestamp: timestamp)
+            recencyScore = FrecencyScore.calculateRecencyScore(lastAccessTimestamp: timestamp)
+            frequencyScore = FrecencyScore.calculateFrequencyScore(accessCount: accessCount)
         }
 
         let totalScore = tierBonus + tierOverrideBoost + recencyScore + frequencyScore + baseScore + shortWordBonus

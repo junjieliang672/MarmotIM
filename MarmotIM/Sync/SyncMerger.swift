@@ -169,4 +169,60 @@ struct SyncMerger {
 
         return changed
     }
+
+    // MARK: - User Suppressed Words Merge
+
+    /// Merge user_suppressed_words records
+    /// Conflict resolution: keep record with newer suppressedTimestamp
+    /// IMPORTANT: Respects is_deleted flag to prevent resurrecting deleted entries
+    /// - Parameters:
+    ///   - local: Local records (key: text)
+    ///   - remote: Remote records from iCloud
+    /// - Returns: Merged records
+    static func mergeSuppressedWords(
+        local: [String: SuppressedWordRecord],
+        remote: [String: SuppressedWordRecord]
+    ) -> [String: SuppressedWordRecord] {
+        var result = local
+
+        for (key, remoteRecord) in remote {
+            if let localRecord = result[key] {
+                // Conflict: keep the one with newer timestamp
+                // The newer timestamp wins, regardless of is_deleted state
+                // This ensures that a deletion with newer timestamp takes precedence
+                if remoteRecord.suppressedTimestamp > localRecord.suppressedTimestamp {
+                    result[key] = remoteRecord
+                }
+            } else {
+                // Only exists in remote: only add if NOT deleted
+                // This prevents resurrecting entries that were deleted locally
+                // and the local deletion record was purged
+                if !remoteRecord.isDeleted {
+                    result[key] = remoteRecord
+                }
+            }
+        }
+
+        return result
+    }
+
+    static func findChangedSuppressedWords(
+        merged: [String: SuppressedWordRecord],
+        original: [String: SuppressedWordRecord]
+    ) -> [(String, SuppressedWordRecord)] {
+        var changed: [(String, SuppressedWordRecord)] = []
+
+        for (key, record) in merged {
+            if let orig = original[key] {
+                if record.suppressedTimestamp != orig.suppressedTimestamp ||
+                   record.isDeleted != orig.isDeleted {
+                    changed.append((key, record))
+                }
+            } else {
+                changed.append((key, record))
+            }
+        }
+
+        return changed
+    }
 }

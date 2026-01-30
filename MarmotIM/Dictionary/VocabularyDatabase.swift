@@ -18,7 +18,8 @@ final class VocabularyDatabase {
     /// Database schema version for migrations
     /// Version 4: Add is_deleted column to user_favorites
     /// Version 5: Add reverse lookup tables (char_to_wubi, char_to_pinyin, polyphone_words)
-    private static let schemaVersion = 5
+    /// Version 6: Add user_suppressed_words table for suppressed word ranking
+    private static let schemaVersion = 6
 
     // MARK: - Initialization
 
@@ -1048,6 +1049,204 @@ final class VocabularyDatabase {
         return results
     }
 
+    // MARK: - User Suppressed Words (降权词库)
+
+    /// Add a word to the suppressed words list
+    /// - Parameter text: The word to suppress
+    /// - Returns: True if successful
+    func suppressWord(text: String) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+
+        let sql = """
+            INSERT INTO user_suppressed_words (text, suppressed_timestamp, is_deleted)
+            VALUES (?, strftime('%s', 'now'), 0)
+            ON CONFLICT(text) DO UPDATE SET
+                suppressed_timestamp = strftime('%s', 'now'),
+                is_deleted = 0
+        """
+
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
+            return false
+        }
+        defer { sqlite3_finalize(statement) }
+
+        sqlite3_bind_text(statement, 1, text, -1, SQLITE_TRANSIENT)
+
+        let result = sqlite3_step(statement) == SQLITE_DONE
+        if result {
+            NSLog("MarmotIM: suppressWord - added '%@' to suppressed words", text)
+        }
+        return result
+    }
+
+    /// Remove a word from the suppressed words list (soft delete)
+    /// - Parameter text: The word to unsuppress
+    /// - Returns: True if successful
+    func unsuppressWord(text: String) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+
+        let sql = """
+            UPDATE user_suppressed_words
+            SET is_deleted = 1, suppressed_timestamp = strftime('%s', 'now')
+            WHERE text = ?
+        """
+
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
+            return false
+        }
+        defer { sqlite3_finalize(statement) }
+
+        sqlite3_bind_text(statement, 1, text, -1, SQLITE_TRANSIENT)
+
+        let result = sqlite3_step(statement) == SQLITE_DONE
+        if result {
+            NSLog("MarmotIM: unsuppressWord - removed '%@' from suppressed words", text)
+        }
+        return result
+    }
+
+    /// Get all active suppressed words (not deleted)
+    /// - Returns: Array of suppressed word texts
+    func getSuppressedWords() -> [String] {
+        lock.lock()
+        defer { lock.unlock() }
+
+        var results: [String] = []
+        let sql = "SELECT text FROM user_suppressed_words WHERE is_deleted = 0"
+        var statement: OpaquePointer?
+
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
+            return []
+        }
+        defer { sqlite3_finalize(statement) }
+
+        while sqlite3_step(statement) == SQLITE_ROW {
+            if let textPtr = sqlite3_column_text(statement, 0) {
+                results.append(String(cString: textPtr))
+            }
+        }
+
+        return results
+    }
+
+    /// Check if a word is suppressed
+    /// - Parameter text: The word to check
+    /// - Returns: True if the word is in the suppressed list
+    func isWordSuppressed(text: String) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+
+        let sql = "SELECT 1 FROM user_suppressed_words WHERE text = ? AND is_deleted = 0 LIMIT 1"
+        var statement: OpaquePointer?
+
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
+            return false
+        }
+        defer { sqlite3_finalize(statement) }
+
+        sqlite3_bind_text(statement, 1, text, -1, SQLITE_TRANSIENT)
+
+        return sqlite3_step(statement) == SQLITE_ROW
+    }
+
+    /// Get all suppressed words with details (for UI display)
+    /// - Returns: Array of tuples containing id, text, and timestamp
+    func getSuppressedWordsWithDetails() -> [(id: Int, text: String, timestamp: Int)] {
+        lock.lock()
+        defer { lock.unlock() }
+
+        var results: [(Int, String, Int)] = []
+        let sql = "SELECT id, text, suppressed_timestamp FROM user_suppressed_words WHERE is_deleted = 0 ORDER BY suppressed_timestamp DESC"
+        var statement: OpaquePointer?
+
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
+            return []
+        }
+        defer { sqlite3_finalize(statement) }
+
+        while sqlite3_step(statement) == SQLITE_ROW {
+            let id = Int(sqlite3_column_int(statement, 0))
+            let textPtr = sqlite3_column_text(statement, 1)
+            let text = textPtr != nil ? String(cString: textPtr!) : ""
+            let timestamp = Int(sqlite3_column_int(statement, 2))
+            results.append((id, text, timestamp))
+        }
+
+        return results
+    }
+
+    /// Remove a suppressed word by ID (soft delete)
+    /// - Parameter id: The ID of the suppressed word to remove
+    /// - Returns: True if successful
+    func unsuppressWordById(_ id: Int) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+
+        let sql = "UPDATE user_suppressed_words SET is_deleted = 1, suppressed_timestamp = strftime('%s', 'now') WHERE id = \(id)"
+        return executeSQL(sql)
+    }
+
+    /// Get all suppressed words including deleted ones (for sync)
+    /// - Returns: Array of tuples containing text, timestamp, and isDeleted flag
+    func getAllSuppressedWordsForSync() -> [(text: String, timestamp: Int, isDeleted: Bool)] {
+        lock.lock()
+        defer { lock.unlock() }
+
+        var results: [(String, Int, Bool)] = []
+        let sql = "SELECT text, suppressed_timestamp, is_deleted FROM user_suppressed_words"
+        var statement: OpaquePointer?
+
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
+            return []
+        }
+        defer { sqlite3_finalize(statement) }
+
+        while sqlite3_step(statement) == SQLITE_ROW {
+            let textPtr = sqlite3_column_text(statement, 0)
+            let text = textPtr != nil ? String(cString: textPtr!) : ""
+            let timestamp = Int(sqlite3_column_int(statement, 1))
+            let isDeleted = sqlite3_column_int(statement, 2) != 0
+            results.append((text, timestamp, isDeleted))
+        }
+
+        return results
+    }
+
+    /// Upsert suppressed word (for sync)
+    /// - Parameters:
+    ///   - text: The word
+    ///   - timestamp: The suppressed timestamp
+    ///   - isDeleted: Whether the word is deleted
+    /// - Returns: True if successful
+    func upsertSuppressedWord(text: String, timestamp: Int, isDeleted: Bool) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+
+        let sql = """
+            INSERT INTO user_suppressed_words (text, suppressed_timestamp, is_deleted)
+            VALUES (?, ?, ?)
+            ON CONFLICT(text) DO UPDATE SET
+                suppressed_timestamp = excluded.suppressed_timestamp,
+                is_deleted = excluded.is_deleted
+        """
+
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
+            return false
+        }
+        defer { sqlite3_finalize(statement) }
+
+        sqlite3_bind_text(statement, 1, text, -1, SQLITE_TRANSIENT)
+        sqlite3_bind_int(statement, 2, Int32(timestamp))
+        sqlite3_bind_int(statement, 3, isDeleted ? 1 : 0)
+
+        return sqlite3_step(statement) == SQLITE_DONE
+    }
+
     // MARK: - Migration
 
     /// Check if database needs migration from JSON
@@ -1123,6 +1322,20 @@ final class VocabularyDatabase {
                     pinyin TEXT NOT NULL
                 )
             """)
+        }
+
+        // Version 6: Add user_suppressed_words table for suppressed word ranking
+        if currentVersion < 6 {
+            NSLog("MarmotIM: Migrating to version 6 (add user_suppressed_words table)...")
+            executeSQL("""
+                CREATE TABLE IF NOT EXISTS user_suppressed_words (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    text TEXT NOT NULL UNIQUE,
+                    suppressed_timestamp INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
+                    is_deleted INTEGER NOT NULL DEFAULT 0
+                )
+            """)
+            executeSQL("CREATE INDEX IF NOT EXISTS idx_suppressed_text ON user_suppressed_words(text)")
         }
 
         setSchemaVersion(targetVersion)

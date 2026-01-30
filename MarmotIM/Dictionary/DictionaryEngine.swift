@@ -68,6 +68,12 @@ class DictionaryEngine {
     /// 英文单词索引
     private var englishWordIndex = EnglishWordIndex()
 
+    /// Suppressed words cache (for efficient O(1) lookup during ranking)
+    private var suppressedWordsCache: Set<String> = []
+
+    /// Lock for suppressed words cache access
+    private let suppressedWordsLock = NSLock()
+
     // MARK: - Initialization
 
     /// Initialize the dictionary engine
@@ -188,6 +194,58 @@ class DictionaryEngine {
         } catch {
             NSLog("MarmotIM: Failed to load English words: \(error)")
         }
+    }
+
+    // MARK: - Suppressed Words Cache
+
+    /// Load suppressed words into cache from database
+    /// Called during preloading and when sync updates suppressed words
+    func loadSuppressedWordsCache() {
+        suppressedWordsLock.lock()
+        defer { suppressedWordsLock.unlock() }
+        suppressedWordsCache = Set(db.getSuppressedWords())
+        NSLog("MarmotIM: Loaded \(suppressedWordsCache.count) suppressed words into cache")
+    }
+
+    /// Get the current set of suppressed words (for ranking)
+    func getSuppressedWords() -> Set<String> {
+        suppressedWordsLock.lock()
+        defer { suppressedWordsLock.unlock() }
+        return suppressedWordsCache
+    }
+
+    /// Update suppressed words cache (called when user adds/removes words)
+    func updateSuppressedWordsCache() {
+        loadSuppressedWordsCache()
+    }
+
+    /// Check if a word is suppressed
+    func isWordSuppressed(_ text: String) -> Bool {
+        suppressedWordsLock.lock()
+        defer { suppressedWordsLock.unlock() }
+        return suppressedWordsCache.contains(text)
+    }
+
+    /// Add a word to suppressed list and update cache
+    func suppressWord(text: String) -> Bool {
+        if db.suppressWord(text: text) {
+            suppressedWordsLock.lock()
+            suppressedWordsCache.insert(text)
+            suppressedWordsLock.unlock()
+            return true
+        }
+        return false
+    }
+
+    /// Remove a word from suppressed list and update cache
+    func unsuppressWord(text: String) -> Bool {
+        if db.unsuppressWord(text: text) {
+            suppressedWordsLock.lock()
+            suppressedWordsCache.remove(text)
+            suppressedWordsLock.unlock()
+            return true
+        }
+        return false
     }
 
     /// 英文完全匹配搜索

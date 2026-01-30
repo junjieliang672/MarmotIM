@@ -63,6 +63,26 @@ struct FilterFreqRecord: Codable {
     }
 }
 
+/// Record for user_suppressed_words table sync
+/// Key format: word text (e.g., "wget", "usr")
+struct SuppressedWordRecord: Codable {
+    var suppressedTimestamp: Int
+    var isDeleted: Bool
+
+    init(suppressedTimestamp: Int, isDeleted: Bool = false) {
+        self.suppressedTimestamp = suppressedTimestamp
+        self.isDeleted = isDeleted
+    }
+
+    // Custom decoding to handle legacy JSON that doesn't have isDeleted
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        suppressedTimestamp = try container.decode(Int.self, forKey: .suppressedTimestamp)
+        // Default to false if missing (backward compatibility)
+        isDeleted = try container.decodeIfPresent(Bool.self, forKey: .isDeleted) ?? false
+    }
+}
+
 // MARK: - Key Generation Helpers
 
 extension FilterFreqRecord {
