@@ -251,8 +251,14 @@ class InputController: IMKInputController {
 
         // Handle punctuation - convert based on config
         if let char = characters.first, !char.isLetter && !char.isNumber && !char.isWhitespace {
-            // Only handle punctuation in Chinese mode and when not composing
-            if !isComposing {
+            if isComposing {
+                // Append punctuation to input buffer (e.g., "ab" + "_" → "ab_")
+                inputBuffer.append(String(char))
+                updateMarkedText(client: sender)
+                searchCandidates()
+                showCandidateWindow(client: sender)
+                return true
+            } else {
                 if handlePunctuation(String(char), client: sender) {
                     return true
                 }
