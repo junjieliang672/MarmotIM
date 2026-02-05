@@ -47,7 +47,7 @@ xcuserdata/
 
 # Swift Package Manager
 .swiftpm/
-Packages/
+Packages/*/.build/
 Package.resolved
 
 # IDE
