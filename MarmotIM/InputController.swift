@@ -204,9 +204,13 @@ class InputController: IMKInputController {
         case 125, 126: // Down/Up arrow
             return handleArrowKey(isDown: keyCode == 125, client: sender)
         case 33: // [ key - page up
-            return handlePageUp(client: sender)
+            if isComposing {
+                return handlePageUp(client: sender)
+            }
         case 30: // ] key - page down
-            return handlePageDown(client: sender)
+            if isComposing {
+                return handlePageDown(client: sender)
+            }
         case 43: // , key - page up
             if isComposing {
                 return handlePageUp(client: sender)

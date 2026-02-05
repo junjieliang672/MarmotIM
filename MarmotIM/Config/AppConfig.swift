@@ -212,6 +212,38 @@ struct AppConfig: Codable {
     /// Show code type hint (pinyin/wubi) in candidate window
     var showCodeHint: Bool
 
+    // MARK: - Memberwise Init
+
+    init(
+        enterKeyBehavior: EnterKeyBehavior,
+        candidateCount: Int,
+        addSpaceAfterEnglish: Bool,
+        showStatusBarIcon: Bool,
+        showModeIndicator: Bool,
+        punctuationMode: PunctuationMode,
+        customPunctuation: [String: String],
+        autoPairPunctuation: Bool,
+        themeMode: ThemeMode,
+        candidateWindowStyle: CandidateWindowStyle,
+        rankingWeights: RankingWeights,
+        fuzzyPinyin: FuzzyPinyinConfig = .default,
+        showCodeHint: Bool
+    ) {
+        self.enterKeyBehavior = enterKeyBehavior
+        self.candidateCount = candidateCount
+        self.addSpaceAfterEnglish = addSpaceAfterEnglish
+        self.showStatusBarIcon = showStatusBarIcon
+        self.showModeIndicator = showModeIndicator
+        self.punctuationMode = punctuationMode
+        self.customPunctuation = customPunctuation
+        self.autoPairPunctuation = autoPairPunctuation
+        self.themeMode = themeMode
+        self.candidateWindowStyle = candidateWindowStyle
+        self.rankingWeights = rankingWeights
+        self.fuzzyPinyin = fuzzyPinyin
+        self.showCodeHint = showCodeHint
+    }
+
     // MARK: - Default Configuration
 
     static let `default` = AppConfig(
@@ -245,6 +277,29 @@ struct AppConfig: Codable {
         showCodeHint: true
     )
 
+    // MARK: - Resilient Decoding
+
+    /// Custom decoder that tolerates missing fields by falling back to defaults.
+    /// This prevents config reset when fields are added/removed between builds.
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let d = AppConfig.default
+
+        enterKeyBehavior = (try? container.decode(EnterKeyBehavior.self, forKey: .enterKeyBehavior)) ?? d.enterKeyBehavior
+        candidateCount = (try? container.decode(Int.self, forKey: .candidateCount)) ?? d.candidateCount
+        addSpaceAfterEnglish = (try? container.decode(Bool.self, forKey: .addSpaceAfterEnglish)) ?? d.addSpaceAfterEnglish
+        showStatusBarIcon = (try? container.decode(Bool.self, forKey: .showStatusBarIcon)) ?? d.showStatusBarIcon
+        showModeIndicator = (try? container.decode(Bool.self, forKey: .showModeIndicator)) ?? d.showModeIndicator
+        punctuationMode = (try? container.decode(PunctuationMode.self, forKey: .punctuationMode)) ?? d.punctuationMode
+        customPunctuation = (try? container.decode([String: String].self, forKey: .customPunctuation)) ?? d.customPunctuation
+        autoPairPunctuation = (try? container.decode(Bool.self, forKey: .autoPairPunctuation)) ?? d.autoPairPunctuation
+        themeMode = (try? container.decode(ThemeMode.self, forKey: .themeMode)) ?? d.themeMode
+        candidateWindowStyle = (try? container.decode(CandidateWindowStyle.self, forKey: .candidateWindowStyle)) ?? d.candidateWindowStyle
+        rankingWeights = (try? container.decode(RankingWeights.self, forKey: .rankingWeights)) ?? d.rankingWeights
+        fuzzyPinyin = (try? container.decode(FuzzyPinyinConfig.self, forKey: .fuzzyPinyin)) ?? d.fuzzyPinyin
+        showCodeHint = (try? container.decode(Bool.self, forKey: .showCodeHint)) ?? d.showCodeHint
+    }
+
     // MARK: - Backward Compatibility
 
     /// Legacy theme property (for backward compatibility)
@@ -269,36 +324,7 @@ struct AppConfig: Codable {
 
         let data = try Data(contentsOf: url)
         let decoder = JSONDecoder()
-
-        // Try to decode new format first
-        do {
-            return try decoder.decode(AppConfig.self, from: data)
-        } catch {
-            // Fall back to legacy format
-            NSLog("MarmotIM: Config migration from legacy format")
-            return try decodeLegacyConfig(from: data, decoder: decoder)
-        }
-    }
-
-    /// Decode legacy configuration format
-    private static func decodeLegacyConfig(from data: Data, decoder: JSONDecoder) throws -> AppConfig {
-        // Try to decode as a partial config and fill in defaults
-        struct LegacyConfig: Codable {
-            var showCodeHint: Bool?
-            var candidateCount: Int?
-            var theme: String?
-        }
-
-        let legacy = try decoder.decode(LegacyConfig.self, from: data)
-
-        var config = AppConfig.default
-        config.showCodeHint = legacy.showCodeHint ?? config.showCodeHint
-        config.candidateCount = legacy.candidateCount ?? config.candidateCount
-        if let themeStr = legacy.theme {
-            config.themeMode = ThemeMode(rawValue: themeStr) ?? .system
-        }
-
-        return config
+        return try decoder.decode(AppConfig.self, from: data)
     }
 
     /// Save configuration to file
