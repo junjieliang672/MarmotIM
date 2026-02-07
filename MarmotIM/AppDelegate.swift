@@ -113,6 +113,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             name: .userDictionaryDidChange,
             object: nil
         )
+
+        // Suppressed words changed notification (from iCloud sync)
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleSuppressedWordsChanged),
+            name: .suppressedWordsDidChange,
+            object: nil
+        )
     }
 
     // MARK: - Menu Actions
@@ -138,5 +146,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Legacy notification handler - kept for backward compatibility
         // New code uses direct API calls and doesn't need this
         NSLog("MarmotIM: User dictionary changed notification received (legacy)")
+    }
+
+    @objc private func handleSuppressedWordsChanged() {
+        NSLog("MarmotIM: Suppressed words changed, refreshing cache")
+        dictionaryEngine?.updateSuppressedWordsCache()
     }
 }

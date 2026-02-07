@@ -194,24 +194,36 @@ class iCloudSyncManager {
     private func syncLearningData(documentsURL: URL) throws {
         let remoteURL = documentsURL.appendingPathComponent(learningFileName)
 
-        // 1. Read local database
         let localRecords = try readLocalLearning()
 
-        // 2. Read iCloud file (if exists)
-        let remoteRecords = try readRemoteLearning(from: remoteURL)
+        // Check file download status before reading
+        let downloadStatus = ensureFileDownloaded(at: remoteURL)
 
-        // 3. Merge
-        let merged = SyncMerger.mergeLearning(local: localRecords, remote: remoteRecords)
+        switch downloadStatus {
+        case .ready:
+            // Normal case: file is ready, proceed with merge
+            let remoteRecords = try readRemoteLearningContent(from: remoteURL)
+            let merged = SyncMerger.mergeLearning(local: localRecords, remote: remoteRecords)
 
-        // 4. Write changed records to local database
-        let changed = SyncMerger.findChangedLearning(merged: merged, original: localRecords)
-        if !changed.isEmpty {
-            try writeLocalLearning(changed)
-            NSLog("MarmotIM: Updated \(changed.count) learning records")
+            let changed = SyncMerger.findChangedLearning(merged: merged, original: localRecords)
+            if !changed.isEmpty {
+                try writeLocalLearning(changed)
+                NSLog("MarmotIM: Updated \(changed.count) learning records")
+            }
+
+            // Safe to write merged result back
+            try writeRemoteLearning(merged, to: remoteURL)
+
+        case .notFound:
+            // File doesn't exist in iCloud yet - safe to upload local data
+            NSLog("MarmotIM: No remote learning file, uploading local data")
+            try writeRemoteLearning(localRecords, to: remoteURL)
+
+        case .downloadFailed:
+            // CRITICAL: Remote file exists but couldn't be downloaded
+            // DO NOT write to remote - this would overwrite valid cloud data!
+            NSLog("MarmotIM: Skipping learning sync - remote file download failed, preventing data loss")
         }
-
-        // 5. Upload to iCloud
-        try writeRemoteLearning(merged, to: remoteURL)
     }
 
     // MARK: - Sync User Favorites
@@ -220,16 +232,35 @@ class iCloudSyncManager {
         let remoteURL = documentsURL.appendingPathComponent(favoritesFileName)
 
         let localRecords = try readLocalFavorites()
-        let remoteRecords = try readRemoteFavorites(from: remoteURL)
-        let merged = SyncMerger.mergeFavorites(local: localRecords, remote: remoteRecords)
 
-        let changed = SyncMerger.findChangedFavorites(merged: merged, original: localRecords)
-        if !changed.isEmpty {
-            try writeLocalFavorites(changed)
-            NSLog("MarmotIM: Updated \(changed.count) favorite records")
+        // Check file download status before reading
+        let downloadStatus = ensureFileDownloaded(at: remoteURL)
+
+        switch downloadStatus {
+        case .ready:
+            // Normal case: file is ready, proceed with merge
+            let remoteRecords = try readRemoteFavoritesContent(from: remoteURL)
+            let merged = SyncMerger.mergeFavorites(local: localRecords, remote: remoteRecords)
+
+            let changed = SyncMerger.findChangedFavorites(merged: merged, original: localRecords)
+            if !changed.isEmpty {
+                try writeLocalFavorites(changed)
+                NSLog("MarmotIM: Updated \(changed.count) favorite records")
+            }
+
+            // Safe to write merged result back
+            try writeRemoteFavorites(merged, to: remoteURL)
+
+        case .notFound:
+            // File doesn't exist in iCloud yet - safe to upload local data
+            NSLog("MarmotIM: No remote favorites file, uploading local data")
+            try writeRemoteFavorites(localRecords, to: remoteURL)
+
+        case .downloadFailed:
+            // CRITICAL: Remote file exists but couldn't be downloaded
+            // DO NOT write to remote - this would overwrite valid cloud data!
+            NSLog("MarmotIM: Skipping favorites sync - remote file download failed, preventing data loss")
         }
-
-        try writeRemoteFavorites(merged, to: remoteURL)
     }
 
     // MARK: - Sync Filter User Freq
@@ -238,16 +269,35 @@ class iCloudSyncManager {
         let remoteURL = documentsURL.appendingPathComponent(filterFreqFileName)
 
         let localRecords = try readLocalFilterFreq()
-        let remoteRecords = try readRemoteFilterFreq(from: remoteURL)
-        let merged = SyncMerger.mergeFilterFreq(local: localRecords, remote: remoteRecords)
 
-        let changed = SyncMerger.findChangedFilterFreq(merged: merged, original: localRecords)
-        if !changed.isEmpty {
-            try writeLocalFilterFreq(changed)
-            NSLog("MarmotIM: Updated \(changed.count) filter freq records")
+        // Check file download status before reading
+        let downloadStatus = ensureFileDownloaded(at: remoteURL)
+
+        switch downloadStatus {
+        case .ready:
+            // Normal case: file is ready, proceed with merge
+            let remoteRecords = try readRemoteFilterFreqContent(from: remoteURL)
+            let merged = SyncMerger.mergeFilterFreq(local: localRecords, remote: remoteRecords)
+
+            let changed = SyncMerger.findChangedFilterFreq(merged: merged, original: localRecords)
+            if !changed.isEmpty {
+                try writeLocalFilterFreq(changed)
+                NSLog("MarmotIM: Updated \(changed.count) filter freq records")
+            }
+
+            // Safe to write merged result back
+            try writeRemoteFilterFreq(merged, to: remoteURL)
+
+        case .notFound:
+            // File doesn't exist in iCloud yet - safe to upload local data
+            NSLog("MarmotIM: No remote filter freq file, uploading local data")
+            try writeRemoteFilterFreq(localRecords, to: remoteURL)
+
+        case .downloadFailed:
+            // CRITICAL: Remote file exists but couldn't be downloaded
+            // DO NOT write to remote - this would overwrite valid cloud data!
+            NSLog("MarmotIM: Skipping filter freq sync - remote file download failed, preventing data loss")
         }
-
-        try writeRemoteFilterFreq(merged, to: remoteURL)
     }
 
     // MARK: - Sync Suppressed Words
@@ -256,20 +306,39 @@ class iCloudSyncManager {
         let remoteURL = documentsURL.appendingPathComponent(suppressedWordsFileName)
 
         let localRecords = try readLocalSuppressedWords()
-        let remoteRecords = try readRemoteSuppressedWords(from: remoteURL)
-        let merged = SyncMerger.mergeSuppressedWords(local: localRecords, remote: remoteRecords)
 
-        let changed = SyncMerger.findChangedSuppressedWords(merged: merged, original: localRecords)
-        if !changed.isEmpty {
-            try writeLocalSuppressedWords(changed)
-            NSLog("MarmotIM: Updated \(changed.count) suppressed word records")
-            // Post notification to update suppressed words cache
-            DispatchQueue.main.async {
-                NotificationCenter.default.post(name: .suppressedWordsDidChange, object: nil)
+        // Check file download status before reading
+        let downloadStatus = ensureFileDownloaded(at: remoteURL)
+
+        switch downloadStatus {
+        case .ready:
+            // Normal case: file is ready, proceed with merge
+            let remoteRecords = try readRemoteSuppressedWordsContent(from: remoteURL)
+            let merged = SyncMerger.mergeSuppressedWords(local: localRecords, remote: remoteRecords)
+
+            let changed = SyncMerger.findChangedSuppressedWords(merged: merged, original: localRecords)
+            if !changed.isEmpty {
+                try writeLocalSuppressedWords(changed)
+                NSLog("MarmotIM: Updated \(changed.count) suppressed word records")
+                // Post notification to update suppressed words cache
+                DispatchQueue.main.async {
+                    NotificationCenter.default.post(name: .suppressedWordsDidChange, object: nil)
+                }
             }
-        }
 
-        try writeRemoteSuppressedWords(merged, to: remoteURL)
+            // Safe to write merged result back
+            try writeRemoteSuppressedWords(merged, to: remoteURL)
+
+        case .notFound:
+            // File doesn't exist in iCloud yet - safe to upload local data
+            NSLog("MarmotIM: No remote suppressed words file, uploading local data")
+            try writeRemoteSuppressedWords(localRecords, to: remoteURL)
+
+        case .downloadFailed:
+            // CRITICAL: Remote file exists but couldn't be downloaded
+            // DO NOT write to remote - this would overwrite valid cloud data!
+            NSLog("MarmotIM: Skipping suppressed words sync - remote file download failed, preventing data loss")
+        }
     }
 
     // MARK: - Read Local Database
@@ -397,13 +466,100 @@ class iCloudSyncManager {
         return records
     }
 
-    // MARK: - Read Remote (iCloud)
+    // MARK: - iCloud File Download Status
 
-    private func readRemoteLearning(from url: URL) throws -> [String: LearningRecord] {
-        guard FileManager.default.fileExists(atPath: url.path) else {
-            return [:]
+    /// Status of an iCloud file download attempt
+    private enum FileDownloadStatus {
+        case ready          // File is downloaded and ready to read
+        case notFound       // File doesn't exist in iCloud
+        case downloadFailed // File exists in iCloud but download failed/timed out
+    }
+
+    /// Ensure an iCloud file is downloaded before reading
+    /// Uses URL resource values to check actual download status (Apple recommended approach)
+    private func ensureFileDownloaded(at url: URL) -> FileDownloadStatus {
+        let fileManager = FileManager.default
+
+        // First check if the file is an iCloud ubiquitous item or exists locally
+        guard fileManager.isUbiquitousItem(at: url) || fileManager.fileExists(atPath: url.path) else {
+            // Check for .icloud placeholder (indicates file is in cloud but not downloaded)
+            let placeholderName = "." + url.lastPathComponent + ".icloud"
+            let placeholderURL = url.deletingLastPathComponent().appendingPathComponent(placeholderName)
+
+            if fileManager.fileExists(atPath: placeholderURL.path) {
+                // Placeholder exists - file is in iCloud but not downloaded
+                return triggerDownloadAndWait(at: url)
+            }
+
+            // No file and no placeholder - file doesn't exist
+            return .notFound
         }
 
+        // Check download status using URL resource values (Apple recommended approach)
+        do {
+            let resourceValues = try url.resourceValues(forKeys: [.ubiquitousItemDownloadingStatusKey])
+            if let status = resourceValues.ubiquitousItemDownloadingStatus {
+                switch status {
+                case .current, .downloaded:
+                    return .ready
+                case .notDownloaded:
+                    return triggerDownloadAndWait(at: url)
+                default:
+                    // Handle any future cases by attempting download
+                    return triggerDownloadAndWait(at: url)
+                }
+            }
+        } catch {
+            NSLog("MarmotIM: Failed to get resource values for \(url.lastPathComponent): \(error)")
+        }
+
+        // Fallback: if file exists locally, it's ready
+        if fileManager.fileExists(atPath: url.path) {
+            return .ready
+        }
+
+        return .notFound
+    }
+
+    /// Trigger download of an iCloud file and wait for it to complete
+    private func triggerDownloadAndWait(at url: URL) -> FileDownloadStatus {
+        do {
+            try FileManager.default.startDownloadingUbiquitousItem(at: url)
+            NSLog("MarmotIM: Triggered download for iCloud file: \(url.lastPathComponent)")
+
+            // Wait for download with timeout
+            let timeout: TimeInterval = 30.0  // 30 seconds for larger files
+            let startTime = Date()
+
+            while true {
+                if FileManager.default.fileExists(atPath: url.path) {
+                    // Double-check it's actually downloaded
+                    if let values = try? url.resourceValues(forKeys: [.ubiquitousItemDownloadingStatusKey]),
+                       let status = values.ubiquitousItemDownloadingStatus,
+                       status == .current || status == .downloaded {
+                        return .ready
+                    }
+                    // File exists locally, assume it's ready
+                    return .ready
+                }
+
+                if Date().timeIntervalSince(startTime) > timeout {
+                    NSLog("MarmotIM: Timeout waiting for iCloud file download: \(url.lastPathComponent)")
+                    return .downloadFailed
+                }
+
+                Thread.sleep(forTimeInterval: 0.2)
+            }
+        } catch {
+            NSLog("MarmotIM: Failed to start downloading iCloud file: \(error)")
+            return .downloadFailed
+        }
+    }
+
+    // MARK: - Read Remote (iCloud)
+
+    /// Read remote learning records (caller must ensure file is downloaded first)
+    private func readRemoteLearningContent(from url: URL) throws -> [String: LearningRecord] {
         var coordinatorError: NSError?
         var readError: Error?
         var records: [String: LearningRecord] = [:]
@@ -429,11 +585,8 @@ class iCloudSyncManager {
         return records
     }
 
-    private func readRemoteFavorites(from url: URL) throws -> [String: FavoriteRecord] {
-        guard FileManager.default.fileExists(atPath: url.path) else {
-            return [:]
-        }
-
+    /// Read remote favorites records (caller must ensure file is downloaded first)
+    private func readRemoteFavoritesContent(from url: URL) throws -> [String: FavoriteRecord] {
         var coordinatorError: NSError?
         var readError: Error?
         var records: [String: FavoriteRecord] = [:]
@@ -459,11 +612,8 @@ class iCloudSyncManager {
         return records
     }
 
-    private func readRemoteFilterFreq(from url: URL) throws -> [String: FilterFreqRecord] {
-        guard FileManager.default.fileExists(atPath: url.path) else {
-            return [:]
-        }
-
+    /// Read remote filter freq records (caller must ensure file is downloaded first)
+    private func readRemoteFilterFreqContent(from url: URL) throws -> [String: FilterFreqRecord] {
         var coordinatorError: NSError?
         var readError: Error?
         var records: [String: FilterFreqRecord] = [:]
@@ -489,11 +639,8 @@ class iCloudSyncManager {
         return records
     }
 
-    private func readRemoteSuppressedWords(from url: URL) throws -> [String: SuppressedWordRecord] {
-        guard FileManager.default.fileExists(atPath: url.path) else {
-            return [:]
-        }
-
+    /// Read remote suppressed words records (caller must ensure file is downloaded first)
+    private func readRemoteSuppressedWordsContent(from url: URL) throws -> [String: SuppressedWordRecord] {
         var coordinatorError: NSError?
         var readError: Error?
         var records: [String: SuppressedWordRecord] = [:]
