@@ -25,6 +25,13 @@ struct BasicSettingsView: View {
                         }
                         Spacer()
                     }
+
+                    Toggle(isOn: $viewModel.config.numberAsInputWhenCapital) {
+                        Text("含大写字母时数字入码")
+                    }
+                    .onChange(of: viewModel.config.numberAsInputWhenCapital) { _ in
+                        viewModel.save()
+                    }
                 }
 
                 // Candidate section

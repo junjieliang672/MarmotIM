@@ -241,6 +241,15 @@ class InputController: IMKInputController {
         // Handle number keys for candidate selection (1-9)
         // Works in both normal mode (inputBuffer not empty) and filter mode
         if let char = characters.first, char.isNumber, (!inputBuffer.isEmpty || filterMode != .none) {
+            // If setting is enabled and buffer contains a capital letter, append number to buffer
+            let config = AppDelegate.config
+            if config.numberAsInputWhenCapital && inputBuffer.contains(where: { $0.isUppercase }) {
+                inputBuffer.append(char)
+                updateMarkedText(client: sender)
+                searchCandidates()
+                showCandidateWindow(client: sender)
+                return true
+            }
             let num = Int(String(char)) ?? 0
             if num >= 1 && num <= 9 {
                 return selectCandidate(at: num - 1, client: sender)

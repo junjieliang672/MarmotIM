@@ -162,6 +162,9 @@ struct AppConfig: Codable {
     /// Behavior when Enter key is pressed
     var enterKeyBehavior: EnterKeyBehavior
 
+    /// When input buffer contains a capital letter, treat number keys as input to buffer instead of candidate selection
+    var numberAsInputWhenCapital: Bool
+
     // MARK: - Candidate Settings (候选词)
 
     /// Number of candidates to show (3-9)
@@ -216,6 +219,7 @@ struct AppConfig: Codable {
 
     init(
         enterKeyBehavior: EnterKeyBehavior,
+        numberAsInputWhenCapital: Bool,
         candidateCount: Int,
         addSpaceAfterEnglish: Bool,
         showStatusBarIcon: Bool,
@@ -230,6 +234,7 @@ struct AppConfig: Codable {
         showCodeHint: Bool
     ) {
         self.enterKeyBehavior = enterKeyBehavior
+        self.numberAsInputWhenCapital = numberAsInputWhenCapital
         self.candidateCount = candidateCount
         self.addSpaceAfterEnglish = addSpaceAfterEnglish
         self.showStatusBarIcon = showStatusBarIcon
@@ -249,6 +254,7 @@ struct AppConfig: Codable {
     static let `default` = AppConfig(
         // Basic Settings
         enterKeyBehavior: .clearCode,
+        numberAsInputWhenCapital: true,
 
         // Candidate Settings
         candidateCount: 9,
@@ -286,6 +292,7 @@ struct AppConfig: Codable {
         let d = AppConfig.default
 
         enterKeyBehavior = (try? container.decode(EnterKeyBehavior.self, forKey: .enterKeyBehavior)) ?? d.enterKeyBehavior
+        numberAsInputWhenCapital = (try? container.decode(Bool.self, forKey: .numberAsInputWhenCapital)) ?? d.numberAsInputWhenCapital
         candidateCount = (try? container.decode(Int.self, forKey: .candidateCount)) ?? d.candidateCount
         addSpaceAfterEnglish = (try? container.decode(Bool.self, forKey: .addSpaceAfterEnglish)) ?? d.addSpaceAfterEnglish
         showStatusBarIcon = (try? container.decode(Bool.self, forKey: .showStatusBarIcon)) ?? d.showStatusBarIcon
@@ -375,6 +382,7 @@ struct AppConfig: Codable {
 extension AppConfig {
     enum CodingKeys: String, CodingKey {
         case enterKeyBehavior
+        case numberAsInputWhenCapital
         case candidateCount
         case addSpaceAfterEnglish
         case showStatusBarIcon
