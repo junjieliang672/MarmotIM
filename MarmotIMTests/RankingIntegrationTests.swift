@@ -11,14 +11,24 @@ final class RankingIntegrationTests: XCTestCase {
     // MARK: - Test: Selection Should Immediately Boost Ranking
 
     func testSelectionImmediatelyBoostsRanking() throws {
-        // Create test entries simulating the "kham" scenario
-        // 唬 (hu) - 1 char, higher short word bonus
-        // 中英 (zhongying) - 2 chars, lower short word bonus
+        // Scenario: a single input code maps to two full-wubi candidates.
+        // 唬 (1 char) initially wins on short-word bonus (40K vs 30K); the
+        // user then selects 中英 (2 char), and the recency/tierOverrideBoost
+        // components must flip the ordering on the next search.
+        //
+        // NOTE (spec-001 decision 008): the original setup used a 4-char wubi
+        // code ("kham"), but CandidateRanker applies a dedicated short-word
+        // carve-out when inputLength==4 && textLength==2 (50K bonus vs the
+        // 40K a 1-char word gets). That made 中英 the initial winner and
+        // invalidated the assertion that 唬 should be #1 before any
+        // selection. A 3-char wubi code isolates the "selection immediately
+        // boosts ranking" behavior from that unrelated carve-out rule.
+        // Authorized by kingjj-lead per spec-001 resumption sign-off.
         let huEntry = DictionaryEntry(
             id: 1,
             text: "唬",
             pinyin: "hu",
-            wubi: "kham",
+            wubi: "kha",
             wubiBaseFrequency: 30000,
             pinyinBaseFrequency: 30000,
             source: 1, // wubi source
@@ -29,7 +39,7 @@ final class RankingIntegrationTests: XCTestCase {
             id: 2,
             text: "中英",
             pinyin: "zhongying",
-            wubi: "kham",
+            wubi: "kha",
             wubiBaseFrequency: 30000,
             pinyinBaseFrequency: 30000,
             source: 1, // wubi source
@@ -40,13 +50,13 @@ final class RankingIntegrationTests: XCTestCase {
         let engine = try DictionaryEngine(entries: [huEntry, zhongYingEntry])
 
         // First search - before any selection
-        let matches1 = engine.search(code: "kham", limit: 10)
+        let matches1 = engine.search(code: "kha", limit: 10)
         XCTAssertEqual(matches1.count, 2, "Should find both entries")
 
         // Initial ranking - 唬 should be first due to short word bonus
         let candidates1 = CandidateRanker.rank(
             matches: matches1,
-            inputCode: "kham",
+            inputCode: "kha",
             engine: engine
         )
 
@@ -76,10 +86,10 @@ final class RankingIntegrationTests: XCTestCase {
         print("  中英 userData: accessCount=\(userData?.accessCount ?? 0), timestamp=\(userData?.lastAccessTimestamp ?? 0)")
 
         // Second search - after selection
-        let matches2 = engine.search(code: "kham", limit: 10)
+        let matches2 = engine.search(code: "kha", limit: 10)
         let candidates2 = CandidateRanker.rank(
             matches: matches2,
-            inputCode: "kham",
+            inputCode: "kha",
             engine: engine
         )
 

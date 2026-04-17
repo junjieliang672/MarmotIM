@@ -331,15 +331,26 @@ final class CandidateRankerTests: XCTestCase {
     /// Scenario: "eset" → "彩"(1字,44861) vs "采用"(2字,34861)
     /// Base + ShortWord: 彩=44861+40000=84861, 采用=34861+50000=84861 (相等!)
     /// 此时频率分(accessCount)应该决定排名
+    ///
+    /// NOTE (spec-001 decision 007): The previous setup staggered the two
+    /// timestamps by 1s to "give 彩 a recency edge" but that edge is actually
+    /// dominated by tierOverrideBoost (500B initial, 1-hour half-life), which
+    /// at 1s offset is ~96M — far larger than the 5M frequency gap the test
+    /// was trying to isolate. See docs/ranking.md for the formula. The fix is
+    /// to equalize timestamps so tierOverrideBoost deltas cancel, leaving the
+    /// 5M frequency-score delta to decide the winner as the test name intends.
+    /// This change is authorized by kingjj-lead per spec-001 resumption sign-off.
     func testWubi4Char_EqualBaseScore_FrequencyWins() {
         // 模拟 "eset" 场景: 彩 vs 采用
         let cai = makeEntry(id: 16095, text: "彩", wubi: "eset", wubiBaseFrequency: 44861, length: 1)
         let caiyong = makeEntry(id: 16097, text: "采用", wubi: "eset", wubiBaseFrequency: 34861, length: 2)
 
-        // "采用" 被选择更多次 (7次 vs 6次)
-        let now = UInt32(Date().timeIntervalSince1970) - 100  // 稍早以便频率分主导
-        engine.setUserLearning(entryId: 16095, accessCount: 6, lastAccessTimestamp: now + 1)  // 彩
-        engine.setUserLearning(entryId: 16097, accessCount: 7, lastAccessTimestamp: now)       // 采用
+        // "采用" 被选择更多次 (7次 vs 6次).
+        // Timestamps are IDENTICAL so tierOverrideBoost and recency cancel;
+        // only frequencyScore (5M per selection) decides.
+        let now = UInt32(Date().timeIntervalSince1970) - 100
+        engine.setUserLearning(entryId: 16095, accessCount: 6, lastAccessTimestamp: now)  // 彩
+        engine.setUserLearning(entryId: 16097, accessCount: 7, lastAccessTimestamp: now)  // 采用
 
         let matches = [
             makeMatch(entry: cai, matchedCode: "eset", matchType: .full, codeType: .wubi),
@@ -348,9 +359,8 @@ final class CandidateRankerTests: XCTestCase {
 
         let candidates = rankMatches(matches, inputCode: "eset")
 
-        // 虽然 "彩" 的 recency 稍高 (1秒差距约8K分)
-        // 但 "采用" 的频率分高 5M (7×5M - 6×5M)
-        // 所以 "采用" 应该排第一
+        // "采用" 的频率分高 5M (7×5M - 6×5M),
+        // 其他组件 (tierBonus, tierOverrideBoost, recency, base+shortWord) 全部相等
         XCTAssertEqual(candidates[0].text, "采用", "频率分更高的词应该排第一")
         XCTAssertEqual(candidates[1].text, "彩", "频率分更低的词应该排第二")
     }

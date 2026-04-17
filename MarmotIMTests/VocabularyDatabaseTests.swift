@@ -1,4 +1,5 @@
 import XCTest
+import SQLite3
 @testable import MarmotIM
 
 final class VocabularyDatabaseTests: XCTestCase {
@@ -143,6 +144,73 @@ final class VocabularyDatabaseTests: XCTestCase {
         let learningData = db.loadAllUserLearning()
         if let data = learningData[entryId] {
             XCTAssertEqual(data.accessCount, 3)
+        }
+    }
+
+    /// FI-001 (spec-001): full round-trip regression guard for recordSelection.
+    ///
+    /// Root cause recap: the bundled dictionary.db historically shipped
+    /// user_learning with `FOREIGN KEY(entry_id) REFERENCES entries(id) ON
+    /// DELETE CASCADE`, while the Swift source omitted the FK because user
+    /// learning must survive dictionary rebuilds. That drift silently failed
+    /// recordSelection whenever the id was not present in `entries` and lost
+    /// user writes on every dictionary update. Schema v7 drops the FK.
+    ///
+    /// This test locks the invariant: a recordSelection for an arbitrary id
+    /// must succeed, be retrievable, and the ON CONFLICT UPDATE path must
+    /// actually increment access_count. If anyone re-adds the FK (e.g. by
+    /// regenerating the bundled DB from tools/build_dictionary.py without
+    /// also dropping it there), this test will fail immediately.
+    func testRecordSelection_roundTrip() {
+        let db = VocabularyDatabase.shared
+
+        // Use an id that is guaranteed NOT to exist in entries(id). If the
+        // FK ever comes back, INSERT will fail with SQLITE_CONSTRAINT_FOREIGNKEY.
+        let entryId = UInt32.random(in: 0xC0000000...0xCFFFFFFF)
+
+        // Clean slate — defensively remove any prior row so this test can run
+        // repeatedly without relying on tearDown wiping the singleton.
+        _ = db.getConnection().map { conn -> Void in
+            var stmt: OpaquePointer?
+            if sqlite3_prepare_v2(conn, "DELETE FROM user_learning WHERE entry_id = ?", -1, &stmt, nil) == SQLITE_OK {
+                sqlite3_bind_int64(stmt, 1, Int64(entryId))
+                _ = sqlite3_step(stmt)
+            }
+            sqlite3_finalize(stmt)
+        }
+
+        // 1) First recordSelection must return true.
+        let firstWrite = db.recordSelection(entryId: entryId, totalScore: 42.0)
+        XCTAssertTrue(firstWrite, "recordSelection must succeed for an arbitrary entry id (FI-001)")
+
+        // 2) The row must be visible via loadAllUserLearning() with accessCount=1.
+        let after1 = db.loadAllUserLearning()
+        guard let row1 = after1[entryId] else {
+            XCTFail("loadAllUserLearning() missing the entry after a successful recordSelection")
+            return
+        }
+        XCTAssertEqual(row1.accessCount, 1, "accessCount must be 1 after first selection")
+        XCTAssertGreaterThan(row1.lastAccessTimestamp, 0, "timestamp must be populated")
+
+        // 3) Second recordSelection must take the ON CONFLICT UPDATE path and
+        //    bump accessCount to 2.
+        let secondWrite = db.recordSelection(entryId: entryId, totalScore: 84.0)
+        XCTAssertTrue(secondWrite, "second recordSelection (UPSERT path) must succeed")
+        let after2 = db.loadAllUserLearning()
+        guard let row2 = after2[entryId] else {
+            XCTFail("row disappeared after second recordSelection")
+            return
+        }
+        XCTAssertEqual(row2.accessCount, 2, "ON CONFLICT UPDATE must increment accessCount to 2")
+
+        // Cleanup.
+        _ = db.getConnection().map { conn -> Void in
+            var stmt: OpaquePointer?
+            if sqlite3_prepare_v2(conn, "DELETE FROM user_learning WHERE entry_id = ?", -1, &stmt, nil) == SQLITE_OK {
+                sqlite3_bind_int64(stmt, 1, Int64(entryId))
+                _ = sqlite3_step(stmt)
+            }
+            sqlite3_finalize(stmt)
         }
     }
 

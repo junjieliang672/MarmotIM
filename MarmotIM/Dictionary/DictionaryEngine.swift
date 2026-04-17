@@ -624,9 +624,19 @@ class DictionaryEngine {
 
         NSLog("MarmotIM: recordSelection - cachedScore=%.0f, timestamp=%u", score, timestamp)
 
-        // Persist to database asynchronously to avoid blocking main thread
+        // Persist to database asynchronously to avoid blocking main thread.
+        // Previously the return value was discarded with `_ = ...`, which
+        // hid silent user-learning losses (e.g. when the bundled dictionary.db
+        // shipped with a FOREIGN KEY on user_learning and the id was not yet
+        // in `entries`). Per spec-001 decision 005(a), surface a false return
+        // via an error-level canary log so regressions in the DB layer are
+        // visible from `log stream` without re-running the test suite.
         Self.dbWriteQueue.async { [weak self] in
-            _ = self?.db.recordSelection(entryId: entryId, totalScore: Double(score))
+            guard let self = self else { return }
+            let wrote = self.db.recordSelection(entryId: entryId, totalScore: Double(score))
+            if !wrote {
+                NSLog("MarmotIM: [E][dict] db recordSelection failed entry_id=%u", entryId)
+            }
         }
     }
 

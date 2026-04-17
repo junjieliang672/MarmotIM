@@ -19,7 +19,17 @@ final class VocabularyDatabase {
     /// Version 4: Add is_deleted column to user_favorites
     /// Version 5: Add reverse lookup tables (char_to_wubi, char_to_pinyin, polyphone_words)
     /// Version 6: Add user_suppressed_words table for suppressed word ranking
-    private static let schemaVersion = 6
+    /// Version 7: Drop FOREIGN KEY(entry_id) from user_learning.
+    ///            Bundled dictionary.db historically shipped with a
+    ///            "FOREIGN KEY (entry_id) REFERENCES entries(id) ON DELETE CASCADE"
+    ///            clause on user_learning (see spec-001 decision). The Swift source
+    ///            intentionally omits the FK because user learning must survive
+    ///            dictionary rebuilds. The drift made recordSelection silently
+    ///            return false for any entry id not present in `entries` (e.g. the
+    ///            synthetic 0xA0000000 id used by testRecordSelection, and any
+    ///            id wiped during a dictionary update). This migration rebuilds
+    ///            user_learning without the FK while preserving all rows.
+    private static let schemaVersion = 7
 
     // MARK: - Initialization
 
@@ -63,10 +73,18 @@ final class VocabularyDatabase {
 
         // Configure database
         configureDatabase()
-        
+
         // Create tables
         createTables()
-        
+
+        // Run schema migrations. This previously only ran from
+        // DictionaryPreloadService.preload(); callers that reach the singleton
+        // directly (including the test target) skipped migrations entirely,
+        // so schema drifts like the v7 user_learning FK removal never applied.
+        // Migrations are idempotent: performMigrations() short-circuits once
+        // the stored schema_version has caught up with schemaVersion.
+        performMigrations()
+
         NSLog("MarmotIM: VocabularyDatabase initialized at \(dbPath.path)")
     }
 
@@ -795,9 +813,23 @@ final class VocabularyDatabase {
     }
 
     /// Record a selection (increment access count, update timestamp)
+    ///
+    /// Returns false only on SQLite failure. Any false return is logged with a
+    /// structured "recordSelection rejected" warning (see spec-001 decision
+    /// 005a and observability/logging-standard.md). The caller in
+    /// DictionaryEngine discards the return value on the async write path; the
+    /// log line is the production-visible fingerprint of a silent drop.
     func recordSelection(entryId: UInt32, totalScore: Double) -> Bool {
         lock.lock()
         defer { lock.unlock() }
+
+        // db may be nil after closeDatabase() — surface that cleanly rather
+        // than tripping the sqlite3_prepare_v2 failure path.
+        guard db != nil else {
+            NSLog("MarmotIM: [W][dict] recordSelection rejected entry_id=%u reason=db_closed sqlite_rc=0",
+                  entryId)
+            return false
+        }
 
         let timestamp = UInt32(Date().timeIntervalSince1970)
 
@@ -811,7 +843,11 @@ final class VocabularyDatabase {
         """
 
         var statement: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
+        let prepareRC = sqlite3_prepare_v2(db, sql, -1, &statement, nil)
+        guard prepareRC == SQLITE_OK else {
+            NSLog("MarmotIM: [W][dict] recordSelection rejected entry_id=%u reason=prepare_failed sqlite_rc=%d",
+                  entryId, prepareRC)
+            sqlite3_finalize(statement)
             return false
         }
         defer { sqlite3_finalize(statement) }
@@ -820,7 +856,13 @@ final class VocabularyDatabase {
         sqlite3_bind_int(statement, 2, Int32(timestamp))
         sqlite3_bind_double(statement, 3, totalScore)
 
-        return sqlite3_step(statement) == SQLITE_DONE
+        let stepRC = sqlite3_step(statement)
+        if stepRC != SQLITE_DONE {
+            NSLog("MarmotIM: [W][dict] recordSelection rejected entry_id=%u reason=step_failed sqlite_rc=%d",
+                  entryId, stepRC)
+            return false
+        }
+        return true
     }
 
     /// Load all user learning data (for in-memory cache)
@@ -1338,8 +1380,85 @@ final class VocabularyDatabase {
             executeSQL("CREATE INDEX IF NOT EXISTS idx_suppressed_text ON user_suppressed_words(text)")
         }
 
+        // Version 7: Drop FOREIGN KEY from user_learning.
+        // Historical bundled databases shipped user_learning with
+        //   FOREIGN KEY (entry_id) REFERENCES entries(id) ON DELETE CASCADE
+        // which silently cascaded away user frecency rows whenever the
+        // dictionary was rebuilt, and caused recordSelection() to fail with
+        // SQLITE_CONSTRAINT_FOREIGNKEY for any id not present in `entries`.
+        // The Swift createTables() source always defined the table WITHOUT
+        // that FK, so this migration brings the on-disk schema back in line
+        // with the source-of-truth schema while preserving every row.
+        // (See spec-001 decision 007 / Q3 root-cause analysis.)
+        if currentVersion < 7 {
+            NSLog("MarmotIM: Migrating to version 7 (drop FK on user_learning)...")
+            if userLearningHasForeignKey() {
+                let rowsBefore = countUserLearningRows()
+                NSLog("MarmotIM: v7 migration - rebuilding user_learning (\(rowsBefore) rows to preserve)")
+
+                // Recreate without the FK. We must temporarily disable foreign
+                // keys so the old table can be dropped while rows referencing
+                // it are in-flight. The PRAGMA is a no-op inside a transaction,
+                // so we toggle it around the BEGIN/COMMIT block.
+                executeSQL("PRAGMA foreign_keys=OFF")
+                executeSQL("BEGIN TRANSACTION")
+                executeSQL("""
+                    CREATE TABLE user_learning_new (
+                        entry_id INTEGER PRIMARY KEY,
+                        access_count INTEGER NOT NULL DEFAULT 0,
+                        last_access_timestamp INTEGER NOT NULL DEFAULT 0,
+                        total_score REAL NOT NULL DEFAULT 0
+                    )
+                """)
+                executeSQL("""
+                    INSERT INTO user_learning_new (entry_id, access_count, last_access_timestamp, total_score)
+                    SELECT entry_id, access_count, last_access_timestamp, total_score FROM user_learning
+                """)
+                executeSQL("DROP TABLE user_learning")
+                executeSQL("ALTER TABLE user_learning_new RENAME TO user_learning")
+                executeSQL("CREATE INDEX IF NOT EXISTS idx_user_learning_score ON user_learning(total_score DESC)")
+                executeSQL("COMMIT")
+                executeSQL("PRAGMA foreign_keys=ON")
+
+                let rowsAfter = countUserLearningRows()
+                if rowsAfter < rowsBefore {
+                    NSLog("MarmotIM: v7 migration WARNING - row count shrank from \(rowsBefore) to \(rowsAfter)")
+                } else {
+                    NSLog("MarmotIM: v7 migration - preserved \(rowsAfter) rows")
+                }
+            } else {
+                NSLog("MarmotIM: v7 migration - user_learning already FK-free, nothing to rebuild")
+            }
+        }
+
         setSchemaVersion(targetVersion)
         NSLog("MarmotIM: Schema migration complete")
+    }
+
+    /// Returns true if the on-disk user_learning table carries a FOREIGN KEY
+    /// clause (historical bundled-db artifact that v7 migration removes).
+    private func userLearningHasForeignKey() -> Bool {
+        let sql = "PRAGMA foreign_key_list(user_learning)"
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
+            return false
+        }
+        defer { sqlite3_finalize(statement) }
+        // PRAGMA foreign_key_list returns one row per FK column. Any row means
+        // the table has at least one FK definition.
+        return sqlite3_step(statement) == SQLITE_ROW
+    }
+
+    /// Count rows in user_learning (used by v7 migration for sanity logging).
+    private func countUserLearningRows() -> Int {
+        let sql = "SELECT COUNT(*) FROM user_learning"
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
+            return -1
+        }
+        defer { sqlite3_finalize(statement) }
+        guard sqlite3_step(statement) == SQLITE_ROW else { return -1 }
+        return Int(sqlite3_column_int(statement, 0))
     }
 
     /// Import entries from JSON file
