@@ -29,7 +29,10 @@ final class VocabularyDatabase {
     ///            synthetic 0xA0000000 id used by testRecordSelection, and any
     ///            id wiped during a dictionary update). This migration rebuilds
     ///            user_learning without the FK while preserving all rows.
-    private static let schemaVersion = 7
+    /// Version 8: Add user_relative_order table for relative-ordering rules
+    ///            (spec-003). User-owned directed edges A→B with tombstones for
+    ///            sync parity, UNIQUE(word_a, word_b).
+    private static let schemaVersion = 8
 
     // MARK: - Initialization
 
@@ -55,13 +58,13 @@ final class VocabularyDatabase {
             closeDatabase()
             try? FileManager.default.removeItem(at: dbPath)
             installFromBundle()
-            
+
             if openDatabase() != SQLITE_OK {
                 NSLog("MarmotIM: Critical failure - could not recover database")
                 return
             }
         }
-        
+
         // Validate database integrity
         if !validateDatabase() {
             NSLog("MarmotIM: Database integrity check failed, rebuilding...")
@@ -86,6 +89,37 @@ final class VocabularyDatabase {
         performMigrations()
 
         NSLog("MarmotIM: VocabularyDatabase initialized at \(dbPath.path)")
+    }
+
+    /// Test-only initializer that binds a non-singleton instance to an
+    /// arbitrary on-disk path. Required for spec-003's DualDeviceSyncHarness
+    /// which needs two independent DB instances in separate temp locations.
+    ///
+    /// DOCUMENT: This is test-facing. Production code MUST use `.shared`.
+    /// See decision 005-testability-hook in spec-003.
+    private init(testPath: URL) {
+        self.dbPath = testPath
+        // Ensure parent directory exists (tests supply tempDir/test.db)
+        try? FileManager.default.createDirectory(
+            at: testPath.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+
+        if sqlite3_open(testPath.path, &db) != SQLITE_OK {
+            NSLog("MarmotIM: [E][dict] test DB open failed path=\(testPath.path)")
+            return
+        }
+        configureDatabase()
+        createTables()
+        performMigrations()
+        NSLog("MarmotIM: VocabularyDatabase (test) initialized at \(testPath.path)")
+    }
+
+    /// Factory for tests that need a standalone VocabularyDatabase on disk.
+    /// Each returned instance is independent of `.shared` and of other
+    /// instances. See decision 005-testability-hook in spec-003.
+    static func makeForTests(path: URL) -> VocabularyDatabase {
+        return VocabularyDatabase(testPath: path)
     }
 
     deinit {
@@ -328,6 +362,26 @@ final class VocabularyDatabase {
             )
         """)
         executeSQL("CREATE INDEX IF NOT EXISTS idx_filter_freq ON filter_user_freq(filter_type, code)")
+
+        // Relative ordering rules (spec-003 schema v8)
+        // User-owned directed edge word_a → word_b meaning "A ranks above B
+        // whenever both appear in the candidate list". Tombstones via
+        // is_deleted for iCloud sync parity. Normalized input (NFC + trim)
+        // is applied at the CRUD boundary before INSERT — see
+        // RelativeOrderingNormalizer.
+        executeSQL("""
+            CREATE TABLE IF NOT EXISTS user_relative_order (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                word_a TEXT NOT NULL,
+                word_b TEXT NOT NULL,
+                created_at INTEGER NOT NULL DEFAULT (strftime('%s','now')),
+                updated_at INTEGER NOT NULL DEFAULT (strftime('%s','now')),
+                is_deleted INTEGER NOT NULL DEFAULT 0,
+                UNIQUE(word_a, word_b)
+            )
+        """)
+        executeSQL("CREATE INDEX IF NOT EXISTS idx_relorder_a ON user_relative_order(word_a, is_deleted)")
+        executeSQL("CREATE INDEX IF NOT EXISTS idx_relorder_b ON user_relative_order(word_b, is_deleted)")
     }
 
     // MARK: - Entry Operations
@@ -1289,6 +1343,243 @@ final class VocabularyDatabase {
         return sqlite3_step(statement) == SQLITE_DONE
     }
 
+    // MARK: - Relative Ordering Rules (spec-003)
+
+    /// Add a relative-ordering rule (word A ranks above word B).
+    ///
+    /// Applies NFC + whitespace-trim normalization at the boundary, rejects
+    /// empty / identical / duplicate / cycle-producing inputs with a typed
+    /// Result<…, RelativeOrderingError>. Logs success/failure per the
+    /// observability contract (PII-safe — only char counts and rule_id).
+    func addRelativeOrderingRule(wordA rawA: String, wordB rawB: String) -> Result<RelativeOrderingRule, RelativeOrderingError> {
+        let a = RelativeOrderingNormalizer.normalize(rawA)
+        let b = RelativeOrderingNormalizer.normalize(rawB)
+
+        if a.isEmpty || b.isEmpty {
+            NSLog("MarmotIM: [W][dict] relative order rule rejected reason=emptyInput chars_a=\(a.count) chars_b=\(b.count) action=noop")
+            return .failure(.emptyInput)
+        }
+        if a == b {
+            NSLog("MarmotIM: [W][dict] relative order rule rejected reason=identicalWords chars_a=\(a.count) chars_b=\(b.count) action=noop")
+            return .failure(.identicalWords)
+        }
+
+        lock.lock()
+        defer { lock.unlock() }
+
+        guard db != nil else {
+            NSLog("MarmotIM: [E][dict] relative order rule rejected reason=dbUnavailable chars_a=\(a.count) chars_b=\(b.count) action=noop")
+            return .failure(.dbUnavailable)
+        }
+
+        // Load current (non-tombstoned) rules for duplicate + cycle detection.
+        let existingRules = _unlockedListRelativeOrderingRules(includeDeleted: false)
+
+        // Duplicate check — exact active pair already present.
+        if existingRules.contains(where: { $0.wordA == a && $0.wordB == b }) {
+            NSLog("MarmotIM: [W][dict] relative order rule rejected reason=duplicate chars_a=\(a.count) chars_b=\(b.count) action=noop")
+            return .failure(.duplicate)
+        }
+
+        // Cycle detection on the proposed A→B edge against the current graph.
+        let store = RelativeOrderingStore(rules: existingRules)
+        if let cyclePath = store.wouldCreateCycle(adding: a, b: b) {
+            NSLog("MarmotIM: [W][dict] relative order rule rejected reason=cycle chars_a=\(a.count) chars_b=\(b.count) cycle_len=\(cyclePath.count) action=noop")
+            return .failure(.cycle(path: cyclePath))
+        }
+
+        // Upsert path: if a tombstoned row for (a,b) exists (from a prior
+        // delete + re-add), revive it rather than creating a fresh id.
+        let now = Int(Date().timeIntervalSince1970)
+        let upsertSQL = """
+            INSERT INTO user_relative_order (word_a, word_b, created_at, updated_at, is_deleted)
+            VALUES (?, ?, ?, ?, 0)
+            ON CONFLICT(word_a, word_b) DO UPDATE SET
+                updated_at = excluded.updated_at,
+                is_deleted = 0
+        """
+
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, upsertSQL, -1, &stmt, nil) == SQLITE_OK else {
+            NSLog("MarmotIM: [E][dict] relative order rule insert prepare failed")
+            return .failure(.dbUnavailable)
+        }
+        defer { sqlite3_finalize(stmt) }
+
+        sqlite3_bind_text(stmt, 1, a, -1, SQLITE_TRANSIENT)
+        sqlite3_bind_text(stmt, 2, b, -1, SQLITE_TRANSIENT)
+        sqlite3_bind_int(stmt, 3, Int32(now))
+        sqlite3_bind_int(stmt, 4, Int32(now))
+
+        guard sqlite3_step(stmt) == SQLITE_DONE else {
+            NSLog("MarmotIM: [E][dict] relative order rule insert failed")
+            return .failure(.dbUnavailable)
+        }
+
+        // Fetch the persisted row so we can return the canonical id + createdAt.
+        let selectSQL = "SELECT id, created_at, updated_at FROM user_relative_order WHERE word_a = ? AND word_b = ?"
+        var selStmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, selectSQL, -1, &selStmt, nil) == SQLITE_OK else {
+            return .failure(.dbUnavailable)
+        }
+        defer { sqlite3_finalize(selStmt) }
+        sqlite3_bind_text(selStmt, 1, a, -1, SQLITE_TRANSIENT)
+        sqlite3_bind_text(selStmt, 2, b, -1, SQLITE_TRANSIENT)
+
+        guard sqlite3_step(selStmt) == SQLITE_ROW else {
+            return .failure(.dbUnavailable)
+        }
+
+        let ruleId = sqlite3_column_int64(selStmt, 0)
+        let createdAt = Int(sqlite3_column_int64(selStmt, 1))
+        let updatedAt = Int(sqlite3_column_int64(selStmt, 2))
+        let rule = RelativeOrderingRule(
+            id: ruleId,
+            wordA: a,
+            wordB: b,
+            createdAt: createdAt,
+            updatedAt: updatedAt,
+            isDeleted: false
+        )
+
+        NSLog("MarmotIM: [I][dict] relative order rule added rule_id=\(ruleId) chars_a=\(a.count) chars_b=\(b.count)")
+        return .success(rule)
+    }
+
+    /// Soft-delete a relative-ordering rule by rowid (sets is_deleted=1,
+    /// bumps updated_at). Idempotent: returns true if the row exists
+    /// (whether or not it was already tombstoned).
+    @discardableResult
+    func removeRelativeOrderingRule(ruleId: Int64) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+
+        guard db != nil else { return false }
+
+        let sql = """
+            UPDATE user_relative_order
+            SET is_deleted = 1, updated_at = strftime('%s','now')
+            WHERE id = ?
+        """
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            return false
+        }
+        defer { sqlite3_finalize(stmt) }
+
+        sqlite3_bind_int64(stmt, 1, ruleId)
+        let ok = sqlite3_step(stmt) == SQLITE_DONE
+        if ok {
+            NSLog("MarmotIM: [I][dict] relative order rule removed rule_id=\(ruleId)")
+        }
+        return ok
+    }
+
+    /// Return non-deleted relative-ordering rules, sorted by created_at ASC.
+    func listRelativeOrderingRules() -> [RelativeOrderingRule] {
+        lock.lock()
+        defer { lock.unlock() }
+        return _unlockedListRelativeOrderingRules(includeDeleted: false)
+    }
+
+    /// Return ALL relative-ordering rules (including tombstones). For sync
+    /// upload and diagnostic surfaces only.
+    func listRelativeOrderingRulesIncludingDeleted() -> [RelativeOrderingRule] {
+        lock.lock()
+        defer { lock.unlock() }
+        return _unlockedListRelativeOrderingRules(includeDeleted: true)
+    }
+
+    /// Lightweight pair view for the CandidateRanker post-processing hot
+    /// path. Avoids rule-id / timestamp overhead that the ranker never
+    /// needs. Non-tombstoned pairs only.
+    func loadRelativeOrderingCache() -> [(wordA: String, wordB: String)] {
+        return listRelativeOrderingRules().map { ($0.wordA, $0.wordB) }
+    }
+
+    /// Sync-path upsert that BYPASSES cycle detection. The SyncMerger is
+    /// responsible for pruning cycles before calling. See decision 002.
+    @discardableResult
+    func upsertRelativeOrderingRuleForSync(
+        wordA rawA: String,
+        wordB rawB: String,
+        createdAt: Int,
+        updatedAt: Int,
+        isDeleted: Bool
+    ) -> Bool {
+        let a = RelativeOrderingNormalizer.normalize(rawA)
+        let b = RelativeOrderingNormalizer.normalize(rawB)
+
+        // Defensive: never write empty keys — they would violate NOT NULL.
+        if a.isEmpty || b.isEmpty { return false }
+
+        lock.lock()
+        defer { lock.unlock() }
+
+        guard db != nil else { return false }
+
+        let sql = """
+            INSERT INTO user_relative_order (word_a, word_b, created_at, updated_at, is_deleted)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(word_a, word_b) DO UPDATE SET
+                created_at = MIN(user_relative_order.created_at, excluded.created_at),
+                updated_at = excluded.updated_at,
+                is_deleted = excluded.is_deleted
+        """
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            return false
+        }
+        defer { sqlite3_finalize(stmt) }
+
+        sqlite3_bind_text(stmt, 1, a, -1, SQLITE_TRANSIENT)
+        sqlite3_bind_text(stmt, 2, b, -1, SQLITE_TRANSIENT)
+        sqlite3_bind_int(stmt, 3, Int32(createdAt))
+        sqlite3_bind_int(stmt, 4, Int32(updatedAt))
+        sqlite3_bind_int(stmt, 5, isDeleted ? 1 : 0)
+
+        return sqlite3_step(stmt) == SQLITE_DONE
+    }
+
+    /// Non-locking list helper for internal use. Caller must hold `lock`.
+    private func _unlockedListRelativeOrderingRules(includeDeleted: Bool) -> [RelativeOrderingRule] {
+        guard db != nil else { return [] }
+
+        let sql: String
+        if includeDeleted {
+            sql = "SELECT id, word_a, word_b, created_at, updated_at, is_deleted FROM user_relative_order ORDER BY created_at ASC"
+        } else {
+            sql = "SELECT id, word_a, word_b, created_at, updated_at, is_deleted FROM user_relative_order WHERE is_deleted = 0 ORDER BY created_at ASC"
+        }
+
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            return []
+        }
+        defer { sqlite3_finalize(stmt) }
+
+        var result: [RelativeOrderingRule] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            let id = sqlite3_column_int64(stmt, 0)
+            let wordAPtr = sqlite3_column_text(stmt, 1)
+            let wordBPtr = sqlite3_column_text(stmt, 2)
+            let wordA = wordAPtr != nil ? String(cString: wordAPtr!) : ""
+            let wordB = wordBPtr != nil ? String(cString: wordBPtr!) : ""
+            let createdAt = Int(sqlite3_column_int64(stmt, 3))
+            let updatedAt = Int(sqlite3_column_int64(stmt, 4))
+            let isDeleted = sqlite3_column_int(stmt, 5) != 0
+            result.append(RelativeOrderingRule(
+                id: id,
+                wordA: wordA,
+                wordB: wordB,
+                createdAt: createdAt,
+                updatedAt: updatedAt,
+                isDeleted: isDeleted
+            ))
+        }
+        return result
+    }
+
     // MARK: - Migration
 
     /// Check if database needs migration from JSON
@@ -1429,6 +1720,26 @@ final class VocabularyDatabase {
             } else {
                 NSLog("MarmotIM: v7 migration - user_learning already FK-free, nothing to rebuild")
             }
+        }
+
+        // Version 8: Add user_relative_order table for spec-003 relative-ordering
+        // rules. Idempotent via CREATE TABLE IF NOT EXISTS; existing v7 DBs get
+        // the new table added in-place without touching user data.
+        if currentVersion < 8 {
+            NSLog("MarmotIM: [I][dict] migrating to version 8 table=user_relative_order")
+            executeSQL("""
+                CREATE TABLE IF NOT EXISTS user_relative_order (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    word_a TEXT NOT NULL,
+                    word_b TEXT NOT NULL,
+                    created_at INTEGER NOT NULL DEFAULT (strftime('%s','now')),
+                    updated_at INTEGER NOT NULL DEFAULT (strftime('%s','now')),
+                    is_deleted INTEGER NOT NULL DEFAULT 0,
+                    UNIQUE(word_a, word_b)
+                )
+            """)
+            executeSQL("CREATE INDEX IF NOT EXISTS idx_relorder_a ON user_relative_order(word_a, is_deleted)")
+            executeSQL("CREATE INDEX IF NOT EXISTS idx_relorder_b ON user_relative_order(word_b, is_deleted)")
         }
 
         setSchemaVersion(targetVersion)

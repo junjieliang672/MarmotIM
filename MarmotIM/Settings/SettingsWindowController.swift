@@ -70,25 +70,21 @@ class SettingsWindowController: NSWindowController {
 
 /// Available tabs in the settings window
 enum SettingsTab: String, CaseIterable, Identifiable {
-    case basic = "基本"
-    case userDict = "用户词库"
+    case basic       = "基本"
+    case dictionary  = "词库管理"
     case punctuation = "标点符号"
-    case theme = "主题"
-    case suppressedWords = "降权词库"
-    case importExport = "导入导出"
-    case about = "关于"
+    case theme       = "主题"
+    case about       = "关于"
 
     var id: String { rawValue }
 
     var icon: String {
         switch self {
-        case .basic: return "gearshape"
-        case .userDict: return "doc.text"
+        case .basic:       return "gearshape"
+        case .dictionary:  return "books.vertical"
         case .punctuation: return "number"
-        case .theme: return "paintbrush"
-        case .suppressedWords: return "arrow.down.circle"
-        case .importExport: return "arrow.up.arrow.down.circle"
-        case .about: return "info.circle"
+        case .theme:       return "paintbrush"
+        case .about:       return "info.circle"
         }
     }
 }
@@ -123,16 +119,12 @@ struct SettingsView: View {
                 switch selectedTab {
                 case .basic:
                     BasicSettingsView(viewModel: viewModel)
-                case .userDict:
-                    UserDictView(viewModel: viewModel)
+                case .dictionary:
+                    DictionaryManagementView(viewModel: viewModel)
                 case .punctuation:
                     PunctuationView(viewModel: viewModel)
                 case .theme:
                     ThemeSettingsView(viewModel: viewModel)
-                case .suppressedWords:
-                    SuppressedWordsView(viewModel: viewModel)
-                case .importExport:
-                    ImportExportView()
                 case .about:
                     AboutView()
                 }

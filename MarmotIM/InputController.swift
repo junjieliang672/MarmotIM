@@ -893,10 +893,18 @@ class InputController: IMKInputController {
         let matches = engine.search(code: searchCode, limit: 100)
 
         // Rank candidates using Frecency (new API with engine for user learning data)
-        allCandidates = CandidateRanker.rank(
+        let ranked = CandidateRanker.rank(
             matches: matches,
             inputCode: searchCode,
             engine: engine
+        )
+
+        // Apply relative-ordering rules (spec-003). Sibling pass: does NOT
+        // touch rank()'s score math. Rules come from the engine-resident
+        // cache, rebuilt on preload + .relativeOrderingDidChange.
+        allCandidates = CandidateRanker.applyRelativeOrdering(
+            candidates: ranked,
+            rules: engine.getRelativeOrderingRules()
         )
 
         // Reset to first page

@@ -192,6 +192,9 @@ final class DictionaryPreloadService {
         engine.loadSuppressedWordsCache()
         updateProgress(0.9)
 
+        // Load relative-ordering rules cache (spec-003)
+        engine.loadRelativeOrderingCache()
+
         // Final setup
         engine.finalizePreload()
         updateProgress(0.93)

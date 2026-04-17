@@ -121,6 +121,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             name: .suppressedWordsDidChange,
             object: nil
         )
+
+        // Relative-ordering changed notification (spec-003; from iCloud sync
+        // or local settings UI mutation).
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleRelativeOrderingChanged),
+            name: .relativeOrderingDidChange,
+            object: nil
+        )
     }
 
     // MARK: - Menu Actions
@@ -151,5 +160,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func handleSuppressedWordsChanged() {
         NSLog("MarmotIM: Suppressed words changed, refreshing cache")
         dictionaryEngine?.updateSuppressedWordsCache()
+    }
+
+    @objc private func handleRelativeOrderingChanged() {
+        NSLog("MarmotIM: Relative-ordering rules changed, refreshing cache")
+        dictionaryEngine?.updateRelativeOrderingCache()
     }
 }

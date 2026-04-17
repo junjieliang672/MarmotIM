@@ -74,6 +74,15 @@ class DictionaryEngine {
     /// Lock for suppressed words cache access
     private let suppressedWordsLock = NSLock()
 
+    /// Relative-ordering rules cache (spec-003) — lightweight (wordA, wordB)
+    /// pairs used by CandidateRanker.applyRelativeOrdering on the ranker hot
+    /// path. Rebuilt from VocabularyDatabase at preload and whenever a rule
+    /// mutation or sync merge fires .relativeOrderingDidChange.
+    private var relativeOrderingCache: [(wordA: String, wordB: String)] = []
+
+    /// Lock for relative-ordering cache access.
+    private let relativeOrderingLock = NSLock()
+
     // MARK: - Initialization
 
     /// Initialize the dictionary engine
@@ -246,6 +255,32 @@ class DictionaryEngine {
             return true
         }
         return false
+    }
+
+    // MARK: - Relative Ordering Cache (spec-003)
+
+    /// Rebuild the relative-ordering cache from VocabularyDatabase. Called at
+    /// preload time and on every .relativeOrderingDidChange notification.
+    /// Mirrors the suppressed-words cache pattern above.
+    func loadRelativeOrderingCache() {
+        let pairs = db.loadRelativeOrderingCache()
+        relativeOrderingLock.lock()
+        relativeOrderingCache = pairs
+        relativeOrderingLock.unlock()
+        NSLog("MarmotIM: [I][dict] relative ordering cache loaded rules=\(pairs.count)")
+    }
+
+    /// Get the currently cached relative-ordering rules for ranker
+    /// post-processing. Non-empty only when preload or sync populated it.
+    func getRelativeOrderingRules() -> [(wordA: String, wordB: String)] {
+        relativeOrderingLock.lock()
+        defer { relativeOrderingLock.unlock() }
+        return relativeOrderingCache
+    }
+
+    /// Alias for sync/settings observers. Reloads from VocabularyDatabase.
+    func updateRelativeOrderingCache() {
+        loadRelativeOrderingCache()
     }
 
     /// 英文完全匹配搜索

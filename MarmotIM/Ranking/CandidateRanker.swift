@@ -184,6 +184,92 @@ struct CandidateRanker {
         return candidates
     }
 
+    // MARK: - Relative Ordering Post-Processing (spec-003)
+
+    /// Stable post-processing pass that enforces user-defined relative
+    /// ordering rules of the form "wordA must come before wordB when both
+    /// appear in the candidate list". Called explicitly by the caller AFTER
+    /// `rank()` — this is a sibling function, NOT a new pass inside rank.
+    /// See decision 001-comparator-location in spec-003.
+    ///
+    /// Invariants:
+    /// - Protected tiers (P0/P1 jianma, isJianma==true) are NEVER reordered
+    ///   by this pass. See decision 003-respect-protected-tiers and
+    ///   docs/ranking.md.
+    /// - No-op when `rules` is empty (early return, zero comparisons).
+    /// - No-op when neither wordA nor wordB of any rule is present — the
+    ///   function may still iterate once to verify this but it performs
+    ///   no swaps.
+    /// - Stability: non-rule-matching candidates keep their pre-call order.
+    ///
+    /// Algorithm: stable topological-bubble pass. For each candidate pair
+    /// (i, j) with i < j, if some rule says "candidate[j] ranks before
+    /// candidate[i]", swap them. Repeat until a fixed point, capped at
+    /// `candidates.count * 3` iterations as a defensive guard against
+    /// contradictory rules (which the insert-time cycle check should have
+    /// prevented, but depth-in-depth is cheap).
+    ///
+    /// - Parameters:
+    ///   - candidates: Candidate list in post-rank() order.
+    ///   - rules: List of (wordA, wordB) pairs from VocabularyDatabase.
+    ///     Expected to be small (user rule cardinality is in the tens).
+    /// - Returns: A new candidate list with relative-ordering applied.
+    static func applyRelativeOrdering(
+        candidates: [Candidate],
+        rules: [(wordA: String, wordB: String)]
+    ) -> [Candidate] {
+        // Early exit: empty rule set means true no-op.
+        guard !rules.isEmpty else { return candidates }
+        // Early exit: list too short to reorder.
+        guard candidates.count >= 2 else { return candidates }
+
+        var result = candidates
+        var movesTotal = 0
+        // Iterate to a fixed point. A pair can only be resolved once it is
+        // visited in the correct order; after a move, cascading rules may
+        // apply — hence the outer loop. The cap is generous but bounded to
+        // guard against contradictory rules.
+        let cap = max(candidates.count * rules.count * 2, rules.count + 1)
+
+        for _ in 0..<cap {
+            var movedThisPass = false
+
+            for rule in rules {
+                // Find positions of wordA and wordB in the current result.
+                // We only act if BOTH are present — a rule with only one
+                // side in the list is a no-op.
+                guard let posA = result.firstIndex(where: { $0.text == rule.wordA }),
+                      let posB = result.firstIndex(where: { $0.text == rule.wordB }) else {
+                    continue
+                }
+                // Already in the desired order.
+                if posA < posB { continue }
+
+                // Protected-tier guard: never reorder across a jianma. Per
+                // decision 003 / docs/ranking.md, P0/P1 candidates are
+                // inviolable and user relative-ordering rules do not apply.
+                let candA = result[posA]
+                let candB = result[posB]
+                if candA.isJianma || candB.isJianma { continue }
+
+                // Move wordA to just before wordB. Preserves the stable
+                // order of everything else (insertion-sort semantics).
+                let moving = result.remove(at: posA)
+                // After removing an index greater than posB, posB is unchanged.
+                result.insert(moving, at: posB)
+                movesTotal += 1
+                movedThisPass = true
+            }
+
+            if !movedThisPass { break }
+        }
+
+        if movesTotal > 0 {
+            NSLog("MarmotIM: [D][rank] relative ordering applied rule_count=\(rules.count) candidates_swapped=\(movesTotal)")
+        }
+        return result
+    }
+
     // MARK: - Tier Calculation
 
     /// Determine tier bonus based on match type, code type, and jianma table

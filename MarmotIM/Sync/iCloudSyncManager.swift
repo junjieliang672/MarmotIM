@@ -34,6 +34,7 @@ class iCloudSyncManager {
     private let favoritesFileName = "user_favorites.json"
     private let filterFreqFileName = "filter_user_freq.json"
     private let suppressedWordsFileName = "user_suppressed_words.json"
+    private let relativeOrderingFileName = "user_relative_ordering.json"
 
     // MARK: - Initialization
 
@@ -146,11 +147,11 @@ class iCloudSyncManager {
         }
 
         checkICloudAvailability()
-        
+
         // If manual sync (user triggered), we should try even if checkICloudAvailability returned false initially,
         // because accessing the URL might trigger system prompts or reveal status.
         // But for safety, we still check availability unless we want to force an error.
-        
+
         guard isICloudAvailable else {
             NSLog("MarmotIM: iCloud not available (no identity token), aborting sync")
             // Update status to reflect failure due to unavailability
@@ -172,11 +173,9 @@ class iCloudSyncManager {
             let documentsURL = containerURL.appendingPathComponent("Documents")
             try FileManager.default.createDirectory(at: documentsURL, withIntermediateDirectories: true)
 
-            // 2. Sync each data table
-            try syncLearningData(documentsURL: documentsURL)
-            try syncFavoritesData(documentsURL: documentsURL)
-            try syncFilterFreqData(documentsURL: documentsURL)
-            try syncSuppressedWordsData(documentsURL: documentsURL)
+            // 2. Drive the testable sync entry point with the production
+            // iCloud documents URL + the production DB path.
+            try syncOnce(documentsURL: documentsURL, dbPath: localDBPath)
 
             // 3. Update status
             lastSyncTime = Date()
@@ -187,6 +186,37 @@ class iCloudSyncManager {
             lastSyncSuccess = false
             NSLog("MarmotIM: Sync failed: \(error)")
         }
+    }
+
+    /// Test-facing sync entry point. Performs one full round of sync
+    /// (learning + favorites + filter freq + suppressed words + relative
+    /// ordering) against the given documents directory and local DB file,
+    /// no iCloud entitlement required.
+    ///
+    /// Production `performSync` wraps this with the real iCloud container
+    /// lookup and lifecycle flags. Tests (DualDeviceSyncHarness, T7) call
+    /// this directly against a tempDir acting as the "iCloud" directory.
+    /// See decision 004-testability-via-syncOnce-refactor in spec-003.
+    internal func syncOnce(documentsURL: URL, dbPath: URL) throws {
+        // Save current DB path, swap in the test path if different, and
+        // restore on exit so the same manager can be reused for either.
+        let savedPath = localDBPathOverride
+        localDBPathOverride = dbPath
+        defer { localDBPathOverride = savedPath }
+
+        try syncLearningData(documentsURL: documentsURL)
+        try syncFavoritesData(documentsURL: documentsURL)
+        try syncFilterFreqData(documentsURL: documentsURL)
+        try syncSuppressedWordsData(documentsURL: documentsURL)
+        try syncRelativeOrderingData(documentsURL: documentsURL)
+    }
+
+    /// Dynamic DB path used by all read/write helpers. Defaults to the
+    /// production localDBPath; `syncOnce` swaps this to a test path for
+    /// the duration of a test call. Thread safety: syncQueue serializes.
+    private var localDBPathOverride: URL?
+    internal var activeLocalDBPath: URL {
+        return localDBPathOverride ?? localDBPath
     }
 
     // MARK: - Sync User Learning
@@ -341,11 +371,166 @@ class iCloudSyncManager {
         }
     }
 
+    // MARK: - Sync Relative Ordering (spec-003)
+
+    private func syncRelativeOrderingData(documentsURL: URL) throws {
+        let remoteURL = documentsURL.appendingPathComponent(relativeOrderingFileName)
+
+        let localRecords = try readLocalRelativeOrdering()
+
+        let downloadStatus = ensureFileDownloaded(at: remoteURL)
+
+        switch downloadStatus {
+        case .ready:
+            NSLog("MarmotIM: [I][sync] syncing relative order file status=ready")
+            let remoteRecords = try readRemoteRelativeOrderingContent(from: remoteURL)
+            let (merged, dropped) = SyncMerger.mergeRelativeOrdering(
+                local: localRecords,
+                remote: remoteRecords
+            )
+            let changed = SyncMerger.findChangedRelativeOrdering(merged: merged, original: localRecords)
+            if !changed.isEmpty {
+                try writeLocalRelativeOrdering(changed)
+                NSLog("MarmotIM: [I][sync] relative order merge complete records_received=\(remoteRecords.count) records_new=\(changed.count) records_cycle_dropped=\(dropped.count)")
+                DispatchQueue.main.async {
+                    NotificationCenter.default.post(name: .relativeOrderingDidChange, object: nil)
+                }
+            } else {
+                NSLog("MarmotIM: [I][sync] relative order merge complete records_received=\(remoteRecords.count) records_new=0 records_cycle_dropped=\(dropped.count)")
+            }
+            try writeRemoteRelativeOrdering(merged, to: remoteURL)
+
+        case .notFound:
+            NSLog("MarmotIM: [I][sync] syncing relative order file status=notFound")
+            try writeRemoteRelativeOrdering(localRecords, to: remoteURL)
+
+        case .downloadFailed:
+            NSLog("MarmotIM: [W][sync] syncing relative order file status=downloadFailed action=skip")
+        }
+    }
+
+    private func readLocalRelativeOrdering() throws -> [String: RelativeOrderingRecord] {
+        var db: OpaquePointer?
+        guard sqlite3_open_v2(activeLocalDBPath.path, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else {
+            throw SyncError.databaseOpenFailed
+        }
+        defer { sqlite3_close(db) }
+
+        // Include tombstones — sync needs them for LWW semantics.
+        var records: [String: RelativeOrderingRecord] = [:]
+        let sql = "SELECT word_a, word_b, created_at, updated_at, is_deleted FROM user_relative_order"
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            throw SyncError.queryFailed
+        }
+        defer { sqlite3_finalize(stmt) }
+
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            let wordA = String(cString: sqlite3_column_text(stmt, 0))
+            let wordB = String(cString: sqlite3_column_text(stmt, 1))
+            let createdAt = Int(sqlite3_column_int(stmt, 2))
+            let updatedAt = Int(sqlite3_column_int(stmt, 3))
+            let isDeleted = sqlite3_column_int(stmt, 4) != 0
+            if wordA.isEmpty || wordB.isEmpty { continue }
+            let key = RelativeOrderingRecord.makeKey(wordA: wordA, wordB: wordB)
+            records[key] = RelativeOrderingRecord(
+                createdAt: createdAt,
+                updatedAt: updatedAt,
+                isDeleted: isDeleted
+            )
+        }
+        return records
+    }
+
+    private func readRemoteRelativeOrderingContent(from url: URL) throws -> [String: RelativeOrderingRecord] {
+        var coordinatorError: NSError?
+        var readError: Error?
+        var records: [String: RelativeOrderingRecord] = [:]
+
+        let coordinator = NSFileCoordinator()
+        coordinator.coordinate(readingItemAt: url, options: [], error: &coordinatorError) { coordURL in
+            do {
+                let data = try Data(contentsOf: coordURL)
+                let syncFile = try JSONDecoder().decode(SyncFile<RelativeOrderingRecord>.self, from: data)
+                records = syncFile.records
+            } catch {
+                readError = error
+            }
+        }
+        if let error = coordinatorError {
+            throw SyncError.fileCoordinationFailed(underlying: error)
+        }
+        if let error = readError { throw error }
+        return records
+    }
+
+    private func writeLocalRelativeOrdering(_ records: [(String, RelativeOrderingRecord)]) throws {
+        var db: OpaquePointer?
+        guard sqlite3_open(activeLocalDBPath.path, &db) == SQLITE_OK else {
+            throw SyncError.databaseOpenFailed
+        }
+        defer { sqlite3_close(db) }
+
+        sqlite3_exec(db, "BEGIN TRANSACTION", nil, nil, nil)
+        let sql = """
+            INSERT INTO user_relative_order
+            (word_a, word_b, created_at, updated_at, is_deleted)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(word_a, word_b) DO UPDATE SET
+                created_at = MIN(user_relative_order.created_at, excluded.created_at),
+                updated_at = excluded.updated_at,
+                is_deleted = excluded.is_deleted
+        """
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            sqlite3_exec(db, "ROLLBACK", nil, nil, nil)
+            throw SyncError.queryFailed
+        }
+        defer { sqlite3_finalize(stmt) }
+
+        for (key, record) in records {
+            guard let pair = RelativeOrderingRecord.parseKey(key) else {
+                NSLog("MarmotIM: [W][sync] relative order skipping invalid key action=noop")
+                continue
+            }
+            let aNS = pair.wordA as NSString
+            let bNS = pair.wordB as NSString
+            sqlite3_bind_text(stmt, 1, aNS.utf8String, -1, nil)
+            sqlite3_bind_text(stmt, 2, bNS.utf8String, -1, nil)
+            sqlite3_bind_int(stmt, 3, Int32(record.createdAt))
+            sqlite3_bind_int(stmt, 4, Int32(record.updatedAt))
+            sqlite3_bind_int(stmt, 5, record.isDeleted ? 1 : 0)
+            sqlite3_step(stmt)
+            sqlite3_reset(stmt)
+        }
+        sqlite3_exec(db, "COMMIT", nil, nil, nil)
+    }
+
+    private func writeRemoteRelativeOrdering(_ records: [String: RelativeOrderingRecord], to url: URL) throws {
+        let syncFile = SyncFile(records: records)
+        let data = try JSONEncoder().encode(syncFile)
+
+        var coordinatorError: NSError?
+        var writeError: Error?
+        let coordinator = NSFileCoordinator()
+        coordinator.coordinate(writingItemAt: url, options: .forReplacing, error: &coordinatorError) { coordURL in
+            do {
+                try data.write(to: coordURL, options: .atomic)
+            } catch {
+                writeError = error
+            }
+        }
+        if let error = coordinatorError {
+            throw SyncError.fileCoordinationFailed(underlying: error)
+        }
+        if let error = writeError { throw error }
+    }
+
     // MARK: - Read Local Database
 
     private func readLocalLearning() throws -> [String: LearningRecord] {
         var db: OpaquePointer?
-        guard sqlite3_open_v2(localDBPath.path, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else {
+        guard sqlite3_open_v2(activeLocalDBPath.path, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else {
             throw SyncError.databaseOpenFailed
         }
         defer { sqlite3_close(db) }
@@ -374,7 +559,7 @@ class iCloudSyncManager {
 
     private func readLocalFavorites() throws -> [String: FavoriteRecord] {
         var db: OpaquePointer?
-        guard sqlite3_open_v2(localDBPath.path, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else {
+        guard sqlite3_open_v2(activeLocalDBPath.path, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else {
             throw SyncError.databaseOpenFailed
         }
         defer { sqlite3_close(db) }
@@ -408,7 +593,7 @@ class iCloudSyncManager {
 
     private func readLocalFilterFreq() throws -> [String: FilterFreqRecord] {
         var db: OpaquePointer?
-        guard sqlite3_open_v2(localDBPath.path, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else {
+        guard sqlite3_open_v2(activeLocalDBPath.path, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else {
             throw SyncError.databaseOpenFailed
         }
         defer { sqlite3_close(db) }
@@ -438,7 +623,7 @@ class iCloudSyncManager {
 
     private func readLocalSuppressedWords() throws -> [String: SuppressedWordRecord] {
         var db: OpaquePointer?
-        guard sqlite3_open_v2(localDBPath.path, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else {
+        guard sqlite3_open_v2(activeLocalDBPath.path, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else {
             throw SyncError.databaseOpenFailed
         }
         defer { sqlite3_close(db) }
@@ -670,7 +855,7 @@ class iCloudSyncManager {
 
     private func writeLocalLearning(_ records: [(String, LearningRecord)]) throws {
         var db: OpaquePointer?
-        guard sqlite3_open(localDBPath.path, &db) == SQLITE_OK else {
+        guard sqlite3_open(activeLocalDBPath.path, &db) == SQLITE_OK else {
             throw SyncError.databaseOpenFailed
         }
         defer { sqlite3_close(db) }
@@ -704,7 +889,7 @@ class iCloudSyncManager {
 
     private func writeLocalFavorites(_ records: [(String, FavoriteRecord)]) throws {
         var db: OpaquePointer?
-        guard sqlite3_open(localDBPath.path, &db) == SQLITE_OK else {
+        guard sqlite3_open(activeLocalDBPath.path, &db) == SQLITE_OK else {
             throw SyncError.databaseOpenFailed
         }
         defer { sqlite3_close(db) }
@@ -749,7 +934,7 @@ class iCloudSyncManager {
 
     private func writeLocalFilterFreq(_ records: [(String, FilterFreqRecord)]) throws {
         var db: OpaquePointer?
-        guard sqlite3_open(localDBPath.path, &db) == SQLITE_OK else {
+        guard sqlite3_open(activeLocalDBPath.path, &db) == SQLITE_OK else {
             throw SyncError.databaseOpenFailed
         }
         defer { sqlite3_close(db) }
@@ -787,7 +972,7 @@ class iCloudSyncManager {
 
     private func writeLocalSuppressedWords(_ records: [(String, SuppressedWordRecord)]) throws {
         var db: OpaquePointer?
-        guard sqlite3_open(localDBPath.path, &db) == SQLITE_OK else {
+        guard sqlite3_open(activeLocalDBPath.path, &db) == SQLITE_OK else {
             throw SyncError.databaseOpenFailed
         }
         defer { sqlite3_close(db) }
@@ -922,4 +1107,10 @@ class iCloudSyncManager {
 extension Notification.Name {
     /// Posted when suppressed words are updated via sync
     static let suppressedWordsDidChange = Notification.Name("MarmotIMSuppressedWordsDidChange")
+
+    /// Posted when relative-ordering rules are updated via sync (spec-003).
+    /// Observers (AppDelegate) should call
+    /// `DictionaryEngine.updateRelativeOrderingCache()` so the ranker's
+    /// in-memory rule cache stays fresh.
+    static let relativeOrderingDidChange = Notification.Name("MarmotIMRelativeOrderingDidChange")
 }

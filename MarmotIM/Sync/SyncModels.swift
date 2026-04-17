@@ -83,6 +83,56 @@ struct SuppressedWordRecord: Codable {
     }
 }
 
+/// Record for user_relative_order table sync (spec-003).
+/// Key format: "<wordA>\u{001F}<wordB>" — ASCII Unit Separator U+001F,
+/// which cannot appear in normal IME input (decision 006-sync-key-format).
+struct RelativeOrderingRecord: Codable {
+    var createdAt: Int
+    var updatedAt: Int
+    var isDeleted: Bool
+
+    init(createdAt: Int, updatedAt: Int, isDeleted: Bool = false) {
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+        self.isDeleted = isDeleted
+    }
+
+    // Custom decoding: legacy JSON without isDeleted defaults to false
+    // (mirrors SuppressedWordRecord / FavoriteRecord back-compat pattern).
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        createdAt = try container.decode(Int.self, forKey: .createdAt)
+        updatedAt = try container.decode(Int.self, forKey: .updatedAt)
+        isDeleted = try container.decodeIfPresent(Bool.self, forKey: .isDeleted) ?? false
+    }
+}
+
+// MARK: - RelativeOrderingRecord key helpers
+
+extension RelativeOrderingRecord {
+    /// ASCII Unit Separator (U+001F) — selected per decision 006 because
+    /// it cannot appear in NFC-normalized IME user input, survives JSON
+    /// encoding (`\u001f`), and is lexicographically stable across devices.
+    static let keySeparator: String = "\u{001F}"
+
+    /// Make a sync key from a (wordA, wordB) pair.
+    static func makeKey(wordA: String, wordB: String) -> String {
+        return "\(wordA)\(keySeparator)\(wordB)"
+    }
+
+    /// Parse a sync key back into (wordA, wordB). Returns nil if the key
+    /// is malformed (missing or multiple separators).
+    static func parseKey(_ key: String) -> (wordA: String, wordB: String)? {
+        let parts = key.components(separatedBy: keySeparator)
+        guard parts.count == 2 else { return nil }
+        let a = parts[0]
+        let b = parts[1]
+        // Defensive: never surface empty keys to the caller.
+        guard !a.isEmpty, !b.isEmpty else { return nil }
+        return (a, b)
+    }
+}
+
 // MARK: - Key Generation Helpers
 
 extension FilterFreqRecord {
