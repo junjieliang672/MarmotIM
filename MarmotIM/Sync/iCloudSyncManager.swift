@@ -219,6 +219,42 @@ class iCloudSyncManager {
         return localDBPathOverride ?? localDBPath
     }
 
+    // MARK: - Per-payload sync state markers (spec-004 decision 012)
+    //
+    // Track whether this device has ever successfully synced each payload
+    // so the `.notFound` branch can distinguish:
+    //
+    //   (a) first-ever upload on a fresh device — safe to write local up.
+    //   (b) cloud file deleted after a prior sync — dangerous; skip write.
+    //
+    // The marker is a small empty file placed next to the active DB,
+    // named `.marmotim.sync-state.<payload-name>`. We use the DB's parent
+    // directory so it inherits the DB's lifecycle (tests in harness share
+    // tempDir, production uses ~/Library/Application Support/MarmotIM/).
+
+    private func syncStateMarkerURL(for payloadFileName: String) -> URL {
+        let dir = activeLocalDBPath.deletingLastPathComponent()
+        return dir.appendingPathComponent(".marmotim.sync-state.\(payloadFileName)")
+    }
+
+    internal func hasPayloadEverSynced(_ payloadFileName: String) -> Bool {
+        return FileManager.default.fileExists(atPath: syncStateMarkerURL(for: payloadFileName).path)
+    }
+
+    internal func markPayloadSynced(_ payloadFileName: String) {
+        let marker = syncStateMarkerURL(for: payloadFileName)
+        // Ensure parent dir exists (defensive — in prod the dir is always there).
+        try? FileManager.default.createDirectory(
+            at: marker.deletingLastPathComponent(), withIntermediateDirectories: true
+        )
+        if !FileManager.default.fileExists(atPath: marker.path) {
+            let ok = FileManager.default.createFile(atPath: marker.path, contents: nil)
+            if !ok {
+                NSLog("MarmotIM: [W][sync] sync-state marker write failed payload=\(payloadFileName) action=will_retry_next_sync impact=first_sync_skip_heuristic_degraded")
+            }
+        }
+    }
+
     // MARK: - Sync User Learning
 
     private func syncLearningData(documentsURL: URL) throws {
@@ -243,11 +279,26 @@ class iCloudSyncManager {
 
             // Safe to write merged result back
             try writeRemoteLearning(merged, to: remoteURL)
+            markPayloadSynced(learningFileName)
 
         case .notFound:
-            // File doesn't exist in iCloud yet - safe to upload local data
-            NSLog("MarmotIM: No remote learning file, uploading local data")
-            try writeRemoteLearning(localRecords, to: remoteURL)
+            // File missing in cloud. Spec-004 decision 012 bifurcation:
+            //   (a) marker set (we've synced before) → local is
+            //       authoritative for the state WE contributed; upload
+            //       it to restore cloud.
+            //   (b) marker absent + non-empty local → genuine first-ever
+            //       upload (or new device whose cloud state was a race
+            //       casualty; accept the residual risk). Upload.
+            //   (c) marker absent + empty local → no signal at all that
+            //       we have any right to establish cloud state. Skip to
+            //       avoid clobbering what another device may have had.
+            if localRecords.isEmpty && !hasPayloadEverSynced(learningFileName) {
+                NSLog("MarmotIM: [I][sync] learning file notFound first_sync=true local_empty=true action=skip reason=decision_012")
+            } else {
+                NSLog("MarmotIM: [I][sync] learning file notFound action=upload prior_sync=\(hasPayloadEverSynced(learningFileName)) local_rows=\(localRecords.count)")
+                try writeRemoteLearning(localRecords, to: remoteURL)
+                markPayloadSynced(learningFileName)
+            }
 
         case .downloadFailed:
             // CRITICAL: Remote file exists but couldn't be downloaded
@@ -280,11 +331,17 @@ class iCloudSyncManager {
 
             // Safe to write merged result back
             try writeRemoteFavorites(merged, to: remoteURL)
+            markPayloadSynced(favoritesFileName)
 
         case .notFound:
-            // File doesn't exist in iCloud yet - safe to upload local data
-            NSLog("MarmotIM: No remote favorites file, uploading local data")
-            try writeRemoteFavorites(localRecords, to: remoteURL)
+            // See syncLearningData for rationale (decision 012).
+            if localRecords.isEmpty && !hasPayloadEverSynced(favoritesFileName) {
+                NSLog("MarmotIM: [I][sync] favorites file notFound first_sync=true local_empty=true action=skip reason=decision_012")
+            } else {
+                NSLog("MarmotIM: [I][sync] favorites file notFound action=upload prior_sync=\(hasPayloadEverSynced(favoritesFileName)) local_rows=\(localRecords.count)")
+                try writeRemoteFavorites(localRecords, to: remoteURL)
+                markPayloadSynced(favoritesFileName)
+            }
 
         case .downloadFailed:
             // CRITICAL: Remote file exists but couldn't be downloaded
@@ -317,11 +374,17 @@ class iCloudSyncManager {
 
             // Safe to write merged result back
             try writeRemoteFilterFreq(merged, to: remoteURL)
+            markPayloadSynced(filterFreqFileName)
 
         case .notFound:
-            // File doesn't exist in iCloud yet - safe to upload local data
-            NSLog("MarmotIM: No remote filter freq file, uploading local data")
-            try writeRemoteFilterFreq(localRecords, to: remoteURL)
+            // See syncLearningData for rationale (decision 012).
+            if localRecords.isEmpty && !hasPayloadEverSynced(filterFreqFileName) {
+                NSLog("MarmotIM: [I][sync] filter freq file notFound first_sync=true local_empty=true action=skip reason=decision_012")
+            } else {
+                NSLog("MarmotIM: [I][sync] filter freq file notFound action=upload prior_sync=\(hasPayloadEverSynced(filterFreqFileName)) local_rows=\(localRecords.count)")
+                try writeRemoteFilterFreq(localRecords, to: remoteURL)
+                markPayloadSynced(filterFreqFileName)
+            }
 
         case .downloadFailed:
             // CRITICAL: Remote file exists but couldn't be downloaded
@@ -358,11 +421,17 @@ class iCloudSyncManager {
 
             // Safe to write merged result back
             try writeRemoteSuppressedWords(merged, to: remoteURL)
+            markPayloadSynced(suppressedWordsFileName)
 
         case .notFound:
-            // File doesn't exist in iCloud yet - safe to upload local data
-            NSLog("MarmotIM: No remote suppressed words file, uploading local data")
-            try writeRemoteSuppressedWords(localRecords, to: remoteURL)
+            // See syncLearningData for rationale (decision 012).
+            if localRecords.isEmpty && !hasPayloadEverSynced(suppressedWordsFileName) {
+                NSLog("MarmotIM: [I][sync] suppressed words file notFound first_sync=true local_empty=true action=skip reason=decision_012")
+            } else {
+                NSLog("MarmotIM: [I][sync] suppressed words file notFound action=upload prior_sync=\(hasPayloadEverSynced(suppressedWordsFileName)) local_rows=\(localRecords.count)")
+                try writeRemoteSuppressedWords(localRecords, to: remoteURL)
+                markPayloadSynced(suppressedWordsFileName)
+            }
 
         case .downloadFailed:
             // CRITICAL: Remote file exists but couldn't be downloaded
@@ -399,10 +468,17 @@ class iCloudSyncManager {
                 NSLog("MarmotIM: [I][sync] relative order merge complete records_received=\(remoteRecords.count) records_new=0 records_cycle_dropped=\(dropped.count)")
             }
             try writeRemoteRelativeOrdering(merged, to: remoteURL)
+            markPayloadSynced(relativeOrderingFileName)
 
         case .notFound:
-            NSLog("MarmotIM: [I][sync] syncing relative order file status=notFound")
-            try writeRemoteRelativeOrdering(localRecords, to: remoteURL)
+            // See syncLearningData for rationale (decision 012).
+            if localRecords.isEmpty && !hasPayloadEverSynced(relativeOrderingFileName) {
+                NSLog("MarmotIM: [I][sync] relative order file notFound first_sync=true local_empty=true action=skip reason=decision_012")
+            } else {
+                NSLog("MarmotIM: [I][sync] relative order file notFound action=upload prior_sync=\(hasPayloadEverSynced(relativeOrderingFileName)) local_rows=\(localRecords.count)")
+                try writeRemoteRelativeOrdering(localRecords, to: remoteURL)
+                markPayloadSynced(relativeOrderingFileName)
+            }
 
         case .downloadFailed:
             NSLog("MarmotIM: [W][sync] syncing relative order file status=downloadFailed action=skip")

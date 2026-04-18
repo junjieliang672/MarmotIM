@@ -2,30 +2,39 @@ import XCTest
 import SQLite3
 @testable import MarmotIM
 
+/// VocabularyDatabase tests migrated to per-test isolated DBs via
+/// `VocabularyDatabase.makeForTests(path:)` (spec-004 T1, I-MIG-VDB-01).
+///
+/// Prior to this migration every test poked the production singleton
+/// which wrote to `~/Library/Application Support/MarmotIM/dictionary.db`
+/// — polluting the user's real dictionary on every `swift test` run.
+/// Each test now operates against a fresh tempDir DB; setUp creates it,
+/// tearDown removes it. See spec-004 decision 001-scope-of-legacy-migration.
 final class VocabularyDatabaseTests: XCTestCase {
 
-    var testDbPath: String!
-    var db: VocabularyDatabase!
+    private var tempDir: URL!
+    private var db: VocabularyDatabase!
 
     override func setUp() {
         super.setUp()
-        // Create a temporary database for testing
-        testDbPath = NSTemporaryDirectory() + "test_vocabulary_\(UUID().uuidString).db"
+        tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("marmotim-vdb-tests-\(UUID().uuidString)")
+        try? FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        db = VocabularyDatabase.makeForTests(path: tempDir.appendingPathComponent("test.db"))
     }
 
     override func tearDown() {
-        // Clean up test database
-        if let path = testDbPath {
-            try? FileManager.default.removeItem(atPath: path)
+        db = nil
+        if let dir = tempDir {
+            try? FileManager.default.removeItem(at: dir)
         }
+        tempDir = nil
         super.tearDown()
     }
 
     // MARK: - Entry Tests
 
     func testInsertAndRetrieveEntry() {
-        let db = VocabularyDatabase.shared
-
         let entry = DictionaryEntry(
             id: 99999,
             text: "测试",
@@ -47,14 +56,9 @@ final class VocabularyDatabaseTests: XCTestCase {
         XCTAssertEqual(retrieved?.text, "测试")
         XCTAssertEqual(retrieved?.pinyin, "ceshi")
         XCTAssertEqual(retrieved?.wubi, "aaaa")
-
-        // Cleanup
-        _ = db.deleteEntry(id: 99999)
     }
 
     func testDeleteEntry() {
-        let db = VocabularyDatabase.shared
-
         let entry = DictionaryEntry(
             id: 99998,
             text: "删除测试",
@@ -81,7 +85,14 @@ final class VocabularyDatabaseTests: XCTestCase {
     // MARK: - Index Tests
 
     func testPinyinIndex() {
-        let db = VocabularyDatabase.shared
+        // pinyin_index has FK to entries(id) — insert the parent row first
+        // (previously the shared DB happened to contain the id already).
+        let parent = DictionaryEntry(
+            id: 88888, text: "索引测试", pinyin: "suoyinceshi", wubi: nil,
+            wubiBaseFrequency: 1, pinyinBaseFrequency: 1,
+            source: EntrySource.user.rawValue, length: 4
+        )
+        _ = db.insertEntry(parent)
 
         // Insert pinyin index
         let inserted = db.insertPinyinIndex(code: "testpy", entryId: 88888)
@@ -91,13 +102,16 @@ final class VocabularyDatabaseTests: XCTestCase {
         let indexes = db.loadAllPinyinIndexes()
         let found = indexes.contains { $0.code == "testpy" && $0.entryId == 88888 }
         XCTAssertTrue(found)
-
-        // Cleanup - delete the index entry directly via SQL would be complex,
-        // so we'll leave it (test DB is temporary anyway in real test setup)
     }
 
     func testWubiIndex() {
-        let db = VocabularyDatabase.shared
+        // wubi_index has FK to entries(id) — insert the parent row first.
+        let parent = DictionaryEntry(
+            id: 77777, text: "索引测试2", pinyin: "suoyinceshi2", wubi: "testwb",
+            wubiBaseFrequency: 1, pinyinBaseFrequency: 1,
+            source: EntrySource.user.rawValue, length: 5
+        )
+        _ = db.insertEntry(parent)
 
         // Insert wubi index
         let inserted = db.insertWubiIndex(code: "testwb", entryId: 77777)
@@ -112,8 +126,6 @@ final class VocabularyDatabaseTests: XCTestCase {
     // MARK: - User Learning Tests
 
     func testRecordSelection() {
-        let db = VocabularyDatabase.shared
-
         // Use unique entry ID to avoid conflicts
         let entryId = UInt32.random(in: 0xA0000000...0xAFFFFFFF)
 
@@ -130,8 +142,6 @@ final class VocabularyDatabaseTests: XCTestCase {
     }
 
     func testRecordMultipleSelections() {
-        let db = VocabularyDatabase.shared
-
         // Use unique entry ID to avoid conflicts
         let entryId = UInt32.random(in: 0xB0000000...0xBFFFFFFF)
 
@@ -161,23 +171,15 @@ final class VocabularyDatabaseTests: XCTestCase {
     /// actually increment access_count. If anyone re-adds the FK (e.g. by
     /// regenerating the bundled DB from tools/build_dictionary.py without
     /// also dropping it there), this test will fail immediately.
+    ///
+    /// Migration note (spec-004 T1): This test is preserved verbatim in
+    /// intent but now runs against an isolated makeForTests DB. The FK
+    /// regression would still trip here because makeForTests runs
+    /// performMigrations() which applies v7 to the test DB.
     func testRecordSelection_roundTrip() {
-        let db = VocabularyDatabase.shared
-
         // Use an id that is guaranteed NOT to exist in entries(id). If the
         // FK ever comes back, INSERT will fail with SQLITE_CONSTRAINT_FOREIGNKEY.
         let entryId = UInt32.random(in: 0xC0000000...0xCFFFFFFF)
-
-        // Clean slate — defensively remove any prior row so this test can run
-        // repeatedly without relying on tearDown wiping the singleton.
-        _ = db.getConnection().map { conn -> Void in
-            var stmt: OpaquePointer?
-            if sqlite3_prepare_v2(conn, "DELETE FROM user_learning WHERE entry_id = ?", -1, &stmt, nil) == SQLITE_OK {
-                sqlite3_bind_int64(stmt, 1, Int64(entryId))
-                _ = sqlite3_step(stmt)
-            }
-            sqlite3_finalize(stmt)
-        }
 
         // 1) First recordSelection must return true.
         let firstWrite = db.recordSelection(entryId: entryId, totalScore: 42.0)
@@ -202,23 +204,11 @@ final class VocabularyDatabaseTests: XCTestCase {
             return
         }
         XCTAssertEqual(row2.accessCount, 2, "ON CONFLICT UPDATE must increment accessCount to 2")
-
-        // Cleanup.
-        _ = db.getConnection().map { conn -> Void in
-            var stmt: OpaquePointer?
-            if sqlite3_prepare_v2(conn, "DELETE FROM user_learning WHERE entry_id = ?", -1, &stmt, nil) == SQLITE_OK {
-                sqlite3_bind_int64(stmt, 1, Int64(entryId))
-                _ = sqlite3_step(stmt)
-            }
-            sqlite3_finalize(stmt)
-        }
     }
 
     // MARK: - Batch Operations
 
     func testBatchGetEntries() {
-        let db = VocabularyDatabase.shared
-
         // Insert test entries
         let entries = [
             DictionaryEntry(id: 44441, text: "批量1", pinyin: "piliang1", wubi: nil, wubiBaseFrequency: 1000, pinyinBaseFrequency: 1000, source: 3, length: 3),
@@ -238,27 +228,15 @@ final class VocabularyDatabaseTests: XCTestCase {
         XCTAssertEqual(retrieved[44441]?.text, "批量1")
         XCTAssertEqual(retrieved[44442]?.text, "批量2")
         XCTAssertEqual(retrieved[44443]?.text, "批量3")
-
-        // Cleanup
-        for entry in entries {
-            _ = db.deleteEntry(id: entry.id)
-        }
     }
 
     // MARK: - Entry Count
 
     func testGetEntryCount() {
-        let db = VocabularyDatabase.shared
-
-        // Use a random unique ID to avoid conflicts with existing entries
-        let uniqueId = UInt32.random(in: 0x90000000...0xFFFFFFFF)
-
-        // Clean up first in case this ID exists from a previous failed test
-        _ = db.deleteEntry(id: uniqueId)
-
+        // Isolated DB starts at a known state; insertions add exactly N.
         let initialCount = db.getEntryCount()
 
-        // Insert an entry
+        let uniqueId = UInt32.random(in: 0x90000000...0xFFFFFFFF)
         let entry = DictionaryEntry(
             id: uniqueId,
             text: "计数测试",
@@ -274,8 +252,5 @@ final class VocabularyDatabaseTests: XCTestCase {
 
         let newCount = db.getEntryCount()
         XCTAssertEqual(newCount, initialCount + 1)
-
-        // Cleanup
-        _ = db.deleteEntry(id: uniqueId)
     }
 }

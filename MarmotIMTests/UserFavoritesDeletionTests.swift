@@ -2,8 +2,34 @@ import XCTest
 @testable import MarmotIM
 
 /// Tests for user favorites deletion behavior
-/// These tests verify that deleted entries are properly handled and not resurrected by sync
+/// These tests verify that deleted entries are properly handled and not resurrected by sync.
+///
+/// Note (spec-004 T2, I-MIG-UFD-01): the 2 tests that touch
+/// VocabularyDatabase are migrated to `makeForTests(path:)`-backed
+/// per-test DBs. The 5 pure-merger tests (testMergeFavorites_*) are
+/// left untouched — they exercise `SyncMerger` directly and never
+/// touched the shared DB. See spec-004 decision 001-scope-of-legacy-migration.
 final class UserFavoritesDeletionTests: XCTestCase {
+
+    private var tempDir: URL!
+    private var db: VocabularyDatabase!
+
+    override func setUp() {
+        super.setUp()
+        tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("marmotim-ufd-tests-\(UUID().uuidString)")
+        try? FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        db = VocabularyDatabase.makeForTests(path: tempDir.appendingPathComponent("test.db"))
+    }
+
+    override func tearDown() {
+        db = nil
+        if let dir = tempDir {
+            try? FileManager.default.removeItem(at: dir)
+        }
+        tempDir = nil
+        super.tearDown()
+    }
 
     // MARK: - Test 1: SyncMerger should not restore deleted entries from older remote
 
@@ -110,9 +136,10 @@ final class UserFavoritesDeletionTests: XCTestCase {
     // MARK: - Test 3: User manual add should resurrect deleted entry
 
     func testAddUserFavorite_shouldResurrectDeletedEntry() {
-        let db = VocabularyDatabase.shared
-
-        // Use unique text to avoid conflicts
+        // Isolated DB per test — no need for UUID suffixes to dedupe against
+        // other tests, but keep them for belt-and-suspenders so any accidental
+        // test-order coupling would be obvious. Also they exercise the
+        // "real-world" shape of user text.
         let uniqueText = "测试复活_\(UUID().uuidString.prefix(8))"
 
         // First, add an entry
@@ -146,17 +173,11 @@ final class UserFavoritesDeletionTests: XCTestCase {
         favorites = db.getUserFavorites()
         XCTAssertTrue(favorites.contains { $0.text == uniqueText },
             "Entry should be resurrected after user manual re-add")
-
-        // Cleanup: remove the test entry permanently
-        _ = db.removeUserFavorite(text: uniqueText)
     }
 
     // MARK: - Test 4: getDeletedUserFavorites should return deleted entries
 
     func testGetDeletedUserFavorites() {
-        let db = VocabularyDatabase.shared
-
-        // Use unique text to avoid conflicts
         let uniqueText = "测试删除列表_\(UUID().uuidString.prefix(8))"
 
         // Add and then delete an entry
@@ -169,8 +190,6 @@ final class UserFavoritesDeletionTests: XCTestCase {
 
         XCTAssertNotNil(found, "Deleted entry should appear in getDeletedUserFavorites")
         XCTAssertEqual(found?.wubiCode, "test", "Wubi code should be preserved")
-
-        // Cleanup is automatic since it's soft-deleted
     }
 
     // MARK: - Test 5: Merge with multiple entries
