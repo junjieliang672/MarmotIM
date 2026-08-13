@@ -195,7 +195,16 @@ struct UserEntryData: Codable {
     var lastAccessTimestamp: UInt32
 
     /// Cached total score (for quick sorting)
-    var cachedScore: Float
+    ///
+    /// `Double`, not `Float`. The score carries `recencyInitialBoost` (1e9), and a `Float`'s
+    /// ULP at that magnitude is **64** — so narrowing quantised every score to the nearest
+    /// multiple of 64. Two `recordSelection` calls milliseconds apart on the same entry, with
+    /// an identical stored timestamp, produced values differing by exactly 64
+    /// (observed: 1005047808 vs 1005047744). Everything on either side of this field is
+    /// already `Double` — `CandidateRanker.calculate` returns one, `total_score` is a SQLite
+    /// REAL read via `sqlite3_column_double` — so the old `Double → Float → Double` round trip
+    /// discarded precision for nothing.
+    var cachedScore: Double
 
     /// Convert timestamp to Date
     var lastAccess: Date {
@@ -215,7 +224,7 @@ struct UserEntryData: Codable {
         entryId: UInt32,
         accessCount: UInt32,
         lastAccessTimestamp: UInt32,
-        cachedScore: Float
+        cachedScore: Double
     ) {
         self.entryId = entryId
         self.accessCount = accessCount
@@ -231,11 +240,11 @@ struct UserEntryData: Codable {
 
     /// Recalculate cached score
     mutating func updateCachedScore(baseFrequency: UInt16) {
-        cachedScore = Float(FrecencyScore.calculate(
+        cachedScore = FrecencyScore.calculate(
             accessCount: accessCount,
             lastAccessTimestamp: lastAccessTimestamp,
             baseFrequency: baseFrequency
-        ))
+        )
     }
 }
 

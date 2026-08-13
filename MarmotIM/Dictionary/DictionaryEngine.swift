@@ -130,7 +130,7 @@ class DictionaryEngine {
                 entryId: entryId,
                 accessCount: values.accessCount,
                 lastAccessTimestamp: values.lastAccessTimestamp,
-                cachedScore: Float(values.totalScore)
+                cachedScore: values.totalScore
             )
         }
         NSLog("MarmotIM: Loaded \(userLearningCache.count) user learning entries")
@@ -668,7 +668,7 @@ class DictionaryEngine {
         // visible from `log stream` without re-running the test suite.
         Self.dbWriteQueue.async { [weak self] in
             guard let self = self else { return }
-            let wrote = self.db.recordSelection(entryId: entryId, totalScore: Double(score))
+            let wrote = self.db.recordSelection(entryId: entryId, totalScore: score)
             if !wrote {
                 NSLog("MarmotIM: [E][dict] db recordSelection failed entry_id=%u", entryId)
             }
