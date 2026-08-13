@@ -555,3 +555,78 @@ private final class StubMicrophonePermission: MicrophonePermissionProviding {
         completion()
     }
 }
+
+// MARK: - 服务安装状态（ASRAgentStatus）
+
+/// 「装没装 / 会不会开机自启」是从 plist 读出来的，不是猜的，也不起进程（决策 15）。
+final class ASRAgentStatusTests: XCTestCase {
+
+    private func writePlist(_ dict: [String: Any]) throws -> String {
+        let path = NSTemporaryDirectory() + "marmot-agent-\(UUID().uuidString).plist"
+        let data = try PropertyListSerialization.data(fromPropertyList: dict,
+                                                     format: .xml, options: 0)
+        try data.write(to: URL(fileURLWithPath: path))
+        return path
+    }
+
+    func testAMissingPlistReadsAsNotInstalled() {
+        let status = ASRAgentStatus.read(at: NSTemporaryDirectory() + "definitely-absent.plist")
+        XCTAssertFalse(status.isInstalled)
+        XCTAssertFalse(status.startsAtLogin)
+    }
+
+    func testAPlistWithRunAtLoadTrueReportsBothFacts() throws {
+        let path = try writePlist(["Label": "com.marmotim.asr", "RunAtLoad": true])
+        defer { try? FileManager.default.removeItem(atPath: path) }
+
+        let status = ASRAgentStatus.read(at: path)
+        XCTAssertTrue(status.isInstalled)
+        XCTAssertTrue(status.startsAtLogin)
+    }
+
+    func testAnInstalledAgentWithoutRunAtLoadIsInstalledButNotAutoStarting() throws {
+        // 这两件事必须分开：装了却不自启，是需要用户动手的那一种「正常」。
+        let path = try writePlist(["Label": "com.marmotim.asr"])
+        defer { try? FileManager.default.removeItem(atPath: path) }
+
+        let status = ASRAgentStatus.read(at: path)
+        XCTAssertTrue(status.isInstalled)
+        XCTAssertFalse(status.startsAtLogin)
+    }
+
+    func testGarbageIsTreatedAsNotInstalledRatherThanAnError() throws {
+        let path = NSTemporaryDirectory() + "marmot-garbage-\(UUID().uuidString).plist"
+        try "not a plist at all".write(toFile: path, atomically: true, encoding: .utf8)
+        defer { try? FileManager.default.removeItem(atPath: path) }
+
+        // 从用户角度，读不动的 plist 和没装是同一件事；报个解析错误只会让人更迷惑。
+        XCTAssertEqual(ASRAgentStatus.read(at: path), .notInstalled)
+    }
+
+    // MARK: - 每一种处境给出的话与命令
+
+    func testNotInstalledPointsAtTheInstallCommand() {
+        let advice = ASRAgentStatus.notInstalled.advice(isRunning: false)
+        XCTAssertEqual(advice.command, "bash scripts/build_and_install.sh --all")
+    }
+
+    func testInstalledButNotRunningPointsAtTheLogRatherThanReinstalling() {
+        // KeepAlive 会一直重启它，所以「装了却没应答」多半是起不来 —— 先看日志。
+        let advice = ASRAgentStatus(isInstalled: true, startsAtLogin: true)
+            .advice(isRunning: false)
+        XCTAssertEqual(advice.command, "tail -20 ~/Library/Logs/MarmotIM/asr-server.err.log")
+    }
+
+    func testRunningWithoutAutoStartOffersTheFix() {
+        let advice = ASRAgentStatus(isInstalled: true, startsAtLogin: false)
+            .advice(isRunning: true)
+        XCTAssertEqual(advice.command, "bash scripts/install_asr.sh --reinstall")
+    }
+
+    func testEverythingHealthyOffersNoCommandAtAll() {
+        // 一切正常时不该还挂着一条命令让人以为有事要做。
+        let advice = ASRAgentStatus(isInstalled: true, startsAtLogin: true)
+            .advice(isRunning: true)
+        XCTAssertNil(advice.command)
+    }
+}

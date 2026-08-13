@@ -217,6 +217,53 @@ enum TranscribeHostRule {
     }
 }
 
+// MARK: - 服务安装状态
+
+/// 「装没装 / 会不会开机自启 / 跑没跑」三件独立的事实，**任何状态下都显示**。
+///
+/// 起初这些只在 `.down` 分支出现，当作排障文案。那是个疏漏：服务好好跑着的时候，
+/// 用户同样要能回答「重启之后它还会自己起来吗」—— 而那时页面只写着「正常」，
+/// 什么都没说。状态不该只在出事时才可见。
+///
+/// 三件事来自两个互不相干的来源：前两件读 `~/Library/LaunchAgents` 里的 plist，
+/// 第三件来自 HTTP 健康探测。分开显示是有意的 —— 「装了但没跑」和「跑着但不会自启」
+/// 是两种完全不同的处境，合成一个词就把区别抹掉了。
+struct ASRAgentStatusLine: View {
+    let agent: ASRAgentStatus
+    let isRunning: Bool
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Text("服务：").foregroundColor(.secondary)
+            if agent.isInstalled {
+                fact(true, "已安装")
+                dot
+                // 装了却不自启，得靠人手动拉起来，这值得单独说一句。
+                fact(agent.startsAtLogin, agent.startsAtLogin ? "开机自启" : "不会开机自启")
+                dot
+                fact(isRunning, isRunning ? "运行中" : "未运行")
+            } else {
+                // 没装的时候，后两件事无从谈起 —— 写「不会开机自启」只会让人以为有个开关没打开。
+                fact(false, "未安装")
+            }
+        }
+        .font(.caption)
+    }
+
+    private var dot: some View {
+        Text("·").foregroundColor(.secondary)
+    }
+
+    private func fact(_ ok: Bool, _ label: String) -> some View {
+        HStack(spacing: 3) {
+            Image(systemName: ok ? "checkmark.circle.fill" : "circle")
+                .foregroundColor(ok ? .green : .secondary)
+            Text(label).foregroundColor(ok ? .primary : .secondary)
+        }
+        .accessibilityElement(children: .combine)
+    }
+}
+
 // MARK: - 可复制的命令
 
 /// 一条等宽显示、可一键复制的终端命令。
@@ -272,7 +319,10 @@ final class TranscribeSettingsModel: ObservableObject {
     /// LaunchAgent 的安装状态。读一个 plist 文件，不起进程（决策 15）——
     /// 它回答「装没装 / 会不会开机自启」，健康探测回答「跑没跑」，两者缺一不可：
     /// 只看健康探测，没装和装了没起来会给出同一句话，而这两种处境的补救完全不同。
-    @Published private(set) var agent: ASRAgentStatus = .notInstalled
+    ///
+    /// nil ＝ 还没读过，与 `health` 同一个约定：缺省值恰好是「未安装」，
+    /// 没读就显示它等于把「还没看」说成「没装」。
+    @Published private(set) var agent: ASRAgentStatus?
 
     private let permission: MicrophonePermissionProviding
     private let healthProbe: TranscribeHealthProbing
@@ -430,6 +480,13 @@ struct TranscribeSettingsView: View {
                 Spacer()
             }
 
+            // 安装状态与健康状态分开显示：前者读 plist，后者靠探测，
+            // 两者都拿到之前不猜（agent 为 nil 就是还没读过）。
+            if let agent = model.agent {
+                ASRAgentStatusLine(agent: agent,
+                                   isRunning: model.health?.state == .ready)
+            }
+
             if let health = model.health {
                 switch health.state {
                 case .ready:
@@ -438,13 +495,23 @@ struct TranscribeSettingsView: View {
                             .font(.caption)
                             .foregroundColor(.secondary)
                     }
+                    // 跑着，但重启之后不会自己回来 —— 这是唯一一种「一切正常」却仍需
+                    // 用户动手的情形，所以在这里给出补救命令，而不是只标一个灰点。
+                    if let agent = model.agent, agent.isInstalled, !agent.startsAtLogin {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("重启或重新登录后服务不会自动启动，需要手动运行一次。")
+                            CommandToCopy(command: "bash scripts/install_asr.sh --reinstall")
+                        }
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                    }
                 case .loading:
                     Text(health.detail ?? "模型正在加载，通常需要十几秒；加载完成前转写会失败。")
                         .font(.caption)
                         .foregroundColor(.secondary)
                 case .down:
                     // 「没装」和「装了但没跑」在这里是两句不同的话、两条不同的命令。
-                    let advice = model.agent.advice(isRunning: false)
+                    let advice = (model.agent ?? .notInstalled).advice(isRunning: false)
                     VStack(alignment: .leading, spacing: 4) {
                         Text("没有服务在 \(viewModel.config.transcribe.host):\(String(viewModel.config.transcribe.port)) 监听。")
                         Text(advice.summary)
