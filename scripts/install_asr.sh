@@ -8,7 +8,8 @@
 # Usage:
 #   bash scripts/install_asr.sh                 # provision / bring up to date
 #   bash scripts/install_asr.sh --reinstall     # force: rebuild venv, reinstall deps,
-#                                               #   rewrite the plist, restart the agent.
+#                                               #   rewrite the plist, DISCARD the settings
+#                                               #   overlay, restart the agent.
 #                                               #   Cached weights are REUSED — to re-fetch
 #                                               #   them, delete the model's directory under
 #                                               #   ~/.cache/huggingface/hub first.
@@ -16,6 +17,11 @@
 #                                               #   (venv and weights are left alone)
 #
 # What this script DOES modify:
+#   - ~/Library/Application Support/MarmotIM/asr/config.json  (settings overlay written by
+#                                                     MarmotIM's 转写 page via POST /reconfigure;
+#                                                     --reinstall DELETES it, which is the way
+#                                                     back from a setting that leaves the server
+#                                                     unreachable)
 #   - ~/Library/Application Support/MarmotIM/asr/    (the venv + a copy of server/ that the
 #                                                     agent actually runs; deliberately NOT in
 #                                                     the checkout, so moving or deleting the
@@ -130,6 +136,21 @@ fi
 if [ -d "$LEGACY_VENV" ]; then
     say "note: the old venv is still at $LEGACY_VENV and is no longer used."
     say "      reclaim it with:  rm -rf '$LEGACY_VENV'"
+fi
+
+# ------------------------------------------------------- 0c. reset the settings overlay
+# --reinstall is the documented way back from a configuration that cannot reach a working
+# server: MarmotIM's 转写 page writes an overlay through POST /reconfigure, and the overlay
+# outranks the plist at startup (server/config.py Config.load). If someone sets a port the
+# server cannot bind, the page is then pointing at nothing and cannot undo it — so the
+# escape hatch has to clear the overlay, not just rewrite the plist it already loses to.
+#
+# Only under --reinstall. A plain run must not silently discard settings someone chose.
+OVERLAY="$RUNTIME_DIR/config.json"
+if [ "$FORCE" -eq 1 ] && [ -f "$OVERLAY" ]; then
+    step "Discarding the settings overlay (--reinstall)"
+    rm -f "$OVERLAY"
+    say "removed $OVERLAY; the LaunchAgent's values apply again"
 fi
 
 # ---------------------------------------------------------------- 1. interpreter
@@ -345,15 +366,39 @@ if [ "$(stamp_read "$VENV_DIR/.marmot-server")" != "$SERVER_HASH" ]; then NEEDS_
 LOADED=0
 if launchctl print "gui/$UID/$LABEL" > /dev/null 2>&1; then LOADED=1; fi
 
+# `launchctl bootout` returns before the job is actually gone. A bootstrap issued inside
+# that window fails with `Bootstrap failed: 5: Input/output error` and the script aborts
+# having just torn the agent down — the worst possible outcome, and it only ever happens
+# on the restart path, which is why it survived until a server change forced one.
+wait_until_unloaded() {
+    for _ in $(seq 1 50); do
+        launchctl print "gui/$UID/$LABEL" > /dev/null 2>&1 || return 0
+        sleep 0.1
+    done
+    return 1   # still there after 5 s; let the caller report it
+}
+
+bootstrap_agent() {
+    launchctl bootstrap "gui/$UID" "$PLIST_DEST" && return 0
+    # Losing the race is recoverable; a genuinely broken plist is not. Distinguish them
+    # by looking at what actually happened rather than by trusting the exit code.
+    if launchctl print "gui/$UID/$LABEL" > /dev/null 2>&1; then
+        say "bootstrap reported an error but the agent is loaded — continuing"
+        return 0
+    fi
+    fail "launchctl bootstrap failed and the agent is not loaded. Try: launchctl print gui/$UID/$LABEL"
+}
+
 if [ "$LOADED" -eq 0 ]; then
     step "Loading the agent"
-    launchctl bootstrap "gui/$UID" "$PLIST_DEST" || fail "launchctl bootstrap failed."
+    bootstrap_agent
 elif [ "$NEEDS_RESTART" -eq 1 ]; then
     step "Server code or configuration changed — restarting the agent"
     # bootout+bootstrap rather than kickstart: the plist itself may have changed, and
     # kickstart re-runs the *loaded* job definition, not the file on disk.
     launchctl bootout "gui/$UID/$LABEL" 2>/dev/null || true
-    launchctl bootstrap "gui/$UID" "$PLIST_DEST" || fail "launchctl bootstrap failed."
+    wait_until_unloaded || say "the old job is taking its time to exit; bootstrapping anyway"
+    bootstrap_agent
 else
     step "Agent is loaded and current — leaving it running"
 fi

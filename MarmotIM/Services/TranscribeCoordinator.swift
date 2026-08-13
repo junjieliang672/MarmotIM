@@ -68,6 +68,9 @@ protocol TranscribeRequesting: AnyObject {
     func transcribe(_ request: TranscribeRequest) async throws -> TranscribeResponse
     @discardableResult
     func reload(model: String) async throws -> HealthResponse
+    /// 设置页改动服务端项目的唯一出口。哪些能原地生效、哪些要重启由服务端判断。
+    @discardableResult
+    func reconfigure(_ request: ReconfigureRequest) async throws -> ReconfigureResponse
 }
 
 extension ASRClient: TranscribeRequesting {}
@@ -388,8 +391,15 @@ final class TranscribeCoordinator {
             }
             guard let running = monitor.snapshot.model, running != wanted else { return }
             do {
-                _ = try await requester.reload(model: wanted)
-                log("转写：已请求服务端切换模型 \(running) → \(wanted)")
+                // 只发模型这一项。设置页里那些**只有客户端在用**的项（保持阈值、录音上限、
+                // 标点、超时）不属于服务端，发过去只会让它把不认识的键忽略掉，白跑一趟。
+                let answer = try await requester.reconfigure(
+                    ReconfigureRequest(model: wanted))
+                if answer.restartRequired {
+                    log("转写：服务端为应用新配置正在重启（\(answer.applied.joined(separator: ", "))）")
+                } else {
+                    log("转写：已请求服务端切换模型 \(running) → \(wanted)")
+                }
             } catch {
                 log("转写：切换模型到 \(wanted) 失败（\(error)）")
             }

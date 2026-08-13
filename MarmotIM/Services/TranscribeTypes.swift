@@ -111,3 +111,57 @@ struct ReloadRequest: Codable, Equatable {
     /// HuggingFace 仓库 id
     let model: String
 }
+
+// MARK: - /reconfigure
+
+/// `POST /reconfigure` 请求体：把设置页改动的服务端项目一次交给服务端。
+///
+/// 全部 optional，且 nil 的键**不会出现在 JSON 里**（Swift 的 nil Optional 直接省略该键，
+/// 见 docs/transcribe-spike-findings.md §6）—— 服务端据此把"没提到"和"改成这个值"区分开。
+/// 只发用户真的改了的项，不发整份快照：整份快照会让旧版设置页把新版加的项悄悄改回默认。
+///
+/// **哪些要重启由服务端决定，不在这里判断。** 端口、主机、日志级别要重开进程，
+/// 模型可以原地换 —— 这是服务端的知识，客户端只管发和读 `restartRequired`。
+struct ReconfigureRequest: Codable, Equatable {
+    var host: String?
+    var port: Int?
+    var model: String?
+    var language: String?
+    var minAudioSeconds: Double?
+    var maxAudioSeconds: Double?
+    var logLevel: String?
+
+    enum CodingKeys: String, CodingKey {
+        case host, port, model, language
+        case minAudioSeconds = "min_audio_seconds"
+        case maxAudioSeconds = "max_audio_seconds"
+        case logLevel = "log_level"
+    }
+
+    /// 一项都没有就没必要发请求。
+    var isEmpty: Bool {
+        host == nil && port == nil && model == nil && language == nil
+            && minAudioSeconds == nil && maxAudioSeconds == nil && logLevel == nil
+    }
+}
+
+/// `POST /reconfigure` 的 202 应答：/health 的五个键，外加这两个。
+struct ReconfigureResponse: Codable, Equatable {
+    /// 服务端认定真正发生变化的键；空数组表示发过来的值与现状一致，什么都没做。
+    let applied: [String]
+    /// 服务端是否正在为此重启。true 时它会在应答送达后自行退出，由 launchd 拉起来。
+    let restartRequired: Bool
+
+    let status: String
+    let model: String?
+    let modelLoaded: Bool?
+    let version: String?
+    let detail: String?
+
+    enum CodingKeys: String, CodingKey {
+        case applied
+        case restartRequired = "restart_required"
+        case status, model, version, detail
+        case modelLoaded = "model_loaded"
+    }
+}

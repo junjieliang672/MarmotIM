@@ -1,15 +1,24 @@
-"""Environment-variable configuration for the local ASR service.
+"""Configuration for the local ASR service.
 
-Everything is read once at import of `Config.from_env()`; there is no config file and no
-CLI flag surface. The installer sets these in the LaunchAgent plist; a human debugging by
-hand sets them in the shell (see README §6).
+Three layers, later wins: dataclass defaults <- environment <- overlay file.
+
+The environment comes from the LaunchAgent plist and is install-time bootstrap, written
+only by `scripts/install_asr.sh`. The overlay is the user's live intent from MarmotIM's
+转写 settings page, applied through `POST /reconfigure`. The overlay wins because a
+reinstall must not silently revert a setting someone deliberately changed.
+
+`Config.load()` is the entry point that layers all three. `Config.from_env()` remains the
+environment-only path and is what the tests and a hand-run server use.
 """
 
 from __future__ import annotations
 
 import ipaddress
+import json
+import logging
 import os
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
+from typing import Any
 
 # Only the two repos that `qwen3-asr-mlx` 0.2.0 can actually load. See README §2 --
 # the 8-bit checkpoints fail strict `load_weights`, and `Qwen/Qwen3-ASR-0.6B` is
@@ -21,6 +30,45 @@ KNOWN_MODELS = (
 
 DEFAULT_MODEL = KNOWN_MODELS[0]
 DEFAULT_PORT = 58471
+
+# uvicorn's own levels. Anything else and it refuses to start -- which, for a value the
+# settings page can write, would mean a server that cannot boot and no UI to fix it from.
+KNOWN_LOG_LEVELS = frozenset({"critical", "error", "warning", "info", "debug", "trace"})
+
+# The keys /reconfigure accepts and the overlay may carry. `preload` and `sample_rate`
+# are deliberately absent: the first is a test-only switch, the second is fixed by the
+# model and a mismatch is already reported as bad_audio.
+OVERLAY_KEYS = (
+    "host",
+    "port",
+    "model",
+    "language",
+    "min_audio_seconds",
+    "max_audio_seconds",
+    "log_level",
+)
+
+# Changing any of these means rebinding the socket or re-initialising logging, neither of
+# which is possible in place -- the server writes the overlay and exits, and launchd's
+# KeepAlive restarts it. Everything else in OVERLAY_KEYS applies live.
+RESTART_KEYS = frozenset({"host", "port", "log_level"})
+
+log = logging.getLogger("marmot.asr.config")
+
+
+def overlay_path_default() -> str:
+    """Where the overlay lives: the runtime dir `install_asr.sh` already owns.
+
+    Kept beside the venv and the copied server tree rather than in the repo, so it
+    survives the checkout moving and is removed by `install_asr.sh --reinstall` -- which
+    is the documented way back from a configuration that cannot reach a working server.
+    """
+    return os.path.expanduser(
+        os.environ.get(
+            "MARMOT_ASR_OVERLAY",
+            "~/Library/Application Support/MarmotIM/asr/config.json",
+        )
+    )
 
 # Contract version reported by /health.
 API_VERSION = "1"
@@ -144,6 +192,35 @@ class Config:
     sample_rate: int = 16000
     log_level: str = "info"
 
+    def validate(self, env_prefix: str | None = None) -> "Config":
+        """Return self if the values are usable, else raise ConfigError.
+
+        Shared by every path that can produce a Config -- env at startup and the overlay
+        written by /reconfigure -- so the settings page cannot store a configuration the
+        server would have refused from the environment.
+
+        `env_prefix` only shapes the message, never the rules: from the environment a
+        human has to go and edit `MARMOT_ASR_PORT`, so that is what the error must name;
+        from the overlay the same value is the JSON key `port`.
+        """
+        def name(field: str) -> str:
+            return f"{env_prefix}{field.upper()}" if env_prefix else field
+
+        if not 1 <= self.port <= 65535:
+            raise ConfigError(f"{name('port')}={self.port} is out of range (1-65535)")
+        if self.min_audio_seconds < 0:
+            raise ConfigError(f"{name('min_audio_seconds')} must be >= 0")
+        if self.max_audio_seconds <= self.min_audio_seconds:
+            raise ConfigError(
+                f"{name('max_audio_seconds')} must exceed {name('min_audio_seconds')}"
+            )
+        if self.log_level not in KNOWN_LOG_LEVELS:
+            raise ConfigError(
+                f"{name('log_level')}={self.log_level!r} is not one of "
+                + ", ".join(sorted(KNOWN_LOG_LEVELS))
+            )
+        return self
+
     @classmethod
     def from_env(cls, env_prefix: str = "MARMOT_ASR_") -> "Config":
         p = env_prefix
@@ -157,10 +234,68 @@ class Config:
             max_audio_seconds=_env_float(f"{p}MAX_AUDIO_SECONDS", 300.0),
             log_level=_env_str(f"{p}LOG_LEVEL", "info").lower(),
         )
-        if not 1 <= cfg.port <= 65535:
-            raise ConfigError(f"{p}PORT={cfg.port} is out of range")
-        if cfg.min_audio_seconds < 0:
-            raise ConfigError(f"{p}MIN_AUDIO_SECONDS must be >= 0")
-        if cfg.max_audio_seconds <= cfg.min_audio_seconds:
-            raise ConfigError(f"{p}MAX_AUDIO_SECONDS must exceed {p}MIN_AUDIO_SECONDS")
-        return cfg
+        return cfg.validate(env_prefix=p)
+
+    # ------------------------------------------------------------------ overlay
+
+    def merged_with(self, overlay: dict[str, Any]) -> "Config":
+        """Return a copy with the overlay's recognised keys applied, then validated.
+
+        Unknown keys are ignored rather than rejected: an overlay written by a newer
+        MarmotIM must not stop an older server from booting -- the server would be down
+        with no UI left to fix it from, which is the one failure this whole feature
+        exists to avoid.
+        """
+        values = asdict(self)
+        for key in OVERLAY_KEYS:
+            if key not in overlay:
+                continue
+            raw = overlay[key]
+            if key == "host":
+                values[key] = resolve_loopback_host(str(raw))
+            elif key == "model":
+                values[key] = validate_reload_model(str(raw))
+            elif key == "language":
+                text = str(raw).strip() if raw is not None else ""
+                values[key] = text or None
+            elif key == "port":
+                values[key] = int(raw)
+            elif key in ("min_audio_seconds", "max_audio_seconds"):
+                values[key] = float(raw)
+            elif key == "log_level":
+                values[key] = str(raw).strip().lower()
+        return Config(**values).validate()
+
+    @classmethod
+    def load(cls, path: str | None = None, env_prefix: str = "MARMOT_ASR_") -> "Config":
+        """Defaults <- environment (the LaunchAgent) <- overlay file (the settings page).
+
+        The overlay wins because it is the user's live intent, expressed in the UI, while
+        the plist is install-time bootstrap that only `install_asr.sh` rewrites. Making it
+        the other way round would let a reinstall silently revert settings someone had
+        deliberately changed.
+
+        A missing overlay is the normal state. A CORRUPT one is logged and ignored rather
+        than fatal, for the same reason unknown keys are: refusing to boot leaves no way
+        back except a terminal. `install_asr.sh --reinstall` deletes the overlay, and that
+        is the documented escape.
+        """
+        cfg = cls.from_env(env_prefix)
+        overlay_path = path or overlay_path_default()
+        try:
+            with open(overlay_path, "r", encoding="utf-8") as handle:
+                overlay = json.load(handle)
+        except FileNotFoundError:
+            return cfg
+        except (OSError, ValueError) as exc:
+            log.warning("ignoring unreadable overlay %s: %s", overlay_path, exc)
+            return cfg
+        if not isinstance(overlay, dict):
+            log.warning("ignoring overlay %s: expected an object", overlay_path)
+            return cfg
+        try:
+            return cfg.merged_with(overlay)
+        except ConfigError as exc:
+            # Same reasoning: a bad overlay must not be able to keep the server down.
+            log.warning("ignoring invalid overlay %s: %s", overlay_path, exc)
+            return cfg

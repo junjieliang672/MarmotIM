@@ -572,6 +572,11 @@ final class TranscribeDegradedModeTests: XCTestCase {
         func reload(model: String) async throws -> HealthResponse {
             try await inner.reload(model: model)
         }
+
+        func reconfigure(_ request: ReconfigureRequest) async throws -> ReconfigureResponse {
+            note()
+            return try await inner.reconfigure(request)
+        }
     }
 
     /// 会答话的服务端替身。只有反空过那一条用它 —— 它扮演的是"服务缺席却照样上屏"。
@@ -583,6 +588,12 @@ final class TranscribeDegradedModeTests: XCTestCase {
         }
         func reload(model: String) async throws -> HealthResponse {
             HealthResponse(status: "ok", model: model, modelLoaded: true, version: nil, detail: nil)
+        }
+
+        func reconfigure(_ request: ReconfigureRequest) async throws -> ReconfigureResponse {
+            ReconfigureResponse(applied: [], restartRequired: false, status: "ok",
+                                model: request.model, modelLoaded: true,
+                                version: nil, detail: nil)
         }
     }
 

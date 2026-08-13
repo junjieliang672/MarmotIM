@@ -1033,6 +1033,28 @@ final class TranscribeCoordinatorTests: XCTestCase {
                                   version: nil, detail: nil)
         }
 
+        private var _reconfigured: [ReconfigureRequest] = []
+        var reconfigured: [ReconfigureRequest] { lock.lock(); defer { lock.unlock() }; return _reconfigured }
+        /// 服务端说"我要重启了"时的应答，默认为不需要重启。
+        var reconfigureRestarts = false
+
+        func reconfigure(_ request: ReconfigureRequest) async throws -> ReconfigureResponse {
+            lock.lock()
+            _reconfigured.append(request)
+            // 模型经由 reconfigure 下发时，服务端内部仍走 reload —— 替身把它记在同一处，
+            // 既有那些断言 reloadedModels 的用例才不会因为换了出口就失去意义。
+            if let model = request.model { _reloaded.append(model) }
+            let failure = reloadError
+            let restarts = reconfigureRestarts
+            lock.unlock()
+            if let failure { throw failure }
+            return ReconfigureResponse(applied: request.model.map { _ in ["model"] } ?? [],
+                                       restartRequired: restarts,
+                                       status: restarts ? "restarting" : "loading",
+                                       model: request.model, modelLoaded: false,
+                                       version: nil, detail: nil)
+        }
+
         /// **不可取消**的等待，这是刻意的：契约写明服务端对并发请求排队而非拒绝，
         /// 超时/取消之后它仍在解码。用 `Task.sleep` 会在 cancel 时立刻返回，
         /// 于是"迟到的结果"根本不迟到，代次守卫就永远不会被真正考验到。

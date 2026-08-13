@@ -10,7 +10,12 @@ from __future__ import annotations
 
 import base64
 import binascii
+import json
 import logging
+import os
+import signal
+import tempfile
+import threading
 import time
 from contextlib import asynccontextmanager
 from typing import Any, Optional
@@ -21,7 +26,15 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict
 
-from config import API_VERSION, Config, ConfigError, validate_reload_model
+from config import (
+    API_VERSION,
+    OVERLAY_KEYS,
+    RESTART_KEYS,
+    Config,
+    ConfigError,
+    overlay_path_default,
+    validate_reload_model,
+)
 from model import HealthSnapshot, ModelNotReady, Loader, ModelManager, default_loader
 
 log = logging.getLogger("marmot_asr")
@@ -65,6 +78,25 @@ class ReloadRequest(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     model: str
+
+
+class ReconfigureRequest(BaseModel):
+    """A partial settings payload. Absent keys are left alone.
+
+    Every field is optional because the settings page sends what the user touched, not a
+    full snapshot -- and a full snapshot would make an older page silently revert a
+    setting a newer one added.
+    """
+
+    model_config = ConfigDict(extra="ignore")
+
+    host: Optional[str] = None
+    port: Optional[int] = None
+    model: Optional[str] = None
+    language: Optional[str] = None
+    min_audio_seconds: Optional[float] = None
+    max_audio_seconds: Optional[float] = None
+    log_level: Optional[str] = None
 
 
 class TranscribeResponse(BaseModel):
@@ -120,9 +152,57 @@ def decode_pcm(audio_base64: str, sample_rate: int, cfg: Config) -> np.ndarray:
     return samples
 
 
+def _write_overlay(cfg: Config, path: Optional[str] = None) -> None:
+    """Persist the overlay atomically: temp file in the same dir, then os.replace.
+
+    Same directory matters -- os.replace is only atomic within a filesystem, and a temp
+    file in /tmp can land on a different one. A torn overlay would be read at the next
+    boot, which is the moment there is no UI left to fix it from.
+    """
+    target = path or overlay_path_default()
+    os.makedirs(os.path.dirname(target), exist_ok=True)
+    payload = {k: getattr(cfg, k) for k in OVERLAY_KEYS}
+    handle = tempfile.NamedTemporaryFile(
+        "w", encoding="utf-8", dir=os.path.dirname(target),
+        prefix=".config-", suffix=".tmp", delete=False,
+    )
+    try:
+        with handle:
+            json.dump(payload, handle, indent=2, ensure_ascii=False)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(handle.name, target)
+    except BaseException:
+        # Never leave the temp file behind on a failure; the directory is the runtime
+        # root and litter there is confusing to anyone debugging an install.
+        try:
+            os.unlink(handle.name)
+        except OSError:
+            pass
+        raise
+
+
+def _schedule_restart(delay: float = 0.25) -> None:
+    """Exit shortly, so launchd's KeepAlive restarts us with the new overlay.
+
+    Deferred rather than immediate because the 202 has to reach the client first -- a
+    client that never sees the answer cannot know a restart is coming, and would report a
+    dead server instead of 重启中.
+
+    SIGTERM rather than os._exit: uvicorn installs a handler and shuts the socket down
+    cleanly, so the port is free when the replacement process binds it. A hard exit races
+    the new process for the port and loses roughly half the time.
+    """
+    def _stop() -> None:
+        time.sleep(delay)
+        os.kill(os.getpid(), signal.SIGTERM)
+
+    threading.Thread(target=_stop, name="marmot-restart", daemon=True).start()
+
+
 def create_app(config: Optional[Config] = None, loader: Optional[Loader] = None) -> FastAPI:
     """Build the app. `loader` is injectable so the suite runs with no weights present."""
-    cfg = config if config is not None else Config.from_env()
+    cfg = config if config is not None else Config.load()
     manager = ModelManager(cfg.model, loader=loader or default_loader)
 
     @asynccontextmanager
@@ -230,6 +310,67 @@ def create_app(config: Optional[Config] = None, loader: Optional[Loader] = None)
         log.info("reload requested: %s", target)
         manager.start_load(target)
         return health_body(manager.snapshot())
+
+    @app.post("/reconfigure", status_code=202)
+    async def reconfigure(req: ReconfigureRequest) -> dict[str, Any]:
+        """Apply settings from MarmotIM: live where possible, by restart where not.
+
+        One entry point for the settings page, because deciding *which* changes need a
+        restart is server knowledge and does not belong in Swift. The client posts what
+        the user changed and reads `restart_required` from the answer.
+
+        `async def` for the same reason as /reload: it does no blocking work, and putting
+        it in the threadpool would let it queue behind an in-flight transcription --
+        exactly when someone is clicking around in settings.
+
+        Order matters and is the whole safety story:
+
+        1. validate the MERGED config first. A rejected payload writes nothing, so a bad
+           port can never reach the overlay and brick the next start.
+        2. write the overlay atomically (temp file + os.replace), so a crash mid-write
+           cannot leave half a JSON object that the next boot refuses to parse.
+        3. only then act: live changes now, restart scheduled after the response flushes.
+        """
+        current: Config = app.state.config
+        requested = {k: v for k, v in req.model_dump().items() if v is not None}
+        if not requested:
+            return {"applied": [], "restart_required": False, **health_body(manager.snapshot())}
+
+        try:
+            merged = current.merged_with(requested)
+        except ConfigError as exc:
+            # Its own code: /transcribe's five-code taxonomy is closed and none of them
+            # describes "these settings are unusable".
+            raise ApiError("bad_config", 400, str(exc)) from exc
+
+        # What actually differs, by the MERGED value -- not by what was sent. Posting the
+        # port it already has must not trigger a restart.
+        changed = [k for k in OVERLAY_KEYS
+                   if getattr(merged, k) != getattr(current, k)]
+        if not changed:
+            return {"applied": [], "restart_required": False, **health_body(manager.snapshot())}
+
+        _write_overlay(merged)
+        app.state.config = merged
+
+        needs_restart = bool(set(changed) & RESTART_KEYS)
+
+        # Model changes stay live: start_load is seconds, a restart is ThrottleInterval
+        # plus the same load. Only rebinding the socket or re-initialising logging needs
+        # the process to come back.
+        if "model" in changed and not needs_restart:
+            log.info("reconfigure: switching model to %s", merged.model)
+            manager.start_load(merged.model)
+
+        if needs_restart:
+            log.info("reconfigure: %s changed, restarting", ", ".join(sorted(set(changed) & RESTART_KEYS)))
+            _schedule_restart()
+
+        return {
+            "applied": changed,
+            "restart_required": needs_restart,
+            **health_body(manager.snapshot()),
+        }
 
     @app.post("/transcribe", response_model=TranscribeResponse)
     def transcribe(req: TranscribeRequest) -> TranscribeResponse:

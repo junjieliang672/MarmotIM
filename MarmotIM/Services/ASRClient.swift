@@ -80,6 +80,7 @@ enum ASREndpoint: String, Equatable {
     case health
     case transcribe
     case reload
+    case reconfigure
 
     var path: String { "/\(rawValue)" }
 }
@@ -198,6 +199,24 @@ final class ASRClient {
         try await perform(.reload,
                           method: "POST",
                           body: try encoder.encode(ReloadRequest(model: model)),
+                          timeout: config.reloadTimeout,
+                          successStatuses: [200, 202])
+    }
+
+    /// 把设置页改动的服务端项目交给服务端，由**服务端**决定哪些能原地生效、哪些要重启。
+    ///
+    /// 与 `reload(model:)` 的关系：这是设置页唯一的出口，`reload` 仍在，服务端内部对
+    /// 模型变更就是走它那套。客户端不判断"这项要不要重启" —— 那是服务端的知识，
+    /// 写在两边只会分叉。
+    ///
+    /// 应答里的 `restartRequired` 为 true 时，服务端会在这个响应送达之后才退出；
+    /// 随后 launchd 的 KeepAlive 会把它拉起来，期间 `/health` 连不上是正常的，
+    /// 调用方应当显示"重启中"而不是"未安装"。
+    @discardableResult
+    func reconfigure(_ request: ReconfigureRequest) async throws -> ReconfigureResponse {
+        try await perform(.reconfigure,
+                          method: "POST",
+                          body: try encoder.encode(request),
                           timeout: config.reloadTimeout,
                           successStatuses: [200, 202])
     }
