@@ -9,11 +9,16 @@
 /* Begin PBXBuildFile section */
 		942FAF62E27825F3C56D93D3 /* CompactIndex.swift in Sources */ = {isa = PBXBuildFile; fileRef = F42251310BC5680321494D60 /* CompactIndex.swift */; };
 		96D86D02279F29A2CCB3451E /* MarmotLogoView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8614B2A644D450D6AF22833E /* MarmotLogoView.swift */; };
+		MARMOTRECORDINGVIEW_SWIFT /* MarmotRecordingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = MARMOTRECORDINGVIEW_SWIFT_REF /* MarmotRecordingView.swift */; };
 		A4A9314E072C1845129A0515 /* VisualEffectView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 82937A1A9F7D91EE509602A3 /* VisualEffectView.swift */; };
 		ABOUTVIEW_SWIFT /* AboutView.swift in Sources */ = {isa = PBXBuildFile; fileRef = ABOUTVIEW_SWIFT_REF /* AboutView.swift */; };
 		APPCONFIG_SWIFT /* AppConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = APPCONFIG_SWIFT_REF /* AppConfig.swift */; };
 		APPDELEGATE_SWIFT /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = APPDELEGATE_SWIFT_REF /* AppDelegate.swift */; };
+		ASRCLIENT_SWIFT /* ASRClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = ASRCLIENT_SWIFT_REF /* ASRClient.swift */; };
+		ASRAGENTSTATUS_SWIFT /* ASRAgentStatus.swift in Sources */ = {isa = PBXBuildFile; fileRef = ASRAGENTSTATUS_SWIFT_REF /* ASRAgentStatus.swift */; };
+		ASRHEALTHMONITOR_SWIFT /* ASRHealthMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = ASRHEALTHMONITOR_SWIFT_REF /* ASRHealthMonitor.swift */; };
 		ASSETS_BUILD /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = ASSETS_REF /* Assets.xcassets */; };
+		AUDIORECORDER_SWIFT /* AudioRecorder.swift in Sources */ = {isa = PBXBuildFile; fileRef = AUDIORECORDER_SWIFT_REF /* AudioRecorder.swift */; };
 		B5A0FC3FC4AF28737AB0B27D /* LRUCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1610DB0D2564315AA141A20A /* LRUCache.swift */; };
 		BASICSETTINGS_SWIFT /* BasicSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BASICSETTINGS_SWIFT_REF /* BasicSettingsView.swift */; };
 		CANDIDATEWIN_SWIFT /* CandidateWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = CANDIDATEWIN_SWIFT_REF /* CandidateWindow.swift */; };
@@ -47,6 +52,10 @@
 		SYNCMERGER_SWIFT /* SyncMerger.swift in Sources */ = {isa = PBXBuildFile; fileRef = SYNCMERGER_SWIFT_REF /* SyncMerger.swift */; };
 		SYNCMODELS_SWIFT /* SyncModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = SYNCMODELS_SWIFT_REF /* SyncModels.swift */; };
 		THEMESETTINGS_SWIFT /* ThemeSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = THEMESETTINGS_SWIFT_REF /* ThemeSettingsView.swift */; };
+		TRANSCRIBECOORD_SWIFT /* TranscribeCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = TRANSCRIBECOORD_SWIFT_REF /* TranscribeCoordinator.swift */; };
+		TRANSCRIBEHOTKEY_SWIFT /* TranscribeHotKey.swift in Sources */ = {isa = PBXBuildFile; fileRef = TRANSCRIBEHOTKEY_SWIFT_REF /* TranscribeHotKey.swift */; };
+		TRANSCRIBESETTINGS_SWIFT /* TranscribeSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = TRANSCRIBESETTINGS_SWIFT_REF /* TranscribeSettingsView.swift */; };
+		TRANSCRIBETYPES_SWIFT /* TranscribeTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = TRANSCRIBETYPES_SWIFT_REF /* TranscribeTypes.swift */; };
 		USERDICT_SWIFT /* UserDictView.swift in Sources */ = {isa = PBXBuildFile; fileRef = USERDICT_SWIFT_REF /* UserDictView.swift */; };
 		VOCABDB_SWIFT /* VocabularyDatabase.swift in Sources */ = {isa = PBXBuildFile; fileRef = VOCABDB_SWIFT_REF /* VocabularyDatabase.swift */; };
 /* End PBXBuildFile section */
@@ -60,11 +69,16 @@
 		65A3A4EBE7E620D359EA4DA0 /* HotTierIndex.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = HotTierIndex.swift; path = HotTierIndex.swift; sourceTree = "<group>"; };
 		82937A1A9F7D91EE509602A3 /* VisualEffectView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = VisualEffectView.swift; sourceTree = "<group>"; };
 		8614B2A644D450D6AF22833E /* MarmotLogoView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MarmotLogoView.swift; sourceTree = "<group>"; };
+		MARMOTRECORDINGVIEW_SWIFT_REF /* MarmotRecordingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarmotRecordingView.swift; sourceTree = "<group>"; };
 		ABOUTVIEW_SWIFT_REF /* AboutView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AboutView.swift; sourceTree = "<group>"; };
 		APPCONFIG_SWIFT_REF /* AppConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppConfig.swift; sourceTree = "<group>"; };
 		APPDELEGATE_SWIFT_REF /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
 		APP_REF /* MarmotIM.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = MarmotIM.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		ASRCLIENT_SWIFT_REF /* ASRClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ASRClient.swift; sourceTree = "<group>"; };
+		ASRAGENTSTATUS_SWIFT_REF /* ASRAgentStatus.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ASRAgentStatus.swift; sourceTree = "<group>"; };
+		ASRHEALTHMONITOR_SWIFT_REF /* ASRHealthMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ASRHealthMonitor.swift; sourceTree = "<group>"; };
 		ASSETS_REF /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		AUDIORECORDER_SWIFT_REF /* AudioRecorder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioRecorder.swift; sourceTree = "<group>"; };
 		BASICSETTINGS_SWIFT_REF /* BasicSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BasicSettingsView.swift; sourceTree = "<group>"; };
 		CANDIDATEWIN_SWIFT_REF /* CandidateWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CandidateWindow.swift; sourceTree = "<group>"; };
 		DICTENGINE_SWIFT_REF /* DictionaryEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DictionaryEngine.swift; sourceTree = "<group>"; };
@@ -96,6 +110,10 @@
 		SYNCMERGER_SWIFT_REF /* SyncMerger.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncMerger.swift; sourceTree = "<group>"; };
 		SYNCMODELS_SWIFT_REF /* SyncModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncModels.swift; sourceTree = "<group>"; };
 		THEMESETTINGS_SWIFT_REF /* ThemeSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThemeSettingsView.swift; sourceTree = "<group>"; };
+		TRANSCRIBECOORD_SWIFT_REF /* TranscribeCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscribeCoordinator.swift; sourceTree = "<group>"; };
+		TRANSCRIBEHOTKEY_SWIFT_REF /* TranscribeHotKey.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscribeHotKey.swift; sourceTree = "<group>"; };
+		TRANSCRIBESETTINGS_SWIFT_REF /* TranscribeSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscribeSettingsView.swift; sourceTree = "<group>"; };
+		TRANSCRIBETYPES_SWIFT_REF /* TranscribeTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscribeTypes.swift; sourceTree = "<group>"; };
 		USERDICT_SWIFT_REF /* UserDictView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UserDictView.swift; sourceTree = "<group>"; };
 		VOCABDB_SWIFT_REF /* VocabularyDatabase.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VocabularyDatabase.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -188,6 +206,13 @@
 			isa = PBXGroup;
 			children = (
 				SELECTIONCAPTURE_SWIFT_REF /* SelectionCapture.swift */,
+				TRANSCRIBETYPES_SWIFT_REF /* TranscribeTypes.swift */,
+				AUDIORECORDER_SWIFT_REF /* AudioRecorder.swift */,
+				TRANSCRIBEHOTKEY_SWIFT_REF /* TranscribeHotKey.swift */,
+				ASRCLIENT_SWIFT_REF /* ASRClient.swift */,
+				ASRAGENTSTATUS_SWIFT_REF /* ASRAgentStatus.swift */,
+				ASRHEALTHMONITOR_SWIFT_REF /* ASRHealthMonitor.swift */,
+				TRANSCRIBECOORD_SWIFT_REF /* TranscribeCoordinator.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -212,6 +237,7 @@
 				30978ACAE0C248DBDF722697 /* SuppressedWordsView.swift */,
 				RELORDERVIEW_SWIFT_REF /* RelativeOrderingView.swift */,
 				DICTMGMT_SWIFT_REF /* DictionaryManagementView.swift */,
+				TRANSCRIBESETTINGS_SWIFT_REF /* TranscribeSettingsView.swift */,
 			);
 			path = Tabs;
 			sourceTree = "<group>";
@@ -255,6 +281,7 @@
 				CANDIDATEWIN_SWIFT_REF /* CandidateWindow.swift */,
 				MODEINDICATOR_SWIFT_REF /* ModeIndicator.swift */,
 				8614B2A644D450D6AF22833E /* MarmotLogoView.swift */,
+				MARMOTRECORDINGVIEW_SWIFT_REF /* MarmotRecordingView.swift */,
 				82937A1A9F7D91EE509602A3 /* VisualEffectView.swift */,
 			);
 			path = UI;
@@ -363,12 +390,21 @@
 				SYNCMERGER_SWIFT /* SyncMerger.swift in Sources */,
 				ICLOUDSYNCMGR_SWIFT /* iCloudSyncManager.swift in Sources */,
 				96D86D02279F29A2CCB3451E /* MarmotLogoView.swift in Sources */,
+				MARMOTRECORDINGVIEW_SWIFT /* MarmotRecordingView.swift in Sources */,
 				A4A9314E072C1845129A0515 /* VisualEffectView.swift in Sources */,
 				942FAF62E27825F3C56D93D3 /* CompactIndex.swift in Sources */,
 				B5A0FC3FC4AF28737AB0B27D /* LRUCache.swift in Sources */,
 				F5FE4749BE7140CABCCD842A /* HotTierIndex.swift in Sources */,
 				CD79C8E494C4295842A8153C /* UserTierIndex.swift in Sources */,
 				D1E9902BFDE961700B841B88 /* SuppressedWordsView.swift in Sources */,
+				TRANSCRIBETYPES_SWIFT /* TranscribeTypes.swift in Sources */,
+				AUDIORECORDER_SWIFT /* AudioRecorder.swift in Sources */,
+				TRANSCRIBEHOTKEY_SWIFT /* TranscribeHotKey.swift in Sources */,
+				ASRCLIENT_SWIFT /* ASRClient.swift in Sources */,
+				ASRAGENTSTATUS_SWIFT /* ASRAgentStatus.swift in Sources */,
+				ASRHEALTHMONITOR_SWIFT /* ASRHealthMonitor.swift in Sources */,
+				TRANSCRIBECOORD_SWIFT /* TranscribeCoordinator.swift in Sources */,
+				TRANSCRIBESETTINGS_SWIFT /* TranscribeSettingsView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

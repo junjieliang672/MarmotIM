@@ -73,6 +73,7 @@ enum SettingsTab: String, CaseIterable, Identifiable {
     case basic       = "基本"
     case dictionary  = "词库管理"
     case punctuation = "标点符号"
+    case transcribe  = "转写"
     case theme       = "主题"
     case about       = "关于"
 
@@ -83,6 +84,7 @@ enum SettingsTab: String, CaseIterable, Identifiable {
         case .basic:       return "gearshape"
         case .dictionary:  return "books.vertical"
         case .punctuation: return "number"
+        case .transcribe:  return "mic"
         case .theme:       return "paintbrush"
         case .about:       return "info.circle"
         }
@@ -123,6 +125,8 @@ struct SettingsView: View {
                     DictionaryManagementView(viewModel: viewModel)
                 case .punctuation:
                     PunctuationView(viewModel: viewModel)
+                case .transcribe:
+                    TranscribeSettingsView(viewModel: viewModel)
                 case .theme:
                     ThemeSettingsView(viewModel: viewModel)
                 case .about:
@@ -218,6 +222,10 @@ class SettingsViewModel: ObservableObject {
 
 extension Notification.Name {
     static let configurationDidChange = Notification.Name("MarmotIMConfigurationDidChange")
+
+    /// Posted when the transcribe settings change, so the transcribe subsystem can
+    /// reconfigure without the rest of the app reloading.
+    static let transcribeConfigDidChange = Notification.Name("MarmotIMTranscribeConfigDidChange")
 }
 
 // MARK: - Settings Section Component

@@ -30,6 +30,10 @@ let package = Package(
             name: "MarmotIMTests",
             dependencies: ["MarmotIM"],
             path: "MarmotIMTests",
+            resources: [
+                // Test fixtures (e.g. the transcribe e2e .wav) reachable via Bundle.module.
+                .copy("Fixtures"),
+            ],
             linkerSettings: [
                 .linkedLibrary("sqlite3"),
             ]

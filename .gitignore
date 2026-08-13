@@ -70,5 +70,11 @@ __pycache__/
 .Python
 env/
 venv/
+# Python 3.12 venv for the ASR server, created by scripts/install_asr.sh
+.venv-asr/
 .env
 .worktrees/
+
+# kingjj-flow run state (plans, per-run traces, learnings ledger).
+# Tooling output, not project source: ~20MB of JSONL per run.
+.flow/

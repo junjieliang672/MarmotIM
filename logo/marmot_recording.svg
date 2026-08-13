@@ -1,0 +1,42 @@
+<svg width="26" height="18" viewBox="-4 0 26 18" xmlns="http://www.w3.org/2000/svg">
+  <!-- Recording mark ("Broadcast") — derived from marmot_option4.svg -->
+  <!-- Same kawaii palette and proportions; the mouth opens and sound waves
+       radiate from both sides. Used by the 转写 HUD while the mic is live.
+       Swift twin: MarmotIM/UI/MarmotRecordingView.swift -->
+
+  <!-- Head + belly -->
+  <ellipse cx="9" cy="10" rx="7.5" ry="7" fill="#CD853F"/>
+  <ellipse cx="9" cy="12" rx="4" ry="3.5" fill="#FFEFD5"/>
+
+  <!-- Ears (slightly raised vs. the base logo: cy 4 -> 3.8) -->
+  <ellipse cx="3" cy="3.8" rx="2.2" ry="2.1" fill="#CD853F"/>
+  <ellipse cx="15" cy="3.8" rx="2.2" ry="2.1" fill="#CD853F"/>
+  <ellipse cx="3" cy="3.8" rx="1.2" ry="1.1" fill="#FFB6C1"/>
+  <ellipse cx="15" cy="3.8" rx="1.2" ry="1.1" fill="#FFB6C1"/>
+
+  <!-- Rosy cheeks (before the eyes, so highlights stay on top) -->
+  <ellipse cx="3.5" cy="11" rx="1.5" ry="1" fill="#FF9999" opacity="0.5"/>
+  <ellipse cx="14.5" cy="11" rx="1.5" ry="1" fill="#FF9999" opacity="0.5"/>
+
+  <!-- Sparkly eyes -->
+  <ellipse cx="6" cy="9" rx="2" ry="2.2" fill="#1a1a1a"/>
+  <ellipse cx="12" cy="9" rx="2" ry="2.2" fill="#1a1a1a"/>
+  <circle cx="6.8" cy="8.3" r="0.8" fill="#FFF"/>
+  <circle cx="5.5" cy="9.5" r="0.4" fill="#FFF"/>
+  <circle cx="12.8" cy="8.3" r="0.8" fill="#FFF"/>
+  <circle cx="11.5" cy="9.5" r="0.4" fill="#FFF"/>
+
+  <!-- Nose -->
+  <ellipse cx="9" cy="11.4" rx="0.8" ry="0.5" fill="#8B4513"/>
+
+  <!-- Open mouth — the one real difference from the logo -->
+  <ellipse cx="9" cy="13.9" rx="1.8" ry="1.6" fill="#6B3410"/>
+  <rect x="8.15" y="12.5" width="0.75" height="0.9" rx="0.2" fill="#FFF"/>
+  <rect x="9.1" y="12.5" width="0.75" height="0.9" rx="0.2" fill="#FFF"/>
+
+  <!-- Sound waves, symmetric -->
+  <path d="M17.6 8.4a3 3 0 0 1 0 5.2" stroke="#CD853F" stroke-width="1.3" fill="none" stroke-linecap="round"/>
+  <path d="M20 6.8a5.8 5.8 0 0 1 0 8.4" stroke="#CD853F" stroke-width="1.1" fill="none" stroke-linecap="round" opacity="0.5"/>
+  <path d="M.4 8.4a3 3 0 0 0 0 5.2" stroke="#CD853F" stroke-width="1.3" fill="none" stroke-linecap="round"/>
+  <path d="M-2 6.8a5.8 5.8 0 0 0 0 8.4" stroke="#CD853F" stroke-width="1.1" fill="none" stroke-linecap="round" opacity="0.5"/>
+</svg>

@@ -130,6 +130,79 @@ struct FuzzyPinyinConfig: Codable, Equatable {
     static let `default` = FuzzyPinyinConfig()
 }
 
+// MARK: - Transcribe Configuration (语音转写)
+
+/// ASR model variant. The raw value is the real HuggingFace repo id so that
+/// settings, server and installer cannot drift from one another.
+///
+/// Only bf16 repos are listed: `qwen3-asr-mlx` 0.2.0 uses strict `load_weights`
+/// and cannot load the 8-bit repo, and upstream `Qwen/Qwen3-ASR-0.6B` uses the
+/// `thinker.`-prefixed Omni layout (决策 6/8).
+enum TranscribeModelVariant: String, Codable, CaseIterable {
+    case qwen0_6B_bf16 = "mlx-community/Qwen3-ASR-0.6B-bf16"
+    case qwen1_7B_bf16 = "mlx-community/Qwen3-ASR-1.7B-bf16"
+
+    var displayName: String {
+        switch self {
+        case .qwen0_6B_bf16: return "0.6B（更快）"
+        case .qwen1_7B_bf16: return "1.7B（更准，默认）"
+        }
+    }
+}
+
+/// Recognition language. `.auto` sends no `language` field (决策 9).
+enum TranscribeLanguage: String, Codable, CaseIterable {
+    case auto = "auto"
+    case chinese = "zh"
+    case english = "en"
+
+    var displayName: String {
+        switch self {
+        case .auto: return "自动检测"
+        case .chinese: return "中文"
+        case .english: return "English"
+        }
+    }
+
+    /// Wire value for `TranscribeRequest.language` — nil means auto-detect.
+    var wireValue: String? {
+        self == .auto ? nil : rawValue
+    }
+}
+
+/// Speech-to-text configuration
+struct TranscribeConfig: Codable, Equatable {
+    /// Master switch. Off by default — a dead server must never affect typing (决策 20).
+    var enabled: Bool = false
+
+    /// Local ASR server host. 127.0.0.1 only, no LAN exposure (决策 14).
+    var host: String = "127.0.0.1"
+    var port: Int = 58471
+
+    var modelVariant: TranscribeModelVariant = .qwen1_7B_bf16
+    var language: TranscribeLanguage = .auto
+
+    /// Space-separated hotwords merged into the request `context` (决策 10)
+    var hotwords: String = ""
+
+    /// nil ⇒ 自动 (server passes `max_tokens=None`, library computes
+    /// `max(256, duration * 50)`). A literal value is passed through verbatim (决策 13).
+    var maxNewTokens: Int? = nil
+
+    var requestTimeoutSeconds: Double = 15.0
+
+    /// Stuck-modifier safety valve, not a UX cap (决策 14c)
+    var maxRecordingSeconds: Double = 120.0
+
+    /// Hold duration before recording starts, so a quick tap does nothing (决策 1)
+    var holdThresholdMilliseconds: Int = 250
+
+    /// Strip ONE trailing 。/ . / ，from the transcript (决策 5)
+    var stripTrailingPunctuation: Bool = true
+
+    static let `default` = TranscribeConfig()
+}
+
 // MARK: - Default Punctuation Mapping
 
 /// Default Chinese punctuation mapping
@@ -210,6 +283,11 @@ struct AppConfig: Codable {
     /// Fuzzy pinyin configuration
     var fuzzyPinyin: FuzzyPinyinConfig = .default
 
+    // MARK: - Transcribe Settings (语音转写)
+
+    /// Speech-to-text configuration
+    var transcribe: TranscribeConfig = .default
+
     // MARK: - Legacy Settings (现有设置)
 
     /// Show code type hint (pinyin/wubi) in candidate window
@@ -231,6 +309,7 @@ struct AppConfig: Codable {
         candidateWindowStyle: CandidateWindowStyle,
         rankingWeights: RankingWeights,
         fuzzyPinyin: FuzzyPinyinConfig = .default,
+        transcribe: TranscribeConfig = .default,
         showCodeHint: Bool
     ) {
         self.enterKeyBehavior = enterKeyBehavior
@@ -246,6 +325,7 @@ struct AppConfig: Codable {
         self.candidateWindowStyle = candidateWindowStyle
         self.rankingWeights = rankingWeights
         self.fuzzyPinyin = fuzzyPinyin
+        self.transcribe = transcribe
         self.showCodeHint = showCodeHint
     }
 
@@ -279,6 +359,9 @@ struct AppConfig: Codable {
         // Fuzzy Pinyin Settings
         fuzzyPinyin: .default,
 
+        // Transcribe Settings
+        transcribe: .default,
+
         // Legacy Settings
         showCodeHint: true
     )
@@ -304,6 +387,7 @@ struct AppConfig: Codable {
         candidateWindowStyle = (try? container.decode(CandidateWindowStyle.self, forKey: .candidateWindowStyle)) ?? d.candidateWindowStyle
         rankingWeights = (try? container.decode(RankingWeights.self, forKey: .rankingWeights)) ?? d.rankingWeights
         fuzzyPinyin = (try? container.decode(FuzzyPinyinConfig.self, forKey: .fuzzyPinyin)) ?? d.fuzzyPinyin
+        transcribe = (try? container.decode(TranscribeConfig.self, forKey: .transcribe)) ?? d.transcribe
         showCodeHint = (try? container.decode(Bool.self, forKey: .showCodeHint)) ?? d.showCodeHint
     }
 
@@ -374,6 +458,27 @@ struct AppConfig: Codable {
         candidateWindowStyle.fontSize = min(24, max(10, candidateWindowStyle.fontSize))
         candidateWindowStyle.cornerRadius = min(20, max(0, candidateWindowStyle.cornerRadius))
         candidateWindowStyle.backgroundOpacity = min(1.0, max(0.5, candidateWindowStyle.backgroundOpacity))
+
+        // Transcribe validation
+        // Port must be a usable unprivileged TCP port
+        transcribe.port = min(65535, max(1024, transcribe.port))
+
+        // nil means "let the server decide" (决策 13) — only clamp an explicit value
+        if let tokens = transcribe.maxNewTokens {
+            transcribe.maxNewTokens = min(4096, max(16, tokens))
+        }
+
+        transcribe.requestTimeoutSeconds = min(120.0, max(1.0, transcribe.requestTimeoutSeconds))
+
+        // Stuck-modifier guard: long enough to be a safety valve, not a UX cap
+        transcribe.maxRecordingSeconds = min(600.0, max(5.0, transcribe.maxRecordingSeconds))
+
+        transcribe.holdThresholdMilliseconds = min(2000, max(50, transcribe.holdThresholdMilliseconds))
+
+        // A blank host would silently break every request
+        if transcribe.host.trimmingCharacters(in: .whitespaces).isEmpty {
+            transcribe.host = TranscribeConfig.default.host
+        }
     }
 }
 
@@ -394,6 +499,7 @@ extension AppConfig {
         case candidateWindowStyle
         case rankingWeights
         case fuzzyPinyin
+        case transcribe
         case showCodeHint
     }
 }

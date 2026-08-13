@@ -109,15 +109,18 @@ class InputController: IMKInputController {
         let clientType = sender == nil ? "nil" : String(describing: type(of: sender!))
         let isIMKTextInput = sender is IMKTextInput
         NSLog("MarmotIM: activateServer() - client: \(clientType), isIMKTextInput: \(isIMKTextInput)")
-        
+
         // Reset state
         reset()
         resetPairedPunctuationState()
-        
+
         // Force Chinese mode on activation to prevent being stuck in English mode
         // This ensures the IME is ready to type Chinese when selected or app is switched
         isEnglishMode = false
         ModeIndicator.shared.hide() // Hide any lingering indicators
+
+        // 听写接缝：记一笔"当前是哪个控制器"。见文件末尾的 MARK: 转写上屏接缝。
+        ActiveInputControllerRegistry.shared.activated(self)
     }
 
     override func deactivateServer(_ sender: Any!) {
@@ -125,6 +128,9 @@ class InputController: IMKInputController {
         super.deactivateServer(sender)
         hideCandidateWindow()
         reset()
+
+        // 只在登记的就是自己时才注销 —— 无条件清空会踩 IMK 的顺序陷阱，见 registry 的注释。
+        ActiveInputControllerRegistry.shared.deactivated(self)
     }
 
     override func handle(_ event: NSEvent!, client sender: Any!) -> Bool {
@@ -1338,5 +1344,97 @@ class InputController: IMKInputController {
     @objc private func syncNow(_ sender: Any?) {
         NSLog("MarmotIM: Manual sync triggered")
         iCloudSyncManager.shared.syncNow()
+    }
+
+    // MARK: - 转写上屏接缝
+
+    // 语音听写唯一的、非按键触发的插入入口。三条约束，按重要性排：
+    //
+    // 1. `handle()` 一个字都没改，每次按键不多跑任何东西（决策 20 的验收线）。
+    //    本节的代码只可能被 TranscribeCoordinator 在主线程上调用。
+    // 2. 走的是 `commitText(_:client:)` 同一条路 —— 也就是候选上屏那条路，
+    //    不是剪贴板、不是 CGEvent。所以在任何 app 里的行为都与选词一致。
+    // 3. 拿不到 client 就返回 false，绝不静默吞掉文本；协调器会把它翻成"无法上屏"。
+
+    /// 把一段文本按候选上屏的同一条路径插到光标处。返回是否真的插进去了。
+    ///
+    /// **仅限主线程。** 不加 `dispatchPrecondition`：让输入法为了一次听写而崩溃，
+    /// 比听写失灵严重得多。
+    @discardableResult
+    func insertTranscribedText(_ text: String) -> Bool {
+        guard let target = self.client() else {
+            NSLog("MarmotIM: insertTranscribedText - 没有 client，放弃 \(text.count) 字")
+            return false
+        }
+
+        // 正在组字时先把未完成的编码丢掉，再插。
+        //
+        // 直接插会出事：`insertText` 会把 client 那边的 marked text 顶掉，而我们的
+        // inputBuffer / isComposing / filterMode 还以为在组字。之后每一次退格、每一次
+        // 选词都基于一个客户端已经不认的状态，且**不会自愈** —— 要切走再切回来才恢复。
+        // 两害相权：丢掉的是几个可以重敲的字母，留下的是要重启输入法才能清掉的错乱。
+        //
+        // 顺带一提，这条路走到的前提是用户在组字途中按住了右 Command。`handle()` 里
+        // 带 .command 的 keyDown 一律 return false，所以组字状态确实会原封不动留到这里。
+        if isComposing || !inputBuffer.isEmpty || filterMode != .none {
+            NSLog("MarmotIM: insertTranscribedText - 丢弃未完成的编码 '%@' 后再上屏", inputBuffer)
+            reset()
+            hideCandidateWindow()
+            target.setMarkedText("",
+                                 selectionRange: NSRange(location: 0, length: 0),
+                                 replacementRange: NSRange(location: NSNotFound, length: 0))
+        }
+
+        commitText(text, client: target)
+        return true
+    }
+
+    /// 光标在屏幕上的位置，给听写 HUD 定位用。拿不到就返回 nil，由调用方兜底到鼠标位置
+    /// —— 与 `toggleInputMode` 里那段判定同源（origin 落在原点附近就是没拿到）。
+    func caretPositionOnScreen() -> NSPoint? {
+        guard let target = self.client() else { return nil }
+        var caret = NSRect.zero
+        target.attributes(forCharacterIndex: 0, lineHeightRectangle: &caret)
+        guard caret.origin.x > 10 || caret.origin.y > 50 else { return nil }
+        return caret.origin
+    }
+}
+
+// MARK: - 活跃控制器登记处
+
+/// 记住 IMK 最后一次 `activateServer` 的是哪个控制器。
+///
+/// **为什么需要它。** IMK 为每一个 client 各造一个 `InputController`，而且没有任何
+/// 东西记录"当前是哪一个"；`commitText` 又是私有的、吃的是 `handle()` 收到的 sender。
+/// 于是任何非按键触发的插入（听写、自动化）都必须自己记这一笔。
+///
+/// **为什么抽成独立类型而不是一个 `static weak var`。** 下面 `deactivated` 的
+/// `===` 规则必须能被测到，而在测试进程里造 `IMKInputController` 需要真实的
+/// `IMKServer`。存成 `AnyObject` 之后，两个普通对象就能把
+/// activate(A) → activate(B) → deactivate(A) 这条 IMK 不保证顺序的路径完整驱动一遍。
+final class ActiveInputControllerRegistry {
+
+    static let shared = ActiveInputControllerRegistry()
+
+    /// weak：客户端 app 退出时控制器随之释放，这里绝不能延长它的寿命。
+    private(set) weak var currentObject: AnyObject?
+
+    /// 生产侧读的就是这个。
+    var current: InputController? { currentObject as? InputController }
+
+    func activated(_ controller: AnyObject) {
+        currentObject = controller
+    }
+
+    /// **只在登记的就是它自己时才清空。**
+    ///
+    /// IMK 不保证前一个 client 的 `deactivateServer` 与后一个 client 的
+    /// `activateServer` 谁先到。真实观察到的顺序里 activate(B) 可能先于 deactivate(A)；
+    /// 无条件清空会把已经生效的 B 抹掉，症状是听写"偶尔没反应"——
+    /// 而这与"MarmotIM 不是当前输入源所以无操作"的正常行为**完全无法区分**，
+    /// 因此这条规则一旦写错，几乎不可能靠现场排查发现。
+    func deactivated(_ controller: AnyObject) {
+        guard currentObject === controller else { return }
+        currentObject = nil
     }
 }

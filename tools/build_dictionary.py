@@ -1316,6 +1316,15 @@ def main():
                         help='Build emoji index (default: True)')
     parser.add_argument('--build-fuzzy', action='store_true', default=True,
                         help='Build fuzzy pinyin index (default: True)')
+    # Opt-out for the fuzzy index. Needed because --build-fuzzy is store_true with
+    # default=True, so it can never be turned off by passing it. The install
+    # pipeline (scripts/quick_update.sh) passes --no-build-fuzzy: the index costs
+    # ~6.7M rows / ~382MB of a 1.2GB database and the 模糊拼音 filter is rarely used.
+    # NOTE: the DB is recreated from scratch each run, so skipping this leaves
+    # fuzzy_pinyin EMPTY rather than stale — 模糊拼音 mode returns no results.
+    # Drop the flag from the pipeline to restore it.
+    parser.add_argument('--no-build-fuzzy', action='store_true',
+                        help='Skip the fuzzy pinyin index (overrides --build-fuzzy)')
     parser.add_argument('--build-symbol', action='store_true', default=True,
                         help='Build symbol index (default: True)')
 
@@ -1410,8 +1419,11 @@ def main():
             ]
             build_emoji_index(cursor, emoji_files, vocab_dir)
 
-        if args.build_fuzzy:
+        if args.build_fuzzy and not args.no_build_fuzzy:
             build_fuzzy_pinyin_index(cursor, args.pinyin, vocab_dir)
+        else:
+            print("Skipping fuzzy pinyin index (--no-build-fuzzy); "
+                  "fuzzy_pinyin will be empty and 模糊拼音 mode will return no results.")
 
         if args.build_symbol:
             symbol_path = os.path.join(vocab_dir, 'symbols.yaml')

@@ -17,6 +17,10 @@
   },
   "testTargets" : [
     {
+      "skippedTests" : [
+        "TranscribeE2ETests\/testChineseFixtureTranscribesEndToEnd()",
+        "TranscribeE2ETests\/testEnglishFixtureTranscribesEndToEndUnderAutoLanguage()"
+      ],
       "target" : {
         "containerPath" : "container:MarmotIM.xcodeproj",
         "identifier" : "2B0D67AC2F187B02008AAC6E",

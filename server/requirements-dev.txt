@@ -1,0 +1,5 @@
+# Test-only dependencies. The suite runs with the model MOCKED -- none of the weights,
+# and not even mlx, are needed to run `pytest`.
+-r requirements.txt
+pytest==9.1.1
+httpx==0.28.1

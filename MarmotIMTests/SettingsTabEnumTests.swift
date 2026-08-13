@@ -23,11 +23,13 @@ final class SettingsTabEnumTests: XCTestCase {
                        "降权词库 moved into DictionaryManagementView in spec-003 T5")
     }
 
-    // Five top-level tabs: 基本, 词库管理, 标点符号, 主题, 关于.
-    func testFiveTopLevelTabs() {
-        XCTAssertEqual(SettingsTab.allCases.count, 5,
-                       "spec-003 T5 consolidates to exactly 5 top-level tabs")
-        let expected: [String] = ["基本", "词库管理", "标点符号", "主题", "关于"]
+    // Six top-level tabs: 基本, 词库管理, 标点符号, 转写, 主题, 关于.
+    // Was five after spec-003 T5; 转写 was added by the transcribe feature and
+    // sits with the other input-behaviour tabs, ahead of 主题 / 关于.
+    func testTopLevelTabs() {
+        XCTAssertEqual(SettingsTab.allCases.count, 6,
+                       "spec-003 T5 consolidated to 5 tabs; transcribe adds 转写")
+        let expected: [String] = ["基本", "词库管理", "标点符号", "转写", "主题", "关于"]
         XCTAssertEqual(SettingsTab.allCases.map { $0.rawValue }, expected)
     }
 

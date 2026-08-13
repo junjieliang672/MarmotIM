@@ -28,6 +28,7 @@
 - **iCloud 同步** - 多设备间自动同步用户学习数据、收藏词条，无缝切换
 - **划词入库** - Control+= 快速添加选中文字到用户词库
 - **数据库导入导出** - 支持备份和迁移用户数据
+- **语音转写（可选）** - 按住右 Command 键说话，松开后文字直接上屏；识别在本机完成，音频不出这台电脑。默认关闭，装不装、坏不坏都不影响正常打字。详见 [语音转写使用指南](docs/transcribe.md)
 
 ## 安装
 
@@ -69,12 +70,26 @@ python3 tools/build_dictionary.py
 ### 开发者命令
 
 ```bash
-# 快速更新（无需注销）
-./scripts/quick_update.sh
+# 构建并安装（无需注销）：输入法 + 本地语音识别服务
+./scripts/build_and_install.sh
+
+# 只装输入法，跳过语音识别服务的准备
+./scripts/build_and_install.sh --all
+
+# 强制重建语音识别服务的 venv / 依赖 / LaunchAgent（已下载的模型权重会复用）
+./scripts/build_and_install.sh --reinstall-asr
 
 # 构建发布包
 ./scripts/release.sh
 ```
+
+> 首次运行会下载约 4GB 模型权重（15–100 分钟），之后每次运行只需约 2 秒。
+> 语音识别服务准备失败**不会**影响输入法安装：脚本会警告，输入法照常装好。
+> 需要逐步核对安装结果时见 [docs/installer-operator-checklist.md](docs/installer-operator-checklist.md)。
+
+> `build_and_install.sh` 构建词库时传入 `--no-build-fuzzy`，**不会**构建模糊拼音索引
+> （约 670 万行 / 382MB，模糊拼音过滤模式将没有结果）。需要它时，去掉该脚本里的这个参数，
+> 或直接运行上面的 `python3 tools/build_dictionary.py`（默认会构建）。
 
 ## 使用方法
 
@@ -187,7 +202,8 @@ MarmotIM/
 │   └── generate_icon.py      # 图标生成
 ├── scripts/                 # 构建脚本
 │   ├── build.sh              # 构建并安装
-│   ├── quick_update.sh       # 快速更新（开发用）
+│   ├── build_and_install.sh  # 构建并安装（开发用，无需注销）
+│   ├── quick_update.sh       # 兼容旧名的转发脚本
 │   └── clean_install.sh      # 全新安装（清理旧版本）
 ├── logo/                    # Logo 资源
 └── .github/workflows/       # CI/CD

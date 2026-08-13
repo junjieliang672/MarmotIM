@@ -1,0 +1,41 @@
+# marmot-asr-server runtime dependencies. Python 3.12 only (see README §5).
+# Resolved and verified on macOS/arm64, Python 3.12.13, 2026-08-12.
+#
+# Install:  python3.12 -m venv .venv && .venv/bin/pip install -r requirements.txt
+# The installer owns venv creation -- this file only declares what goes in it.
+
+# --- direct ---
+qwen3-asr-mlx==0.2.0
+fastapi==0.141.1
+uvicorn[standard]==0.52.1
+
+# --- transitive, pinned because a silent major bump here breaks inference or the ASGI app ---
+mlx==0.32.0
+mlx-metal==0.32.0
+numpy==2.5.2
+tokenizers==0.23.1
+huggingface_hub==1.27.0
+soundfile==0.14.0
+starlette==1.6.0
+pydantic==2.13.4
+pydantic_core==2.46.4
+anyio==4.14.2
+h11==0.16.0
+click==8.4.2
+# uvicorn[standard] extras -- uvloop is the reason /health stays sub-millisecond
+uvloop==0.22.1
+httptools==0.8.0
+websockets==17.0.1
+watchfiles==1.2.0
+python-dotenv==1.2.2
+PyYAML==6.0.3
+
+# NOT here, deliberately:
+#   pyannote / diarization -- forbidden by the brief; qwen3-asr-mlx has no diarization code
+#     at all, so it cannot enter the tree even transitively.
+#   sounddevice -- the [audio] extra of qwen3-asr-mlx. Audio capture is the Swift client's job.
+#   pytest -- see requirements-dev.txt.
+#
+# hf-xet is pulled in by huggingface_hub and is left unpinned/unlisted: the Xet transfer
+# backend stalled at 0 bytes when fetching weights on this machine. Set HF_HUB_DISABLE_XET=1
+# for any download (README §4).
