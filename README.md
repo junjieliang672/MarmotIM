@@ -70,22 +70,35 @@ python3 tools/build_dictionary.py
 ### 开发者命令
 
 ```bash
-# 构建并安装（无需注销）：输入法 + 本地语音识别服务
+# 构建并安装（无需注销）：只装输入法，不碰语音识别服务
 ./scripts/build_and_install.sh
 
-# 只装输入法，跳过语音识别服务的准备
+# 输入法 + 本地语音识别服务（venv、模型权重、开机自启的 LaunchAgent）
 ./scripts/build_and_install.sh --all
 
 # 强制重建语音识别服务的 venv / 依赖 / LaunchAgent（已下载的模型权重会复用）
 ./scripts/build_and_install.sh --reinstall-asr
 
+# 单独准备语音识别服务（不重新构建输入法）
+./scripts/install_asr.sh
+
 # 构建发布包
 ./scripts/release.sh
 ```
 
-> 首次运行会下载约 4GB 模型权重（15–100 分钟），之后每次运行只需约 2 秒。
+> 语音识别服务是**可选**的，只有 `--all` 才会准备它 —— 不加参数就只装输入法，
+> 不会悄悄开始下载几个 GB 的模型。
+>
+> 首次 `--all` 会下载约 4GB 模型权重（15–100 分钟）；权重下载后就会一直复用，
+> 之后的运行（包括 `--reinstall-asr`）都不会重新下载，热运行约 2 秒。
+>
 > 语音识别服务准备失败**不会**影响输入法安装：脚本会警告，输入法照常装好。
 > 需要逐步核对安装结果时见 [docs/installer-operator-checklist.md](docs/installer-operator-checklist.md)。
+>
+> 服务本体装在 `~/Library/Application Support/MarmotIM/asr/`，**不在仓库里** ——
+> 移动、改名或删除本仓库都不会弄坏已经装好的服务。
+>
+> 发布包（`release.sh` / 方法一）**不含**语音识别服务，只有从源码安装才能使用语音转写。
 
 > `build_and_install.sh` 构建词库时传入 `--no-build-fuzzy`，**不会**构建模糊拼音索引
 > （约 670 万行 / 382MB，模糊拼音过滤模式将没有结果）。需要它时，去掉该脚本里的这个参数，
@@ -125,6 +138,11 @@ python3 tools/build_dictionary.py
 |------|------|------|
 | 划词入库 | Control+= | 将选中的文字添加到用户词库 |
 | 划词删除 | Control+- | 将选中的文字从用户词库删除 |
+| 语音转写 | 按住右 Command | 按住说话，松开后文字上屏。需先在「转写」设置页启用，并装好本地语音服务 |
+
+> 语音转写只在土拨鼠输入法**是当前输入源**时生效；切到英文或别的输入法时按住右 Command
+> 不会有任何反应，这是刻意的。左 Command 与所有 ⌘ 快捷键都照常工作 —— 按住期间只要
+> 敲了别的键，这次听写就会作废并把快捷键放行。
 
 ### iCloud 同步
 
@@ -157,6 +175,7 @@ python3 tools/build_dictionary.py
 - **用户词库** - 管理用户添加的词条
 - **标点符号** - 自定义标点映射
 - **主题** - 候选窗口外观（字体大小、圆角、透明度）
+- **转写** - 语音转写开关、服务状态、语言、热词；高级项内可改地址端口、模型变体等
 - **导入导出** - 数据库备份与恢复
 - **关于** - 版本信息与开发初衷
 
@@ -171,6 +190,8 @@ python3 tools/build_dictionary.py
 - `modeSwitchKey`: 状态切换键 (`shift` / `control` / `fn` / `disabled`)
 - `themeMode`: 主题模式 (`system` / `light` / `dark`)
 - `punctuationMode`: 标点模式 (`chinese` / `english` / `custom`)
+- `transcribe`: 语音转写设置（是否启用、服务地址与端口、语言、热词、模型变体等），
+  默认 `enabled: false`；详见 [语音转写使用指南](docs/transcribe.md)
 
 数据库文件位于 `~/Library/Application Support/MarmotIM/dictionary.db`
 
@@ -186,9 +207,15 @@ MarmotIM/
 │   ├── Ranking/             # Frecency 排序
 │   ├── Storage/             # 用户数据存储
 │   ├── Sync/                # iCloud 同步
-│   ├── UI/                  # 候选窗口
+│   ├── Services/            # 划词入库、语音转写（热键 / 录音 / 客户端 / 协调器）
+│   ├── UI/                  # 候选窗口、提示 HUD
 │   ├── Settings/            # 设置界面
 │   └── Config/              # 配置管理
+├── server/                  # 本地语音识别服务（FastAPI + uvicorn + MLX）
+│   ├── app.py                # HTTP 接口：/health、/transcribe、/reload
+│   ├── model.py              # 模型加载与推理（常驻内存）
+│   ├── config.py             # 环境变量配置，只监听回环地址
+│   └── tests/                # pytest（不需要模型权重即可全部通过）
 ├── vocab/                   # 词库源文件
 │   ├── py_table.txt          # 拼音词库
 │   ├── wb_table.txt          # 五笔词库
@@ -202,7 +229,9 @@ MarmotIM/
 │   └── generate_icon.py      # 图标生成
 ├── scripts/                 # 构建脚本
 │   ├── build.sh              # 构建并安装
-│   ├── build_and_install.sh  # 构建并安装（开发用，无需注销）
+│   ├── build_and_install.sh  # 构建并安装（开发用，无需注销）；--all 连语音服务一起装
+│   ├── install_asr.sh        # 单独准备语音识别服务（venv / 权重 / LaunchAgent）
+│   ├── com.marmotim.asr.plist # LaunchAgent 模板（开机自启，崩溃自动重启）
 │   ├── quick_update.sh       # 兼容旧名的转发脚本
 │   └── clean_install.sh      # 全新安装（清理旧版本）
 ├── logo/                    # Logo 资源
@@ -228,6 +257,7 @@ MarmotIM/
 - **用户数据**: SQLite WAL 模式
 - **云同步**: iCloud Documents
 - **排序算法**: Frecency
+- **语音识别**: MLX + Qwen3-ASR-1.7B（本机推理），服务端 FastAPI + uvicorn，只监听回环地址
 
 ## 许可证
 
