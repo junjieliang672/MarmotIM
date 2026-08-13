@@ -389,19 +389,41 @@ final class TranscribeCoordinator {
             } else {
                 await monitor.refreshIfStale(maxAge: ASRHealthMonitor.stalenessInterval)
             }
-            guard let running = monitor.snapshot.model, running != wanted else { return }
+            // 服务端没起来（从没探成功过）就不发：那不是"配置不对"，而是"我们不知道"。
+            guard monitor.snapshot.model != nil else { return }
             do {
-                // 只发模型这一项。设置页里那些**只有客户端在用**的项（保持阈值、录音上限、
-                // 标点、超时）不属于服务端，发过去只会让它把不认识的键忽略掉，白跑一趟。
-                let answer = try await requester.reconfigure(
-                    ReconfigureRequest(model: wanted))
+                // 一次把**所有服务端项目**发过去，由服务端自己 diff。
+                // 客户端不做差异判断：/health 根本不报 min/max_audio_seconds 和 log_level，
+                // 拿不到现值就没法比；而服务端本来就要比一次，比完值没变会回 applied:[] 什么都不做。
+                // 设置页里只有客户端在用的项（保持阈值、录音上限、标点、超时）不在这里。
+                let answer = try await requester.reconfigure(ReconfigureRequest(
+                    host: updated.host,
+                    port: updated.port,
+                    model: wanted,
+                    language: updated.language.reconfigureValue,
+                    minAudioSeconds: updated.minAudioSeconds,
+                    maxAudioSeconds: updated.maxAudioSeconds,
+                    logLevel: updated.logLevel))
+                if answer.applied.isEmpty {
+                    return   // 服务端已经是这份配置，没必要留一行日志
+                }
                 if answer.restartRequired {
-                    log("转写：服务端为应用新配置正在重启（\(answer.applied.joined(separator: ", "))）")
+                    log("转写：服务端为应用 \(answer.applied.joined(separator: "、")) 正在重启")
+                    // 重启期间连接被拒绝，与"没装"在网络上完全同形。只有服务端知道
+                    // 区别，所以由它的应答驱动这条通知，设置页不去猜哪些项要重启。
+                    //
+                    // `DispatchQueue.main.async` 而不是 `await MainActor.run`：后者会把这个
+                    // Task 挂起，直到主线程有空。测试里主线程正忙着 spin 等结果，于是每个
+                    // 相关用例都要空等一次超时 —— 实测把整个 Swift 套件从 11 s 拖到 893 s。
+                    // 这里根本不需要等它送达，发出去就行。
+                    DispatchQueue.main.async {
+                        NotificationCenter.default.post(name: .transcribeServerRestarting, object: nil)
+                    }
                 } else {
-                    log("转写：已请求服务端切换模型 \(running) → \(wanted)")
+                    log("转写：服务端已应用 \(answer.applied.joined(separator: "、"))")
                 }
             } catch {
-                log("转写：切换模型到 \(wanted) 失败（\(error)）")
+                log("转写：下发服务端配置失败（\(error)）")
             }
         }
     }

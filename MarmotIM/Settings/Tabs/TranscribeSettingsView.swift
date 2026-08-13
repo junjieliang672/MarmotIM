@@ -177,6 +177,9 @@ struct NumericFieldSpec: Equatable {
     static let requestTimeout = NumericFieldSpec(unit: "秒", lowerBound: 1, upperBound: 120, isInteger: false)
     static let maxRecording = NumericFieldSpec(unit: "秒", lowerBound: 5, upperBound: 600, isInteger: false)
     static let holdThreshold = NumericFieldSpec(unit: "毫秒", lowerBound: 50, upperBound: 2000, isInteger: true)
+    // 服务端项目。区间与 AppConfig.validate() 的钳制、以及 server/config.py 的校验对齐。
+    static let minAudio = NumericFieldSpec(unit: "秒", lowerBound: 0, upperBound: 10, isInteger: false)
+    static let maxAudio = NumericFieldSpec(unit: "秒", lowerBound: 1, upperBound: 3600, isInteger: false)
 
     func format(_ value: Double) -> String {
         value == value.rounded() ? String(Int(value)) : String(value)
@@ -324,6 +327,11 @@ final class TranscribeSettingsModel: ObservableObject {
     /// 没读就显示它等于把「还没看」说成「没装」。
     @Published private(set) var agent: ASRAgentStatus?
 
+    /// 服务端说它正在重启。重启中的连接被拒绝与「没装」同形，靠猜会把前者显示成后者。
+    /// 由 `.transcribeServerRestarting` 置位，健康探测再次成功时清除。
+    @Published private(set) var isServerRestarting = false
+    private var restartObserver: NSObjectProtocol?
+
     private let permission: MicrophonePermissionProviding
     private let healthProbe: TranscribeHealthProbing
 
@@ -332,6 +340,15 @@ final class TranscribeSettingsModel: ObservableObject {
         self.permission = permission
         self.healthProbe = healthProbe
         self.microphone = permission.currentStatus()
+        restartObserver = NotificationCenter.default.addObserver(
+            forName: .transcribeServerRestarting, object: nil, queue: .main
+        ) { [weak self] _ in
+            self?.isServerRestarting = true
+        }
+    }
+
+    deinit {
+        if let restartObserver { NotificationCenter.default.removeObserver(restartObserver) }
     }
 
     /// 重新读取权限状态。窗口打开时调用 —— 用户可能刚在「系统设置」里改过。
@@ -365,6 +382,10 @@ final class TranscribeSettingsModel: ObservableObject {
             guard let self else { return }
             // 探测被取消时监视器什么都没学到（probedAt 仍是 nil）——那不是一个可显示的结论。
             self.health = snapshot.hasProbed ? snapshot : nil
+            // 探到了就说明它已经回来了；只有真正答话才清除，超时不算。
+            if snapshot.hasProbed, snapshot.state == .ready || snapshot.state == .loading {
+                self.isServerRestarting = false
+            }
             self.isCheckingHealth = false
         }
     }
@@ -460,7 +481,13 @@ struct TranscribeSettingsView: View {
                 Text("本地服务：")
                     .frame(width: 80, alignment: .trailing)
 
-                if let health = model.health {
+                if model.isServerRestarting {
+                    // 优先于健康状态：重启期间探测必然失败，而 .down 会显示成「未安装」。
+                    Image(systemName: "arrow.clockwise")
+                        .foregroundColor(.orange)
+                    Text("重启中")
+                        .foregroundColor(.orange)
+                } else if let health = model.health {
                     Image(systemName: health.state.settingsIconName)
                         .foregroundColor(health.state.settingsTint)
                     Text(health.state.settingsDisplayName)
@@ -507,6 +534,10 @@ struct TranscribeSettingsView: View {
                     }
                 case .loading:
                     Text(health.detail ?? "模型正在加载，通常需要十几秒；加载完成前转写会失败。")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                case .down where model.isServerRestarting:
+                    Text("服务正在重启以应用新配置，通常十几秒；期间听写不可用。")
                         .font(.caption)
                         .foregroundColor(.secondary)
                 case .down:
@@ -712,6 +743,55 @@ struct TranscribeSettingsView: View {
                                    onCommit: { model.persist(viewModel) })
 
                     Text("按住右 Command 键超过这个时长才开始录音，避免误触。")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+
+                    Divider()
+
+                    // 服务端项目：改动通过 POST /reconfigure 下发。前两项服务端能原地生效，
+                    // 日志级别要重开进程 —— 页面不判断，服务端在应答里告诉我们。
+                    Text("以下三项作用于本机语音服务")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+
+                    ValidatedField(label: "最短音频：",
+                                   unit: "秒",
+                                   initialText: NumericFieldSpec.minAudio.format(viewModel.config.transcribe.minAudioSeconds),
+                                   parse: NumericFieldSpec.minAudio.parse,
+                                   onValid: { value in
+                                       viewModel.config.transcribe.minAudioSeconds = value
+                                       viewModel.markDirty()
+                                   },
+                                   onCommit: { model.persist(viewModel) })
+
+                    Text("短于此长度的录音会被静默丢弃，不会插字，也不报错。")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+
+                    ValidatedField(label: "最长音频：",
+                                   unit: "秒",
+                                   initialText: NumericFieldSpec.maxAudio.format(viewModel.config.transcribe.maxAudioSeconds),
+                                   parse: NumericFieldSpec.maxAudio.parse,
+                                   onValid: { value in
+                                       viewModel.config.transcribe.maxAudioSeconds = value
+                                       viewModel.markDirty()
+                                   },
+                                   onCommit: { model.persist(viewModel) })
+
+                    Text("服务端的第二道上限。客户端本来就有录音上限，这一项通常不必动。")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+
+                    Picker("日志级别：", selection: $viewModel.config.transcribe.logLevel) {
+                        ForEach(TranscribeConfig.knownLogLevels, id: \.self) { level in
+                            Text(level).tag(level)
+                        }
+                    }
+                    .onChange(of: viewModel.config.transcribe.logLevel) { _ in
+                        model.persist(viewModel)
+                    }
+
+                    Text("改这一项服务会重启，期间听写短暂不可用。")
                         .font(.caption)
                         .foregroundColor(.secondary)
 

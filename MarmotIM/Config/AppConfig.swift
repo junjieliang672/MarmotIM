@@ -164,6 +164,13 @@ enum TranscribeLanguage: String, Codable, CaseIterable {
         }
     }
 
+    /// `/reconfigure` 用的值，与上面那个**语义不同**，所以是两个属性而不是一个。
+    ///
+    /// 转写请求里 nil ＝ 这次不指定语言；但在 /reconfigure 里 nil ＝ 这一项不改，
+    /// 于是"把语言改成自动"就永远发不出去。服务端把空串和 null 都解释成自动检测
+    /// （app.py: `str(raw).strip() or None`），所以这里发空串。
+    var reconfigureValue: String { self == .auto ? "" : rawValue }
+
     /// Wire value for `TranscribeRequest.language` — nil means auto-detect.
     var wireValue: String? {
         self == .auto ? nil : rawValue
@@ -196,6 +203,26 @@ struct TranscribeConfig: Codable, Equatable {
 
     /// Hold duration before recording starts, so a quick tap does nothing (决策 1)
     var holdThresholdMilliseconds: Int = 250
+
+    // MARK: - 服务端项目
+    //
+    // 下面三项**不是**客户端行为，它们通过 POST /reconfigure 下发给本机服务，
+    // 由服务端决定能否原地生效（前两项可以，logLevel 要重开进程）。
+    // 存在这里而不是只留在服务端，是为了和 modelVariant 一致：设置页是真相来源，
+    // 服务端的 overlay 是它的镜像 —— 否则重装一次服务，用户改过的值就悄悄回到默认。
+
+    /// 短于此长度的音频按 audio_too_short 静默丢弃。
+    var minAudioSeconds: Double = 0.2
+
+    /// 长于此长度的音频按 audio_too_long 拒绝。客户端本来就有 120 s 卡键兜底，
+    /// 所以服务端这道上限是刻意宽松的第二道。
+    var maxAudioSeconds: Double = 300.0
+
+    /// 服务端日志级别（uvicorn 的取值）。改它要重开进程。
+    var logLevel: String = "info"
+
+    /// uvicorn 认得的级别。别的值会让服务端起不来 —— 而它起不来就没有界面能改回去。
+    static let knownLogLevels = ["critical", "error", "warning", "info", "debug", "trace"]
 
     /// Strip ONE trailing 。/ . / ，from the transcript (决策 5)
     var stripTrailingPunctuation: Bool = true
@@ -474,6 +501,19 @@ struct AppConfig: Codable {
         transcribe.maxRecordingSeconds = min(600.0, max(5.0, transcribe.maxRecordingSeconds))
 
         transcribe.holdThresholdMilliseconds = min(2000, max(50, transcribe.holdThresholdMilliseconds))
+
+        // 服务端项目。钳制区间与 server/config.py 的 validate() 对齐 —— 客户端先钳一次，
+        // 是为了不让设置页把一个服务端必然拒绝的值发出去再显示一条错误。
+        transcribe.minAudioSeconds = min(10.0, max(0.0, transcribe.minAudioSeconds))
+        transcribe.maxAudioSeconds = min(3600.0, max(1.0, transcribe.maxAudioSeconds))
+        // max 必须大于 min，否则服务端会拒绝整份配置。宁可把 max 顶上去，
+        // 也不要让一个不可能生效的组合落盘。
+        if transcribe.maxAudioSeconds <= transcribe.minAudioSeconds {
+            transcribe.maxAudioSeconds = transcribe.minAudioSeconds + 1.0
+        }
+        if !TranscribeConfig.knownLogLevels.contains(transcribe.logLevel) {
+            transcribe.logLevel = "info"
+        }
 
         // A blank host would silently break every request
         if transcribe.host.trimmingCharacters(in: .whitespaces).isEmpty {

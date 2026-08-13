@@ -226,6 +226,11 @@ extension Notification.Name {
     /// Posted when the transcribe settings change, so the transcribe subsystem can
     /// reconfigure without the rest of the app reloading.
     static let transcribeConfigDidChange = Notification.Name("MarmotIMTranscribeConfigDidChange")
+
+    /// 服务端应答说它要为应用新配置而重启。由 TranscribeCoordinator 发出，设置页据此
+    /// 把指示灯显示成「重启中」而不是「未安装」—— 重启期间连接被拒绝，二者在网络上
+    /// 长得一模一样，只有服务端知道区别，所以由它告诉我们。
+    static let transcribeServerRestarting = Notification.Name("MarmotIMTranscribeServerRestarting")
 }
 
 // MARK: - Settings Section Component

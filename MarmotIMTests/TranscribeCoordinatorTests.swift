@@ -792,7 +792,14 @@ final class TranscribeCoordinatorTests: XCTestCase {
                       "选了别的变体，就必须让服务端真的换过去")
     }
 
-    func testNoReloadWhenTheServerAlreadyRunsTheSelectedModel() {
+    /// 改热词不该让服务端停顿 —— 但**判断谁变了已经移到服务端**。
+    ///
+    /// 客户端不再自己 diff：`/health` 根本不报 min/max_audio_seconds 和 log_level，
+    /// 拿不到现值就无从比较，而服务端本来就要比一次。所以这里改成断言新的分工：
+    /// 客户端把整份服务端子集发过去，一次，不重复发。
+    /// "值没变就什么都不做"那一半由 server/tests/test_reconfigure.py 的
+    /// test_posting_values_that_already_hold_changes_nothing 守着。
+    func testChangingAClientOnlySettingStillSendsExactlyOneReconfigure() {
         let harness = Harness()
         harness.start()
         harness.health.reportedModel = TranscribeModelVariant.qwen1_7B_bf16.rawValue   // 与配置一致
@@ -800,8 +807,11 @@ final class TranscribeCoordinatorTests: XCTestCase {
         harness.coordinator.configurationDidChange()
 
         XCTAssertTrue(spin { harness.health.refreshCount >= 1 })
-        XCTAssertEqual(harness.client.reloadedModels, [],
-                       "每次保存都无条件重载，等于每改一次热词就让服务端停 0.6 s")
+        XCTAssertTrue(spin { harness.client.reconfigured.count == 1 },
+                      "整份服务端子集只发一次，由服务端决定其中哪些真的变了")
+        // 发出去的模型就是配置里选的那个，不是凭空捏的。
+        XCTAssertEqual(harness.client.reconfigured.first?.model,
+                       TranscribeModelVariant.qwen1_7B_bf16.rawValue)
     }
 
     /// 服务端没报告过模型（服务没起 / 从没探成功过）是"我们不知道"，不是"模型不对"。
