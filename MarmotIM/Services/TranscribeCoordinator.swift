@@ -44,6 +44,11 @@ import Carbon   // TISCopyCurrentKeyboardInputSource —— 决策 3 的判据�
 ///
 /// `isActiveInputSource` 是决策 3 的判据：MarmotIM 不是当前输入源时整条长按无操作 ——
 /// 不录音、不发请求、不显示任何东西，也**没有**剪贴板兜底。
+///
+/// 「转写 → 不是当前输入源时也能听写」打开之后，这个判据由
+/// `FallbackTranscriptSink` 放宽到「IME 那条路可用**或者**合成键盘事件那条路可用」。
+/// 名字保持不变：它问的一直是「这次长按有没有落点」，而不是字面上的输入源。
+/// 剪贴板兜底在任何一档下都不存在。
 protocol TranscriptInserting: AnyObject {
     var isActiveInputSource: Bool { get }
     /// 返回是否真的插进去了。
@@ -806,6 +811,154 @@ final class IMETranscriptSink: TranscriptInserting {
     }
 }
 
+// MARK: - 辅助功能授权
+
+/// 辅助功能（Accessibility）授权的查询与申请。
+///
+/// 抽成协议的理由和麦克风那份一致：合成键盘事件的两条判据里，这一条是**进程级**的，
+/// 测试进程里既不能授予也不能撤销，不抽出来就只能测到「没授权 → 拒绝」那一半。
+protocol AccessibilityTrusting {
+    /// 本进程当前是否被信任。**不弹窗**——这个查询在长按路径上会被反复调用。
+    var isTrusted: Bool { get }
+    /// 弹一次系统授权引导窗。只应由设置页的按钮触发。
+    func promptForTrust()
+}
+
+/// 真实实现：`AXIsProcessTrusted` 家族。
+///
+/// 查询与申请刻意分成两个方法，对应同一个 API 的两种用法：
+/// `AXIsProcessTrustedWithOptions(nil)` 只读，带 `kAXTrustedCheckOptionPrompt: true`
+/// 才弹窗。合成一个方法会让长按路径上的每次查询都有弹窗的可能。
+struct SystemAccessibilityTrust: AccessibilityTrusting {
+
+    var isTrusted: Bool { AXIsProcessTrusted() }
+
+    func promptForTrust() {
+        let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
+        _ = AXIsProcessTrustedWithOptions(options)
+    }
+}
+
+/// 合成键盘事件的上屏接缝 —— 「不是当前输入源时也能听写」这条退路。
+///
+/// **为什么是 `CGEventKeyboardSetUnicodeString` 而不是剪贴板 + ⌘V。**
+/// 后者要占用剪贴板（`docs/transcribe.md` §1 明写了不走剪贴板），而且粘贴是不是
+/// 会发生完全取决于目标 app 认不认 ⌘V。合成 Unicode 事件不碰剪贴板，也不依赖
+/// 目标 app 的快捷键绑定。
+///
+/// **这条路比 IME 那条弱在哪，值得写清楚：**
+/// · 需要辅助功能授权，没有就整条无操作（不是报错，是不动）；
+/// · 文字进的是「当前键盘焦点」，而这个焦点由系统决定，我们无从核对；
+/// · 安全输入（密码框会开 `EnableSecureEventInput`）下事件会被系统吞掉。
+///   这一条是**好事**，等于系统替我们挡住了最不该插字的地方，所以不去绕过它。
+///
+/// 所以它永远只是退路：`FallbackTranscriptSink` 只在 IME 那条路走不通时才用它。
+final class SynthesizedKeystrokeSink: TranscriptInserting {
+
+    /// 一次投递的字符上限。`CGEventKeyboardSetUnicodeString` 对超长串的行为没有保证，
+    /// 分片投递是稳的那一侧。转写结果通常远短于此，这里只是不让极端输入撞上未定义行为。
+    static let chunkSize = 20
+
+    private let trust: AccessibilityTrusting
+
+    init(trust: AccessibilityTrusting = SystemAccessibilityTrust()) {
+        self.trust = trust
+    }
+
+    /// 有没有授权就是这条路可不可用。焦点在哪、那个控件收不收字，我们查不到，
+    /// 所以不假装能查 —— 剩下的由系统裁决。
+    var isActiveInputSource: Bool { trust.isTrusted }
+
+    func insertTranscript(_ text: String) -> Bool {
+        guard !text.isEmpty, trust.isTrusted else { return false }
+        // 按下时查过一次，这里再查一次：转写要花一秒上下，其间授权完全可能被撤销。
+        // 与 IMETranscriptSink.insertTranscript 的双查是同一个理由。
+        guard let source = CGEventSource(stateID: .combinedSessionState) else { return false }
+
+        for chunk in Self.chunks(of: text) {
+            // virtualKey 取 0：我们不是在模拟某个物理键，键码没有意义，
+            // 载荷全在 UnicodeString 里。keyDown / keyUp 成对发，缺一半的话
+            // 部分 app（尤其是 Electron）会收不到。
+            guard let down = CGEvent(keyboardEventSource: source, virtualKey: 0, keyDown: true),
+                  let up = CGEvent(keyboardEventSource: source, virtualKey: 0, keyDown: false)
+            else { return false }
+
+            var utf16 = Array(chunk.utf16)
+            down.keyboardSetUnicodeString(stringLength: utf16.count, unicodeString: &utf16)
+            up.keyboardSetUnicodeString(stringLength: utf16.count, unicodeString: &utf16)
+
+            down.post(tap: .cgAnnotatedSessionEventTap)
+            up.post(tap: .cgAnnotatedSessionEventTap)
+        }
+        return true
+    }
+
+    /// 按 UTF-16 长度切片，但**不切开代理对**（emoji、部分罕用汉字都是一对两个 code unit）。
+    /// 按 `Character` 累加就天然不会切开，代价是分片可能略短于上限 —— 无所谓。
+    static func chunks(of text: String) -> [String] {
+        var result: [String] = []
+        var current = ""
+        var length = 0
+        for character in text {
+            let width = String(character).utf16.count
+            if length + width > chunkSize, !current.isEmpty {
+                result.append(current)
+                current = ""
+                length = 0
+            }
+            current.append(character)
+            length += width
+        }
+        if !current.isEmpty { result.append(current) }
+        return result
+    }
+}
+
+/// 主路 + 退路的组合接缝。**这是「不是当前输入源时也能听写」开关的全部实现。**
+///
+/// 规则只有两条，两条都重要：
+/// 1. **主路永远优先。** MarmotIM 是当前输入源且有落点时走 `IMETranscriptSink`，
+///    与开关无关。那条路不需要任何授权、插入位置精确、行为和候选上屏完全一致 ——
+///    没有任何理由用退路去换它。
+/// 2. **退路要开关和授权同时成立。** 开关关着（默认）时本类退化成主路本身，
+///    一行新代码都不参与决策；开关开着但没给辅助功能授权时同样无操作。
+///    打开开关本身不会让任何事情变得能用，这一点在设置页里也是这么说的。
+///
+/// **失效方向变了，所以默认必须是关的。** 主路失效的样子是「听写从来不工作」；
+/// 退路失效的样子是「文字出现在别人的输入框里」。后者是决策 3 当初要挡的那件事。
+/// 把它做成用户显式打开的一档，是把这个选择还给用户，而不是替他做主。
+final class FallbackTranscriptSink: TranscriptInserting {
+
+    private let primary: TranscriptInserting
+    private let fallback: TranscriptInserting
+    private let isFallbackEnabled: () -> Bool
+
+    init(primary: TranscriptInserting,
+         fallback: TranscriptInserting,
+         isFallbackEnabled: @escaping () -> Bool) {
+        self.primary = primary
+        self.fallback = fallback
+        self.isFallbackEnabled = isFallbackEnabled
+    }
+
+    /// 按下那一刻的判据：两条路有一条能走就录。
+    ///
+    /// `||` 的短路顺序是有意的 —— 主路可用时根本不去查辅助功能授权，
+    /// 关着开关的用户不会因为这个功能多出一次 `AXIsProcessTrusted` 调用。
+    var isActiveInputSource: Bool {
+        if primary.isActiveInputSource { return true }
+        return isFallbackEnabled() && fallback.isActiveInputSource
+    }
+
+    func insertTranscript(_ text: String) -> Bool {
+        // 主路自己会再查一次输入源，插不进去就返回 false —— 这里不重复判断它的判据，
+        // 否则「能不能插」这件事就有了两份可能失配的定义。
+        if primary.insertTranscript(text) { return true }
+        guard isFallbackEnabled() else { return false }
+        return fallback.insertTranscript(text)
+    }
+}
+
 // MARK: - 真实 HUD
 
 /// HUD 的绘制端。抽出来是为了让上面那层（主线程投递、自动消失、兜底关闭）
@@ -957,7 +1110,16 @@ extension TranscribeCoordinator {
             recorder: AudioRecorder(config: config),
             health: health,
             config: config,
-            inserter: IMETranscriptSink(),
+            // 主路仍是 IMETranscriptSink，一字未改。退路只在用户把
+            // 「不是当前输入源时也能听写」打开、且给了辅助功能授权时才参与 ——
+            // 开关默认关闭，所以缺省行为与本包装存在之前完全一致。
+            //
+            // 开关每次都从 config() 现读，不在装配时取一次快照：设置页改完即时生效，
+            // 与其它转写项一致（那些走 .transcribeConfigDidChange 重配，这一项不必）。
+            inserter: FallbackTranscriptSink(
+                primary: IMETranscriptSink(),
+                fallback: SynthesizedKeystrokeSink(),
+                isFallbackEnabled: { config().worksWhenInactive }),
             hud: TranscribeHUD(renderer: TranscribeHUDWindow(),
                                watchdog: { TranscribeCoordinator.watchdogSeconds(for: config()) }),
             hotwords: hotwords)

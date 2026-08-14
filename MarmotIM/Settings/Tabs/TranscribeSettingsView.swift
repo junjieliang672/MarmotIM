@@ -312,6 +312,10 @@ final class TranscribeSettingsModel: ObservableObject {
 
     @Published private(set) var microphone: MicrophonePermission
 
+    /// 辅助功能授权。只有「不是当前输入源时也能听写」这一档需要它 ——
+    /// 关着开关的人不该看见它，也不该被它引去开一个用不上的权限。
+    @Published private(set) var accessibilityTrusted: Bool
+
     /// 最近一次健康探测的结果。nil ＝ 还没探出结论，界面显示「尚未检查」而不是猜一个状态
     /// （监视器的初始快照是 `.loading`，直接显示它等于把「还没问」说成「启动中」）。
     @Published private(set) var health: ASRHealthSnapshot?
@@ -332,28 +336,88 @@ final class TranscribeSettingsModel: ObservableObject {
     @Published private(set) var isServerRestarting = false
     private var restartObserver: NSObjectProtocol?
 
+    /// 辅助功能授权变化的两个观察点。
+    ///
+    /// 只在 `onAppear` 读一次是不够的：用户点「去授权」时设置窗口**是开着的**，
+    /// 授权动作发生在另一个 app 里，回来时这一页仍在显示授权前的结论 ——
+    /// 于是「我明明已经授权了，它还说未授权」。那是这一格最容易被当成 bug 的样子，
+    /// 而它确实就是个 bug。
+    ///
+    /// · `com.apple.accessibility.api` 是系统在授权表变动时发的**分布式**通知
+    ///   （跨进程，所以必须走 `DistributedNotificationCenter`）。它不带载荷，
+    ///   收到就重读一次。
+    /// · 应用重新激活时再读一次兜底：分布式通知的投递时机没有文档保证，而
+    ///   「从系统设置切回来」是这条路径上必然发生的一步。
+    private var accessibilityObserver: NSObjectProtocol?
+    private var appActivationObserver: NSObjectProtocol?
+
     private let permission: MicrophonePermissionProviding
     private let healthProbe: TranscribeHealthProbing
+    private let accessibility: AccessibilityTrusting
 
     init(permission: MicrophonePermissionProviding = SystemMicrophonePermission(),
-         healthProbe: TranscribeHealthProbing = MonitorHealthProbe()) {
+         healthProbe: TranscribeHealthProbing = MonitorHealthProbe(),
+         accessibility: AccessibilityTrusting = SystemAccessibilityTrust()) {
         self.permission = permission
         self.healthProbe = healthProbe
+        self.accessibility = accessibility
         self.microphone = permission.currentStatus()
+        self.accessibilityTrusted = accessibility.isTrusted
         restartObserver = NotificationCenter.default.addObserver(
             forName: .transcribeServerRestarting, object: nil, queue: .main
         ) { [weak self] _ in
             self?.isServerRestarting = true
         }
+        accessibilityObserver = DistributedNotificationCenter.default().addObserver(
+            forName: NSNotification.Name("com.apple.accessibility.api"), object: nil, queue: .main
+        ) { [weak self] _ in
+            // 通知到达与 AXIsProcessTrusted 开始改口之间有一小段窗口，立刻读会读到旧值。
+            // 迟一点再读一次，两次都读 —— 读一次 AXIsProcessTrusted 是廉价的。
+            self?.refreshAccessibility()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { self?.refreshAccessibility() }
+        }
+        appActivationObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            self?.refreshAccessibility()
+        }
     }
 
     deinit {
         if let restartObserver { NotificationCenter.default.removeObserver(restartObserver) }
+        if let appActivationObserver { NotificationCenter.default.removeObserver(appActivationObserver) }
+        if let accessibilityObserver {
+            DistributedNotificationCenter.default().removeObserver(accessibilityObserver)
+        }
     }
 
     /// 重新读取权限状态。窗口打开时调用 —— 用户可能刚在「系统设置」里改过。
     func refresh() {
         microphone = permission.currentStatus()
+        refreshAccessibility()
+    }
+
+    /// 只重读辅助功能这一项。授权变化的通知与应用激活都只关心它，
+    /// 顺带把麦克风也查一遍没有害处，但会让「谁触发了什么」在日志里糊成一片。
+    func refreshAccessibility() {
+        accessibilityTrusted = accessibility.isTrusted
+    }
+
+    /// 弹一次辅助功能授权引导窗。
+    ///
+    /// 系统这个弹窗只是把用户送到「系统设置」，**授权结果不会回调**，而且新授权通常
+    /// 要重启进程才对本进程生效。所以这里不轮询、不假装能等到结果，只在下一次
+    /// `refresh()`（重开设置窗口）时重新读一遍。界面上也是这么写给用户看的。
+    func promptForAccessibility() {
+        accessibility.promptForTrust()
+    }
+
+    /// 打开「系统设置 › 隐私与安全性 › 辅助功能」。
+    func openAccessibilitySettings() {
+        guard let url = URL(string:
+            "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")
+        else { return }
+        NSWorkspace.shared.open(url)
     }
 
     /// 触发系统授权弹窗（仅在未决定态有意义）。
@@ -470,6 +534,61 @@ struct TranscribeSettingsView: View {
             Text("该手势暂不支持自定义。")
                 .font(.caption)
                 .foregroundColor(.secondary)
+
+            Divider()
+
+            Toggle(isOn: $viewModel.config.transcribe.worksWhenInactive) {
+                Text("不是当前输入源时也能听写")
+            }
+            .onChange(of: viewModel.config.transcribe.worksWhenInactive) { _ in
+                model.persist(viewModel)
+                // 刚打开时把授权状态重读一遍：用户可能上次开过又关了，
+                // 下面那行提示必须说的是现在的实情。
+                model.refresh()
+            }
+
+            Text("默认关闭。关闭时，只有土拨鼠是当前输入源、且光标停在能收字的地方，"
+                 + "长按右 Command 才有反应 —— 其余情况整条无操作。")
+                .font(.caption)
+                .foregroundColor(.secondary)
+
+            if viewModel.config.transcribe.worksWhenInactive {
+                // 只在开着时展开。这一档的代价必须写在它自己旁边，而不是藏在文档里。
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("打开后，土拨鼠不是当前输入源时改用合成键盘事件把文字送到当前焦点。"
+                         + "土拨鼠自己能上屏时仍走原来那条路，行为不变。")
+
+                    HStack {
+                        Text("辅助功能：")
+                            .frame(width: 80, alignment: .trailing)
+                        Image(systemName: model.accessibilityTrusted
+                              ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                            .foregroundColor(model.accessibilityTrusted ? .green : .orange)
+                        Text(model.accessibilityTrusted ? "已授权" : "未授权")
+
+                        if !model.accessibilityTrusted {
+                            Button("去授权") { model.promptForAccessibility() }
+                                .padding(.leading, 4)
+                            Button("打开系统设置") { model.openAccessibilitySettings() }
+                        }
+                        Spacer()
+                    }
+                    .font(.body)
+
+                    if !model.accessibilityTrusted {
+                        // 说清楚「开关开着但仍然没用」不是坏了。这是最容易被当成 bug 的一格。
+                        Text("没有这个授权，合成键盘事件会被系统丢弃，这个开关不起任何作用。"
+                             + "授权后通常需要重新登录（或重启输入法）才对本进程生效。")
+                            .foregroundColor(.orange)
+                    }
+
+                    Text("代价：文字会插进系统认定的当前焦点，土拨鼠无从核对那是不是你想要的输入框。"
+                         + "密码框等安全输入场合系统会直接丢弃事件，这是刻意不去绕开的。")
+                }
+                .font(.caption)
+                .foregroundColor(.secondary)
+                .padding(.leading, 20)
+            }
         }
     }
 

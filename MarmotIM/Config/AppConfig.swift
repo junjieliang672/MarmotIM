@@ -204,6 +204,20 @@ struct TranscribeConfig: Codable, Equatable {
     /// Hold duration before recording starts, so a quick tap does nothing (决策 1)
     var holdThresholdMilliseconds: Int = 250
 
+    /// 不是当前输入源时也允许听写。默认关闭。
+    ///
+    /// 关闭时（决策 3 的原样行为）：只有 MarmotIM 是当前键盘输入源、且有活跃的
+    /// `InputController` 时长按才有反应，文字走候选上屏那条路插进去。
+    ///
+    /// 打开时：上面那条路仍然优先；只有走不通时才退到合成键盘事件
+    /// （`CGEventKeyboardSetUnicodeString`）。这条退路**需要辅助功能授权**，
+    /// 没授权就还是无操作 —— 打开这个开关本身不会让任何事情变得能用。
+    ///
+    /// 代价写在这里而不是只写在设置页里：这一项把失效方向翻了个面。关闭时它坏了的
+    /// 样子是「听写从来不工作」，打开时是「文字出现在别人的输入框里」。所以它默认关闭，
+    /// 而且退路只在主路走不通时才用。
+    var worksWhenInactive: Bool = false
+
     // MARK: - 服务端项目
     //
     // 下面三项**不是**客户端行为，它们通过 POST /reconfigure 下发给本机服务，
@@ -227,7 +241,49 @@ struct TranscribeConfig: Codable, Equatable {
     /// Strip ONE trailing 。/ . / ，from the transcript (决策 5)
     var stripTrailingPunctuation: Bool = true
 
+    /// 声明 `init(from:)` 会顶掉编译器合成的逐成员构造器，而全部属性都有默认值，
+    /// 所以这里补一个空构造器就够了 —— 逐成员那份没有任何调用方（查过）。
+    init() {}
+
     static let `default` = TranscribeConfig()
+
+    // MARK: - Resilient Decoding
+
+    /// 与 `AppConfig.init(from:)` 同样的容错，只是低一层。
+    ///
+    /// **为什么必须有。** `AppConfig` 那份注释说得很清楚：容错解码是为了「字段增删
+    /// 之后配置不会被重置」。但它对本结构体只做了一次
+    /// `(try? container.decode(TranscribeConfig.self, …)) ?? d.transcribe` ——
+    /// 而合成的 `init(from:)` 对缺失的键是**抛错**的，属性上的默认值不参与解码
+    /// （实测：`keyNotFound`，不是回退到默认值）。两者合起来的效果是：只要给本结构体
+    /// 加一个字段，旧版本写下的 `config.json` 就整块解码失败，于是主机、端口、模型、
+    /// 热词、以及用户改过的一切**一起悄悄回到默认值** —— 上层的 `??` 把异常吞掉了，
+    /// 没有任何地方会报错。
+    ///
+    /// 所以这里逐字段 `decodeIfPresent`。加 `worksWhenInactive` 是第一次踩到它，
+    /// 但这个坑对之前每一次字段增补都成立，写在这里一次性了结。
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let d = TranscribeConfig()
+
+        enabled = (try? container.decode(Bool.self, forKey: .enabled)) ?? d.enabled
+        host = (try? container.decode(String.self, forKey: .host)) ?? d.host
+        port = (try? container.decode(Int.self, forKey: .port)) ?? d.port
+        modelVariant = (try? container.decode(TranscribeModelVariant.self, forKey: .modelVariant)) ?? d.modelVariant
+        language = (try? container.decode(TranscribeLanguage.self, forKey: .language)) ?? d.language
+        hotwords = (try? container.decode(String.self, forKey: .hotwords)) ?? d.hotwords
+        // maxNewTokens 是 Optional，nil 是一个有意义的取值（"自动"）。缺键、显式 null、
+        // 解不动，三种情况都落到 d.maxNewTokens —— 它本身就是 nil，所以结论一致。
+        maxNewTokens = (try? container.decode(Int.self, forKey: .maxNewTokens)) ?? d.maxNewTokens
+        requestTimeoutSeconds = (try? container.decode(Double.self, forKey: .requestTimeoutSeconds)) ?? d.requestTimeoutSeconds
+        maxRecordingSeconds = (try? container.decode(Double.self, forKey: .maxRecordingSeconds)) ?? d.maxRecordingSeconds
+        holdThresholdMilliseconds = (try? container.decode(Int.self, forKey: .holdThresholdMilliseconds)) ?? d.holdThresholdMilliseconds
+        worksWhenInactive = (try? container.decode(Bool.self, forKey: .worksWhenInactive)) ?? d.worksWhenInactive
+        minAudioSeconds = (try? container.decode(Double.self, forKey: .minAudioSeconds)) ?? d.minAudioSeconds
+        maxAudioSeconds = (try? container.decode(Double.self, forKey: .maxAudioSeconds)) ?? d.maxAudioSeconds
+        logLevel = (try? container.decode(String.self, forKey: .logLevel)) ?? d.logLevel
+        stripTrailingPunctuation = (try? container.decode(Bool.self, forKey: .stripTrailingPunctuation)) ?? d.stripTrailingPunctuation
+    }
 }
 
 // MARK: - Default Punctuation Mapping

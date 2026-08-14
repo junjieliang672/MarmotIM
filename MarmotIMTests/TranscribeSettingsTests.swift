@@ -76,6 +76,51 @@ final class TranscribeSettingsTests: XCTestCase {
         XCTAssertEqual(decoded.transcribe, TranscribeConfig.default)
     }
 
+    /// 一份**有** `transcribe` 键、但缺了后加字段的旧配置，必须逐字段回退，
+    /// 而不是整块丢掉。
+    ///
+    /// 这条盯的是一个会静默吃掉用户设置的坑：`TranscribeConfig` 原先用合成的
+    /// `Codable`，而合成解码器对缺键是抛错的（属性默认值不参与解码）。上层
+    /// `AppConfig.init(from:)` 又用 `(try? …) ?? d.transcribe` 把异常吞掉 ——
+    /// 于是每加一个字段，旧用户改过的主机、端口、模型、热词会一起悄悄回到默认值，
+    /// 而且没有任何地方会报错。`worksWhenInactive` 是第一个踩到它的字段。
+    func testConfigFromAnOlderBuildKeepsItsTranscribeSettingsWhenAFieldIsAdded() throws {
+        // 一份不含 worksWhenInactive 的 transcribe 块，其余项都被用户改过。
+        let legacy = """
+        {"transcribe": {"enabled": true, "host": "127.0.0.1", "port": 51234,
+                        "modelVariant": "mlx-community/Qwen3-ASR-0.6B-bf16",
+                        "language": "zh", "hotwords": "土拨鼠 五笔",
+                        "requestTimeoutSeconds": 30.0, "maxRecordingSeconds": 200.0,
+                        "holdThresholdMilliseconds": 400, "minAudioSeconds": 0.5,
+                        "maxAudioSeconds": 250.0, "logLevel": "debug",
+                        "stripTrailingPunctuation": false}}
+        """.data(using: .utf8)!
+
+        let decoded = try JSONDecoder().decode(AppConfig.self, from: legacy).transcribe
+
+        XCTAssertFalse(decoded.worksWhenInactive,
+                       "缺失的新字段应当取默认值（关闭）")
+        // 逐项核对，不是抽查：这条用例的全部意义就是"其余的一个都没丢"。
+        XCTAssertTrue(decoded.enabled)
+        XCTAssertEqual(decoded.port, 51234, "用户改过的端口不得被重置")
+        XCTAssertEqual(decoded.modelVariant, .qwen0_6B_bf16)
+        XCTAssertEqual(decoded.language, .chinese)
+        XCTAssertEqual(decoded.hotwords, "土拨鼠 五笔")
+        XCTAssertEqual(decoded.requestTimeoutSeconds, 30.0)
+        XCTAssertEqual(decoded.maxRecordingSeconds, 200.0)
+        XCTAssertEqual(decoded.holdThresholdMilliseconds, 400)
+        XCTAssertEqual(decoded.minAudioSeconds, 0.5)
+        XCTAssertEqual(decoded.maxAudioSeconds, 250.0)
+        XCTAssertEqual(decoded.logLevel, "debug")
+        XCTAssertFalse(decoded.stripTrailingPunctuation)
+    }
+
+    /// 新开关默认必须是关的 —— 它把失效方向从"听写不工作"翻成"文字进了别人的输入框"。
+    func testWorksWhenInactiveDefaultsToOff() {
+        XCTAssertFalse(TranscribeConfig.default.worksWhenInactive)
+        XCTAssertFalse(AppConfig.default.transcribe.worksWhenInactive)
+    }
+
     // MARK: - validate()
 
     func testValidateClampsOutOfRangeValues() {

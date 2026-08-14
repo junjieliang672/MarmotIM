@@ -32,7 +32,7 @@
 # What this script DOES modify:
 #   - dict/dictionary.db       (rebuilt from vocab/ source)
 #   - build/**                 (xcodebuild output)
-#   - /Library/Input Methods/MarmotIM.app  (sudo cp + codesign)
+#   - /Library/Input Methods/MarmotIM.app  (sudo cp; the bundle keeps Xcode's signature)
 #   - with --all ONLY, everything scripts/install_asr.sh modifies:
 #     ~/Library/Application Support/MarmotIM/asr/, ~/.cache/huggingface/hub/,
 #     ~/Library/LaunchAgents/com.marmotim.asr.plist, ~/Library/Logs/MarmotIM/.
@@ -154,34 +154,120 @@ echo "Injecting dictionary.db into App Bundle..."
 mkdir -p "build/MarmotIM.app/Contents/Resources"
 cp -f "dict/dictionary.db" "build/MarmotIM.app/Contents/Resources/"
 
+# Step 4b: Re-seal the bundle, AS YOU, BEFORE it is installed.
+#
+# Two separate reasons this sits here and not after the install:
+#
+# 1. The injection above modified a signed bundle, so its seal is now broken:
+#      a sealed resource is missing or invalid
+#      file modified: .../Contents/Resources/dictionary.db
+#    Xcode signs at the end of its build; the dictionary lands afterwards. The old
+#    ad-hoc `--sign -` was silently re-sealing this too — that, not habit alone, is
+#    why a re-sign existed here at all. (Observed 2026-08-13 by removing it: the
+#    installed bundle failed verification.)
+#
+# 2. Signing MUST NOT run under sudo. The identity's private key lives in YOUR login
+#    keychain, which root cannot read, so `sudo codesign` fails with:
+#      Warning: unable to build chain to self-signed root for signer "Apple Development: …"
+#      errSecInternalComponent
+#    (Also observed 2026-08-13, one round after the seal problem.) Signing before the
+#    install sidesteps it entirely: `sudo cp -r` preserves the signature, so root only
+#    ever copies an already-valid bundle instead of trying to produce one.
+#
+# Everything Xcode put on the signature has to be restated, because `--force --sign`
+# replaces it wholesale:
+#   --entitlements  entitlements are DROPPED otherwise. This is what the 2026-08-12
+#                   note found impossible on the ad-hoc path: the restricted iCloud keys
+#                   need a provisioning profile, and a real identity has one. The profile
+#                   itself (Contents/embedded.provisionprofile) survives untouched.
+#   -o runtime      hardened runtime is NOT inherited. Dropping it would silently undo
+#                   the microphone entitlement's reason for existing.
+# `--deep` is deliberately absent: Apple discourages it for signing, and there are no
+# nested binaries here — the failure it would paper over is one worth seeing.
+SIGN_IDENTITY="${MARMOT_SIGN_IDENTITY:-$(security find-identity -v -p codesigning 2>/dev/null \
+    | sed -n 's/.*"\(Apple Development:[^"]*\)".*/\1/p' | head -1)}"
+if [ -z "$SIGN_IDENTITY" ]; then
+    echo "ERROR: no Apple Development codesigning identity found." >&2
+    echo "       Sign in to Xcode with the Apple ID that owns team 6R7CZ58K47, or set" >&2
+    echo "       MARMOT_SIGN_IDENTITY to the identity to use. Without a real identity," >&2
+    echo "       use scripts/build.sh --no-icloud instead of this script." >&2
+    exit 1
+fi
+echo "Re-sealing the bundle as: $SIGN_IDENTITY"
+codesign --force --sign "$SIGN_IDENTITY" \
+    --entitlements MarmotIM/MarmotIM.entitlements \
+    -o runtime \
+    build/MarmotIM.app || {
+    echo "ERROR: re-signing build/MarmotIM.app failed — see the output above." >&2
+    echo "       If this is 'errSecInternalComponent', something re-introduced sudo on" >&2
+    echo "       this call: the signing key is in your login keychain, not root's." >&2
+    exit 1
+}
+
 # Step 5: Install app to /Library/Input Methods
 echo "Installing..."
 sudo rm -rf /Library/Input\ Methods/MarmotIM.app
 sudo cp -r build/MarmotIM.app /Library/Input\ Methods/MarmotIM.app
-# REVERTED 2026-08-12: do NOT pass --entitlements on this ad-hoc re-sign.
+
+# WHY THE SIGNATURE ABOVE IS A REAL IDENTITY AND NOT AD-HOC. (2026-08-13)
 #
-# The attempt was reasonable — a bare `--sign -` replaces Xcode's signature and
-# drops its entitlements, so the dev install had been running iCloud sync while
-# declaring no iCloud entitlements. But restoring them here BREAKS THE APP:
-# `com.apple.developer.icloud-container-identifiers` and `…ubiquity-container-…`
-# are RESTRICTED entitlements that require a real provisioning profile. An
-# ad-hoc signature (`flags=0x2(adhoc)`, `TeamIdentifier=not set`) cannot carry
-# them, so launchd refuses to spawn the process:
+# This step used to run `sudo codesign --force --deep --sign -`, replacing Xcode's
+# Team-ID signature with an ad-hoc one. That single line made the ACCESSIBILITY
+# PERMISSION IMPOSSIBLE TO KEEP, which is what finally forced the change:
 #
-#   Launch failed. NSPOSIXErrorDomain Code=163 "Launchd job spawn failed"
+#   An ad-hoc signature has no team identifier (`flags=0x2(adhoc)`,
+#   `TeamIdentifier=not set`), so TCC can only pin the grant to that build's
+#   cdhash — and `--force --sign -` mints a NEW cdhash on every install. The
+#   grant you gave yesterday no longer matches the binary installed today.
+#   The symptom is maximally confusing: System Settings still shows MarmotIM
+#   ticked under 辅助功能, while `AXIsProcessTrusted()` returns false in the
+#   running process, so 听写 silently does nothing outside the IME path.
+#   Measured 2026-08-13: grant recorded 21:27:54, reinstall at 21:33:14, and the
+#   settings page went back to 未授权 with the tick still showing in System Settings.
 #
-# Observed on the real install, which is why it was not caught earlier: the
-# checklist step that launches the app (§A2/§A4) had been deferred, so nothing
-# ever started the re-signed bundle.
+# Signed with a real identity the grant is pinned to `6R7CZ58K47` + the bundle id, both
+# stable across rebuilds, so it survives every reinstall. Same for the microphone.
 #
-# The missing-entitlements issue is real but is NOT fixable on the ad-hoc dev
-# path — it needs a Developer ID identity, which belongs with a notarized build.
-# Sync works today by other means; leave that alone here.
+# On the two warnings the old comment left here, both of which were correct about
+# the ad-hoc path and neither of which applies now:
 #
-# Also deliberately NOT passing `-o runtime`: hardened runtime is stripped on
-# this path, and enabling it would start enforcing entitlement-gated
-# capabilities on a bundle that declares none (e.g. the microphone).
-sudo codesign --force --deep --sign - /Library/Input\ Methods/MarmotIM.app
+#  · Restricted iCloud entitlements. `…icloud-container-identifiers` and
+#    `…ubiquity-container-…` DO need a real provisioning profile — which is exactly
+#    what the Xcode build produces (`Contents/embedded.provisionprofile`). It was the
+#    ad-hoc re-sign that could not carry them, not this bundle.
+#  · Hardened runtime. Xcode's signature has `flags=0x10000(runtime)`, which the
+#    ad-hoc re-sign stripped, and it does start enforcing entitlement-gated
+#    capabilities. The one this app actually uses is the microphone, so
+#    `com.apple.security.device.audio-input` was added to MarmotIM.entitlements
+#    in the same change. That entitlement is unrestricted and the app is not
+#    sandboxed, so it needs nothing from the developer account.
+#
+# If you ever DO need the ad-hoc path back (no Apple account on the machine), use
+# scripts/build.sh --no-icloud, which drops the entitlements that require a profile
+# in the first place — and accept that Accessibility will not stick across installs.
+#
+# Verify rather than assume: an unsigned or broken bundle here fails to launch with
+# `Launchd job spawn failed`, and a missing team identifier silently reintroduces the
+# permission bug above. Both are cheap to check and expensive to discover by hand.
+#
+# Verification needs no sudo — /Library/Input Methods is world-readable, and unlike
+# signing it does not touch a keychain. Checking the INSTALLED copy rather than the
+# one we just signed is the point: it is the only thing that proves `sudo cp -r`
+# preserved the signature.
+if ! codesign --verify --strict /Library/Input\ Methods/MarmotIM.app 2>/dev/null; then
+    echo "ERROR: the installed bundle failed signature verification." >&2
+    echo "       The copy did not preserve the signature, or something modified the" >&2
+    echo "       bundle after step 4b re-sealed it." >&2
+    exit 1
+fi
+INSTALLED_TEAM=$(codesign -dv /Library/Input\ Methods/MarmotIM.app 2>&1 | sed -n 's/^TeamIdentifier=//p')
+if [ -z "$INSTALLED_TEAM" ] || [ "$INSTALLED_TEAM" = "not set" ]; then
+    echo "WARNING: the installed bundle has no team identifier." >&2
+    echo "         Accessibility and microphone grants will NOT survive the next install:" >&2
+    echo "         TCC can only pin them to this build's cdhash. See the comment above." >&2
+else
+    echo "OK: signed by team $INSTALLED_TEAM (permissions survive reinstalls)."
+fi
 
 # Step 6: Start
 echo "Starting..."
@@ -221,7 +307,10 @@ echo "iCloud sync state markers auto-create on first sync after install."
 echo ""
 echo "To verify what actually landed in /Library/Input Methods:"
 echo "  codesign -dv --entitlements - '/Library/Input Methods/MarmotIM.app'"
-echo "  # expect: flags=0x2(adhoc), and both com.apple.developer.icloud-* keys listed."
+echo "  # expect: TeamIdentifier=6R7CZ58K47, flags=0x10000(runtime), both"
+echo "  # com.apple.developer.icloud-* keys, and com.apple.security.device.audio-input."
+echo "  # A 'not set' team identifier means the ad-hoc re-sign came back and"
+echo "  # Accessibility / microphone grants will break on the next install."
 echo ""
 echo "Deliberately NOT suggesting 'log stream' here: on this machine bare 'log' is"
 echo "shadowed by a zsh function that errors out, and MarmotIM's NSLog payloads render"
@@ -238,9 +327,37 @@ echo ""
 echo "======================================================================"
 ASR_STATUS="skipped"
 if [ "$WITH_ASR" -eq 0 ]; then
-    echo "Input method only. Dictation needs a local ASR server, which was NOT installed."
-    echo "To add it:  bash scripts/build_and_install.sh --all"
-    echo "        or: bash scripts/install_asr.sh"
+    # Report what IS, not what this run did.
+    #
+    # This branch used to print "Dictation needs a local ASR server, which was NOT
+    # installed" and then tell you to run --all — to everyone, including people whose
+    # server was installed, loaded and answering. Telling someone to install what they
+    # already have is worse than saying nothing: it reads as a regression the script
+    # just caused, and the suggested remedy re-runs a 4 GB provisioning path for no
+    # reason. "This run did not touch it" and "it is not there" are different claims,
+    # and only the second one warrants that advice.
+    #
+    # Cheap enough to always check: a plist read and one loopback request with a short
+    # timeout. Neither can start anything, so this stays a pure observation — the
+    # opt-in property of ASR provisioning is unaffected.
+    ASR_PLIST="$HOME/Library/LaunchAgents/com.marmotim.asr.plist"
+    if [ -f "$ASR_PLIST" ]; then
+        ASR_PORT="$(plutil -extract EnvironmentVariables.MARMOT_ASR_PORT raw -o - "$ASR_PLIST" 2>/dev/null || echo "")"
+        if [ -n "$ASR_PORT" ] && curl -fsS --max-time 2 "http://127.0.0.1:$ASR_PORT/health" > /dev/null 2>&1; then
+            echo "Input method only — the ASR server was left alone (it is installed and answering"
+            echo "on 127.0.0.1:$ASR_PORT). Dictation keeps working; nothing to do."
+            ASR_STATUS="untouched"
+        else
+            echo "Input method only — the ASR server was left alone. It is installed, but it is"
+            echo "NOT answering right now, so dictation will fail until it is back."
+            echo "To bring it up:  bash scripts/install_asr.sh"
+            ASR_STATUS="untouched-down"
+        fi
+    else
+        echo "Input method only. Dictation needs a local ASR server, which is NOT installed."
+        echo "To add it:  bash scripts/build_and_install.sh --all"
+        echo "        or: bash scripts/install_asr.sh"
+    fi
 elif [ ! -f "scripts/install_asr.sh" ]; then
     # Not fatal for the same reason as any other ASR failure: the IME is installed.
     echo "WARNING: scripts/install_asr.sh is missing — skipping ASR provisioning." >&2
@@ -275,7 +392,11 @@ echo ""
 echo "Input method: INSTALLED (/Library/Input Methods/MarmotIM.app)"
 case "$ASR_STATUS" in
     ok)      echo "ASR server:   RUNNING  (loopback, launchctl gui/$UID/com.marmotim.asr)" ;;
-    skipped) echo "ASR server:   NOT INSTALLED  (pass --all to provision it)" ;;
+    # Three outcomes, not one: this run provisioned nothing in all three, but the state
+    # it declined to touch is different in each, and so is what the operator should do.
+    untouched)      echo "ASR server:   RUNNING  (untouched by this run)" ;;
+    untouched-down) echo "ASR server:   INSTALLED BUT NOT ANSWERING  (bash scripts/install_asr.sh)" ;;
+    skipped)        echo "ASR server:   NOT INSTALLED  (pass --all to provision it)" ;;
     failed)
         echo "ASR server:   FAILED — see the output above." >&2
         echo ""

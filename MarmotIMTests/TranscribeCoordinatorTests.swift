@@ -638,6 +638,141 @@ final class TranscribeCoordinatorTests: XCTestCase {
         XCTAssertFalse(sink.insertTranscript("没有落点"))
     }
 
+    // MARK: - 「不是当前输入源时也能听写」
+
+    /// 开关关着时（缺省），组合接缝必须与 `IMETranscriptSink` 逐字节同行为。
+    ///
+    /// 这条是整个功能的安全底线：默认配置下新代码一行都不该改变结论。退路的接缝
+    /// 被造出来了，但既不参与判据也不接收文本。
+    func testFallbackIsCompletelyInertWhileTheSwitchIsOff() {
+        let primary = fakeSink(active: false)
+        let fallback = fakeSink(active: true)   // 退路本身完全可用
+        let sink = FallbackTranscriptSink(primary: primary, fallback: fallback,
+                                          isFallbackEnabled: { false })
+
+        XCTAssertFalse(sink.isActiveInputSource,
+                       "开关关着时，退路可用与否都不该让长按有反应")
+        XCTAssertFalse(sink.insertTranscript("不该出现"))
+        XCTAssertEqual(fallback.inserted, [], "开关关着时退路一个字都不能收到")
+    }
+
+    /// 开关开着，但没有辅助功能授权 —— 仍然整条无操作。
+    ///
+    /// 「打开开关本身不会让任何事情变得能用」是设置页写给用户的原话，这里把它钉死。
+    func testFallbackStaysInertWithoutAccessibilityEvenWhenTheSwitchIsOn() {
+        let primary = fakeSink(active: false)
+        let fallback = fakeSink(active: false)  // 未授权
+        let sink = FallbackTranscriptSink(primary: primary, fallback: fallback,
+                                          isFallbackEnabled: { true })
+
+        XCTAssertFalse(sink.isActiveInputSource)
+        XCTAssertFalse(sink.insertTranscript("不该出现"))
+        XCTAssertEqual(fallback.inserted, [])
+    }
+
+    /// 开关开着且已授权，而 IME 那条路走不通 —— 这才是这个功能存在的理由。
+    func testFallbackTakesOverWhenTheIMEPathIsUnavailable() {
+        let primary = fakeSink(active: false)
+        let fallback = fakeSink(active: true)
+        let sink = FallbackTranscriptSink(primary: primary, fallback: fallback,
+                                          isFallbackEnabled: { true })
+
+        XCTAssertTrue(sink.isActiveInputSource, "退路可用就应当开始录音")
+        XCTAssertTrue(sink.insertTranscript("退路上屏"))
+        XCTAssertEqual(fallback.inserted, ["退路上屏"])
+        XCTAssertEqual(primary.inserted, [], "主路走不通，不该假装插进去了")
+    }
+
+    /// 主路可用时永远走主路，与开关无关。
+    ///
+    /// 退路需要授权、插入位置无从核对、密码框下会被吞 —— 每一条都比主路弱，
+    /// 所以主路能走时用退路是纯粹的退步。
+    func testPrimaryWinsWheneverItIsAvailableRegardlessOfTheSwitch() {
+        for switchOn in [true, false] {
+            let primary = fakeSink(active: true)
+            let fallback = fakeSink(active: true)
+            let sink = FallbackTranscriptSink(primary: primary, fallback: fallback,
+                                              isFallbackEnabled: { switchOn })
+
+            XCTAssertTrue(sink.isActiveInputSource, "switchOn=\(switchOn)")
+            XCTAssertTrue(sink.insertTranscript("主路上屏"), "switchOn=\(switchOn)")
+            XCTAssertEqual(primary.inserted, ["主路上屏"], "switchOn=\(switchOn)")
+            XCTAssertEqual(fallback.inserted, [],
+                           "主路插成功之后退路不该再收到同一段文字（switchOn=\(switchOn)）—— "
+                           + "那会让文字上两遍")
+        }
+    }
+
+    /// 按下时可用、转写期间授权被撤销 —— 与 `IMETranscriptSink` 那条同源的双查。
+    func testFallbackRefusesIfTheSwitchIsTurnedOffDuringTranscription() {
+        let primary = fakeSink(active: false)
+        let fallback = fakeSink(active: true)
+        var switchOn = true
+        let sink = FallbackTranscriptSink(primary: primary, fallback: fallback,
+                                          isFallbackEnabled: { switchOn })
+
+        XCTAssertTrue(sink.isActiveInputSource)   // 按下那一刻
+        switchOn = false                          // 转写期间用户关掉了开关
+        XCTAssertFalse(sink.insertTranscript("不该出现"))
+        XCTAssertEqual(fallback.inserted, [])
+    }
+
+    /// 合成键盘事件的分片不得切开代理对。
+    ///
+    /// emoji 和部分罕用汉字在 UTF-16 里是一对两个 code unit，按 code unit 硬切会把
+    /// 一个字劈成两个非法的半个字符 —— 目标 app 收到的是乱码而不是字。
+    func testSynthesizedKeystrokeChunkingNeverSplitsSurrogatePairs() {
+        let text = String(repeating: "🦫", count: 30) + String(repeating: "字", count: 30)
+        let chunks = SynthesizedKeystrokeSink.chunks(of: text)
+
+        XCTAssertEqual(chunks.joined(), text, "分片重新拼起来必须与原文逐字节相同")
+        for chunk in chunks {
+            XCTAssertLessThanOrEqual(chunk.utf16.count, SynthesizedKeystrokeSink.chunkSize,
+                                     "分片不得超过上限：\(chunk)")
+            XCTAssertFalse(chunk.unicodeScalars.contains { $0.properties.isDefaultIgnorableCodePoint
+                                                           && $0.value == 0xFFFD },
+                           "出现了替换字符，说明有代理对被切开了：\(chunk)")
+        }
+    }
+
+    /// 空串不发事件。`CGEvent` 那套对空载荷的行为没有保证，而空转写本来就该被上游丢掉。
+    func testSynthesizedKeystrokeSinkRefusesEmptyText() {
+        let sink = SynthesizedKeystrokeSink(trust: AlwaysTrusted())
+        XCTAssertFalse(sink.insertTranscript(""))
+    }
+
+    /// 没有授权时连事件都不构造。
+    func testSynthesizedKeystrokeSinkIsInertWithoutTrust() {
+        let sink = SynthesizedKeystrokeSink(trust: NeverTrusted())
+        XCTAssertFalse(sink.isActiveInputSource)
+        XCTAssertFalse(sink.insertTranscript("不该出现"))
+    }
+
+    /// `FakeSink` 是 class，没有逐成员构造器 —— 造完再赋值这一步在每条用例里重复
+    /// 一遍会把用例本身淹掉。
+    ///
+    /// **`accept` 必须跟着 `isActive` 一起设。** `FakeSink` 的两个旋钮是各自独立的，
+    /// 但真实接缝里它们不独立：`IMETranscriptSink` 与 `SynthesizedKeystrokeSink`
+    /// 的 `insertTranscript` 都会先把 `isActiveInputSource` 那套判据重查一遍，
+    /// 不可用就返回 false。只设 `isActive` 会造出一个"不可用却照收不误"的接缝 ——
+    /// 现实中不存在，却足以让这几条用例全部误判。
+    private func fakeSink(active: Bool) -> FakeSink {
+        let sink = FakeSink()
+        sink.isActive = active
+        sink.accept = active
+        return sink
+    }
+
+    private struct AlwaysTrusted: AccessibilityTrusting {
+        var isTrusted: Bool { true }
+        func promptForTrust() {}
+    }
+
+    private struct NeverTrusted: AccessibilityTrusting {
+        var isTrusted: Bool { false }
+        func promptForTrust() {}
+    }
+
     // MARK: - HUD 策略
 
     func testHUDRendersEachStateInTurnAndAlwaysClears() {

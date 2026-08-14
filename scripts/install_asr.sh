@@ -291,7 +291,22 @@ PY
         fail "not enough free disk on $CACHE_ROOT to download $MODEL. Free some space and re-run."
     fi
 
-    step "Downloading $MODEL — expect 15–100 minutes on an unauthenticated connection"
+    # The estimate depends entirely on whether the transfer is authenticated, so ask
+    # rather than assert. This line used to say "unauthenticated" unconditionally, to
+    # anyone, including people whose token was making the download finish in under a
+    # minute — a warning that is wrong most of the time trains you to ignore it.
+    #
+    # get_token() rather than testing $HF_TOKEN here: it is the same resolution
+    # snapshot_download will do, so it also honours HUGGING_FACE_HUB_TOKEN and the
+    # stored login at ~/.cache/huggingface/token. Checking one variable by hand would
+    # reintroduce the same lie for anyone who ran `hf auth login`.
+    if "$VENV_PY" -c 'import sys; from huggingface_hub import get_token; sys.exit(0 if get_token() else 1)' 2>/dev/null; then
+        step "Downloading $MODEL — authenticated, so expect a few minutes"
+    else
+        step "Downloading $MODEL — unauthenticated, so expect 15–100 minutes"
+        say "a Hugging Face token makes this dramatically faster:"
+        say "  export HF_TOKEN=hf_...   (or: '$VENV_DIR/bin/hf' auth login)"
+    fi
     say "progress is per-file; it resumes if interrupted, so a re-run is cheap"
     if ! "$VENV_PY" -u - "$MODEL" <<'PY'
 import sys

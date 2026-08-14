@@ -193,7 +193,8 @@ final class TranscribeDegradedModeTests: XCTestCase {
         let symbols = ["TranscribeCoordinator", "TranscribeHotKey", "AudioRecorder",
                        "ASRHealthMonitor", "ASRClient", "TranscriptPostProcessor",
                        "HotwordContextBuilder", "FrecencyHotwordSupplier",
-                       "IMETranscriptSink", "TranscribeHUD"]
+                       "IMETranscriptSink", "SynthesizedKeystrokeSink",
+                       "FallbackTranscriptSink", "TranscribeHUD"]
         var sites: [String.Index] = []
         for symbol in symbols {
             var searchFrom = code.startIndex

@@ -10,5 +10,15 @@
     <array>
         <string>iCloud.com.marmotim.inputmethod.MarmotIM</string>
     </array>
+    <!-- 麦克风（听写用）。加固运行时（hardened runtime）下访问麦克风需要它。
+         之前不需要，是因为安装脚本用 ad-hoc 重签名把加固运行时整个剥掉了；
+         那个重签名已经去掉（见 scripts/build_and_install.sh 第 5 步），
+         Xcode 的签名带 flags=0x10000(runtime)，于是这一项开始被强制要求。
+
+         这是一个**非受限**权限：不需要 provisioning profile 里有对应条目，
+         也不需要改开发者账号的任何配置。本 app 没有开启 App Sandbox，
+         所以它是这条路上唯一需要补的一项。 -->
+    <key>com.apple.security.device.audio-input</key>
+    <true/>
 </dict>
 </plist>
