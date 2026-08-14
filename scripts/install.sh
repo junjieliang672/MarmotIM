@@ -41,6 +41,17 @@ echo "(需要输入管理员密码)"
 sudo rm -rf "/Library/Input Methods/MarmotIM.app"
 sudo cp -r MarmotIM.app "/Library/Input Methods/"
 sudo chmod +x "/Library/Input Methods/MarmotIM.app/Contents/MacOS/MarmotIM"
+# ad-hoc 签名。这里**只能**这样，但代价必须写明（2026-08-13）：
+#
+#   · 发布包里的 app 是用开发证书构建的，那个证书在别人的机器上过不了 Gatekeeper，
+#     所以这里重签成 ad-hoc。真正的解法是 Developer ID 证书 + 公证，目前没有。
+#   · ad-hoc 会丢掉全部 entitlements，其中包括 com.apple.application-identifier ——
+#     没有它 iCloud Drive 会直接拒绝这个进程，也就是说**通过发布包安装的用户，
+#     iCloud 同步从来就没有工作过**。界面上看不出来：文件照常写进本地容器目录。
+#   · ad-hoc 没有稳定身份，TCC 只能把授权钉在这次构建的 cdhash 上，所以麦克风、
+#     辅助功能的授权在下次安装后就会失效（系统设置里还打着勾）。
+#
+# 想要同步和稳定授权，目前只有从源码装：bash scripts/build_and_install.sh
 sudo codesign --force --deep --sign - "/Library/Input Methods/MarmotIM.app"
 
 # Check if dictionary exists

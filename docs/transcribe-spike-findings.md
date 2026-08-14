@@ -100,8 +100,10 @@ no harness, and is the last thing this goal is waiting on.**
 
 Two details below are superseded by what was actually measured: step 6 predicted
 `AXIsProcessTrusted=YES`, and it came back `NO` with the events still delivered (§5/Q3); and
-`scripts/quick_update.sh` has since been renamed to `scripts/build_and_install.sh` (the old name is
-a shim, so the commands still work).
+`scripts/quick_update.sh` has since been renamed to `scripts/build_and_install.sh`. The old name
+survived for a while as a forwarding shim, but that shim was **deleted on 2026-08-13** — the
+commands in the runbook below have been updated to the new name; references to the old name in
+the findings above are left as written, because that is what was run at the time.
 
 Run top to bottom. Two terminals: **T1** for commands, **T2** tailing the evidence file.
 
@@ -126,7 +128,7 @@ codesign -dv --entitlements - "/Library/Input Methods/MarmotIM.app" 2>&1 | head 
 
 **Step 1 — build + install. This one is not optional.**
 ```sh
-bash scripts/quick_update.sh          # asks for sudo
+bash scripts/build_and_install.sh          # asks for sudo
 ```
 > **Skipping this makes the whole run unreadable.** The installed bundle predates the
 > file-logging fix: measured 2026-08-12, its binary (mtime 16:18) contains 15 `SPIKE` strings and
@@ -205,7 +207,7 @@ SPIKE/Q3: [global] keyCode=0x37 LEFT-COMMAND  DOWN …
 line answers this and the reinstall below is only needed if you want a second data point. Either
 way, do it **without touching System Settings**:
 ```sh
-bash scripts/quick_update.sh
+bash scripts/build_and_install.sh
 killall MarmotIM; sleep 1; open "/Library/Input Methods/MarmotIM.app"
 ```
 - **PASS** — `SPIKE/Q1: authorizationStatus BEFORE request = authorized` on a run whose cdhash is

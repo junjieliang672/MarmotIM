@@ -66,18 +66,32 @@ dictionary build failed, and that is a `tools/build_dictionary.py` problem, not 
 codesign -dv --entitlements - "/Library/Input Methods/MarmotIM.app"
 ```
 
-**Expect:** `flags=0x2(adhoc)`, and an entitlements block listing **both**
-`com.apple.developer.icloud-container-identifiers` and
-`com.apple.developer.icloud-services`.
+**Expect:** `TeamIdentifier=6R7CZ58K47`, `flags=0x10000(runtime)`, and **six** entitlements:
 
-**PASS:** both keys present. This is the whole point of the `--entitlements` argument added
-to the install re-sign — before it, the dev install ran iCloud sync while declaring no iCloud
-entitlements at all.
+| key | why it matters |
+|---|---|
+| `com.apple.application-identifier` | **no iCloud Drive without it** — the daemon refuses the process |
+| `com.apple.developer.team-identifier` | stable TCC identity: 麦克风 / 辅助功能 grants survive reinstalls |
+| `com.apple.developer.icloud-container-identifiers` | the container |
+| `com.apple.developer.ubiquity-container-identifiers` | the container |
+| `com.apple.security.device.audio-input` | microphone under hardened runtime |
+| `com.apple.security.get-task-allow` | dev build only; must never reach a notarized build |
 
-**FAIL:** empty output, or a signature with no entitlements. Then the `--entitlements`
-argument did not do its job on the real `/Library/Input Methods` path, and the revert is a
-single flag: drop `--entitlements MarmotIM/MarmotIM.entitlements` from step 5 of
-`scripts/build_and_install.sh`.
+**PASS:** all six present. `scripts/build_and_install.sh` now checks this itself and refuses to
+finish otherwise, so reaching the end of the script is already most of this check.
+
+**FAIL:** three entitlements and no `application-identifier`. That exact set is what the
+hand-maintained `MarmotIM/MarmotIM.entitlements` produces, i.e. step 4b signed with the source
+file instead of Xcode's generated `.xcent`. iCloud sync is dead in that state, and silently:
+the app keeps writing its JSON files into the container while nothing reaches the cloud.
+The unified log is where it shows up —
+`(CloudDocs) [ERROR] **** bundle <pid> is lacking the 'com.apple.application-identifier' …`
+
+> **Corrected 2026-08-13.** This section previously expected `flags=0x2(adhoc)` and a key named
+> `com.apple.developer.icloud-services`. Both were wrong: the ad-hoc re-sign was removed (it made
+> TCC grants impossible to keep), and this project's `.xcent` has never contained
+> `icloud-services`. As written, the old text would have passed a broken install and failed a
+> correct one.
 
 *Note `-o runtime` is deliberately absent, so no `runtime` flag in that output is correct,
 not a defect.*

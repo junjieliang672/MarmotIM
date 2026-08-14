@@ -90,6 +90,10 @@ echo "(需要输入管理员密码)"
 sudo rm -rf "/Library/Input Methods/MarmotIM.app"
 sudo cp -r MarmotIM.app "/Library/Input Methods/"
 sudo chmod +x "/Library/Input Methods/MarmotIM.app/Contents/MacOS/MarmotIM"
+# ad-hoc 签名 —— 与 scripts/install.sh 同一处取舍，代价见那里的注释。
+# 摘要：ad-hoc 丢掉全部 entitlements，因此**发布包安装的用户没有 iCloud 同步**
+# （缺 com.apple.application-identifier，iCloud Drive 直接拒绝），且麦克风/辅助功能
+# 授权在下次安装后失效。要同步就从源码装：bash scripts/build_and_install.sh
 sudo codesign --force --deep --sign - "/Library/Input Methods/MarmotIM.app"
 
 # Check if dictionary exists

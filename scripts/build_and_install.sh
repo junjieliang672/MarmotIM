@@ -4,8 +4,8 @@
 # relaunches the input method. With --all it also provisions the local ASR
 # server that dictation talks to.
 #
-# Renamed from scripts/quick_update.sh; that name survives as a thin shim which
-# prints this name and delegates here.
+# Renamed from scripts/quick_update.sh. That name survived for a while as a thin
+# forwarding shim; it was deleted on 2026-08-13 once the new name had settled.
 #
 # Usage:
 #   bash scripts/build_and_install.sh                  # input method ONLY. Touches nothing

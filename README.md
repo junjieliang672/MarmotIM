@@ -251,8 +251,7 @@ MarmotIM/
 │   ├── build_and_install.sh  # 构建并安装（开发用，无需注销）；--all 连语音服务一起装
 │   ├── install_asr.sh        # 单独准备语音识别服务（venv / 权重 / LaunchAgent）
 │   ├── com.marmotim.asr.plist # LaunchAgent 模板（开机自启，崩溃自动重启）
-│   ├── quick_update.sh       # 兼容旧名的转发脚本
-│   └── clean_install.sh      # 全新安装（清理旧版本）
+│   └── clean_install.sh      # 全新安装（清理旧版本 + 输入法缓存）
 ├── logo/                    # Logo 资源
 └── .github/workflows/       # CI/CD
 ```

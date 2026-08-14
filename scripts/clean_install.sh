@@ -102,8 +102,18 @@ fi
 echo "Step 7: Installing MarmotIM..."
 if [ -d "$PROJECT_DIR/build/MarmotIM.app" ]; then
     sudo cp -r "$PROJECT_DIR/build/MarmotIM.app" /Library/Input\ Methods/MarmotIM.app
-    sudo codesign --force --deep --sign - /Library/Input\ Methods/MarmotIM.app
-    echo "   Installed to /Library/Input Methods/MarmotIM.app"
+    # Re-sign ONLY in --no-icloud mode — same reasoning as scripts/build.sh, see the long
+    # comment there. In short: this used to run unconditionally and discarded Xcode's
+    # entitlements even in iCloud mode, which kills sync (no com.apple.application-identifier
+    # ⇒ iCloud Drive refuses the process) and breaks TCC grants on every install. Nothing is
+    # injected into the bundle here, so its signature is intact and `sudo cp -r` preserves it.
+    if [ "$NO_ICLOUD" = true ]; then
+        sudo codesign --force --deep --sign - /Library/Input\ Methods/MarmotIM.app
+        echo "   Installed (ad-hoc, --no-icloud): no iCloud sync, and TCC grants will not"
+        echo "   survive the next install."
+    else
+        echo "   Installed to /Library/Input Methods/MarmotIM.app (kept Xcode's signature)"
+    fi
 else
     echo "   ERROR: Build not found at $PROJECT_DIR/build/MarmotIM.app"
     if [ "$NO_ICLOUD" = false ]; then

@@ -121,8 +121,39 @@ sudo rm -rf "$INSTALL_DIR/$APP_NAME.app"
 # Copy new app
 sudo cp -R "$APP_PATH" "$INSTALL_DIR/$APP_NAME.app"
 
-# Sign with ad-hoc signature for local use
-sudo codesign --force --deep --sign - "$INSTALL_DIR/$APP_NAME.app"
+# Re-sign ONLY in --no-icloud mode. (2026-08-13)
+#
+# This used to run unconditionally, including in "Mode: With iCloud" — which meant that
+# branch built an entitled, Team-ID-signed app and then immediately threw all of it away.
+# `codesign --force --deep --sign -` replaces the whole signature: no team identifier, no
+# entitlements, no hardened runtime. The two consequences are both silent:
+#
+#   · No `com.apple.application-identifier` ⇒ iCloud Drive refuses the process and sync
+#     never happens, while the app keeps writing its JSON files locally and looks fine.
+#     (Measured on the sibling script 2026-08-13; see scripts/build_and_install.sh step 4b.)
+#   · Ad-hoc has no stable identity, so TCC pins 麦克风 / 辅助功能 grants to that build's
+#     cdhash and they break on the very next install.
+#
+# Nothing here needs a re-sign: unlike build_and_install.sh this script injects nothing into
+# the bundle after the build, so Xcode's signature is still intact and `sudo cp -R` preserves
+# it. The correct action is simply not to touch it.
+#
+# --no-icloud still re-signs because that mode ALREADY built ad-hoc
+# (CODE_SIGN_IDENTITY="-" CODE_SIGN_ENTITLEMENTS="" above); keeping the call there changes
+# nothing and keeps that path exactly as it was.
+if [ "$NO_ICLOUD" = true ]; then
+    sudo codesign --force --deep --sign - "$INSTALL_DIR/$APP_NAME.app"
+    echo "  ad-hoc signed (--no-icloud): no iCloud sync, and TCC grants will not"
+    echo "  survive the next install. Use scripts/build_and_install.sh for a real signature."
+else
+    # Say what landed, so a silently-unentitled install is visible here too.
+    INSTALLED_TEAM=$(codesign -dv "$INSTALL_DIR/$APP_NAME.app" 2>&1 | sed -n 's/^TeamIdentifier=//p')
+    if [ -z "$INSTALLED_TEAM" ] || [ "$INSTALLED_TEAM" = "not set" ]; then
+        echo "  WARNING: installed bundle has no team identifier — iCloud sync will not work." >&2
+    else
+        echo "  Kept Xcode's signature (team $INSTALLED_TEAM)."
+    fi
+fi
 
 echo "Installed."
 echo ""
