@@ -1276,47 +1276,30 @@ class InputController: IMKInputController {
 
     // MARK: - iCloud Sync Status
 
+    // 状态判定本身住在 `SyncStatusPresenter`（本文件末尾）而不是这里。
+    //
+    // 理由和转写那几层一样：`InputController` 是 `IMKInputController`，测试进程里造不出来
+    // （要真的 IMKServer），所以留在方法里的逻辑等于没有测试。而这里恰恰是最不能靠肉眼
+    // 保证的地方 —— 分支顺序错一次，就是「同步已经坏了三个月，菜单一直写着未同步」。
+
     private func syncStatusText() -> String {
         let sync = iCloudSyncManager.shared
-
-        // iCloud not available
-        guard sync.isICloudAvailable else {
-            return "iCloud 未连接"
-        }
-
-        // Syncing
-        if sync.isSyncing {
-            return "同步中..."
-        }
-
-        // Never synced
-        guard let lastTime = sync.lastSyncTime else {
-            return "未同步"
-        }
-
-        // Sync failed
-        if !sync.lastSyncSuccess {
-            return "同步失败 · 点击重试"
-        }
-
-        // Sync success, show time ago
-        let timeAgo = formatTimeAgo(lastTime)
-        return "已同步 · \(timeAgo)"
+        return SyncStatusPresenter.text(
+            isAvailable: sync.isICloudAvailable,
+            isSyncing: sync.isSyncing,
+            lastSyncTime: sync.lastSyncTime,
+            lastSyncSuccess: sync.lastSyncSuccess,
+            lastSyncError: sync.lastSyncError,
+            timeAgo: { [weak self] in self?.formatTimeAgo($0) ?? "" })
     }
 
     private func syncStatusIcon() -> NSImage? {
         let sync = iCloudSyncManager.shared
-
-        let iconName: String
-        if !sync.isICloudAvailable {
-            iconName = "icloud.slash"
-        } else if sync.isSyncing {
-            iconName = "arrow.triangle.2.circlepath"
-        } else if !sync.lastSyncSuccess {
-            iconName = "exclamationmark.icloud"
-        } else {
-            iconName = "checkmark.icloud"
-        }
+        let iconName = SyncStatusPresenter.iconName(
+            isAvailable: sync.isICloudAvailable,
+            isSyncing: sync.isSyncing,
+            lastSyncSuccess: sync.lastSyncSuccess,
+            lastSyncError: sync.lastSyncError)
 
         let image = NSImage(systemSymbolName: iconName, accessibilityDescription: nil)
         image?.isTemplate = true
@@ -1436,5 +1419,78 @@ final class ActiveInputControllerRegistry {
     func deactivated(_ controller: AnyObject) {
         guard currentObject === controller else { return }
         currentObject = nil
+    }
+}
+
+// MARK: - iCloud 同步状态的呈现
+
+/// 菜单里那一行同步状态：文案 + 图标。
+///
+/// **为什么它是一个独立的、无状态的类型。** 这些分支原本长在 `InputController` 的两个
+/// 私有方法里，而 `InputController` 是 `IMKInputController`，测试进程造不出来 —— 也就是说
+/// 它们一行都没被测过。代价是实打实的：`lastSyncTime` 只在**成功**时被赋值，而
+/// 「从未同步」的判断原先排在「失败」前面，于是一次都没成功过的情形永远显示
+/// 「未同步」，无论失败多少次。2026-08-13 安装脚本丢掉
+/// `com.apple.application-identifier` 之后，iCloud 同步整整死着，菜单上却始终是那句
+/// 听起来无害的「未同步」；最后是靠翻 CloudDocs 的日志才发现的。
+///
+/// 所以判定搬到这里：纯输入、纯输出、没有 IMK，测试可以把每一格都钉住。
+/// `InputController` 只负责把 `iCloudSyncManager` 的状态喂进来、把结果画出去。
+enum SyncStatusPresenter {
+
+    /// 顺序即语义，且**失败必须排在「从未同步」之前** —— 见上面那段。
+    static func text(isAvailable: Bool,
+                     isSyncing: Bool,
+                     lastSyncTime: Date?,
+                     lastSyncSuccess: Bool,
+                     lastSyncError: Error?,
+                     timeAgo: (Date) -> String) -> String {
+        guard isAvailable else { return "iCloud 未连接" }
+        if isSyncing { return "同步中..." }
+        if !lastSyncSuccess { return failureText(lastSyncError) }
+        guard let lastSyncTime else { return "未同步" }
+        return "已同步 · \(timeAgo(lastSyncTime))"
+    }
+
+    static func iconName(isAvailable: Bool,
+                         isSyncing: Bool,
+                         lastSyncSuccess: Bool,
+                         lastSyncError: Error?) -> String {
+        if !isAvailable { return "icloud.slash" }
+        if isSyncing { return "arrow.triangle.2.circlepath" }
+        if !lastSyncSuccess {
+            // 「这条路断了」和「这次没成」是两个图标，与文案共用同一个判据。
+            return isUnrecoverable(lastSyncError) ? "icloud.slash" : "exclamationmark.icloud"
+        }
+        return "checkmark.icloud"
+    }
+
+    /// 把失败原因翻成一句话。
+    ///
+    /// 分档的依据只有一个：**重试有没有用**。`containerNotFound` 是签名/授权问题，
+    /// 点一百次「点击重试」也不会好；把它和一次网络抖动说成同一句话，只会让人一直点。
+    static func failureText(_ error: Error?) -> String {
+        // `as?` 而不是直接 `switch error`：SyncError 带关联值（fileCoordinationFailed），
+        // 不是 Equatable，拿 Error? 直接对枚举 case 做模式匹配编译不过。
+        switch error as? SyncError {
+        case .containerNotFound:
+            // 装出来的包缺 iCloud entitlement 时就是这个。出路是重装
+            // （scripts/build_and_install.sh，它现在会自己把这种包挡下来），不是重试。
+            return "同步不可用 · 权限缺失"
+        case .iCloudNotAvailable:
+            return "iCloud 未登录"
+        default:
+            return "同步失败 · 点击重试"
+        }
+    }
+
+    /// 重试救不回来的失败。
+    static func isUnrecoverable(_ error: Error?) -> Bool {
+        switch error as? SyncError {
+        case .containerNotFound, .iCloudNotAvailable:
+            return true
+        default:
+            return false
+        }
     }
 }

@@ -124,6 +124,46 @@ if [ ! -d "build/MarmotIM.app" ]; then
     exit 1
 fi
 
+# Step 2b: Locate the entitlements XCODE generated for this build.
+#
+# `MarmotIM/MarmotIM.entitlements` is the SOURCE. `MarmotIM.app.xcent` is the PRODUCT:
+# Xcode merges the source file with the provisioning profile and the base entitlements
+# (CODE_SIGN_INJECT_BASE_ENTITLEMENTS) and signs with the RESULT, which additionally
+# carries com.apple.application-identifier, com.apple.developer.team-identifier and
+# com.apple.security.get-task-allow. Step 4b re-signs, so it must use the same product —
+# see the long note there for what signing from the source file cost us.
+#
+# Resolved from build settings rather than hardcoded: the DerivedData directory name is a
+# hash, and `-derivedDataPath` can move the whole tree. TARGET_TEMP_DIR + FULL_PRODUCT_NAME
+# is where ProcessProductPackaging always writes it.
+echo "Locating Xcode's generated entitlements..."
+BUILD_SETTINGS=$(xcodebuild -project MarmotIM.xcodeproj -scheme MarmotIM \
+    -configuration Release -showBuildSettings 2>/dev/null)
+_setting() { printf '%s\n' "$BUILD_SETTINGS" | awk -F' = ' -v k="$1" '$1 ~ "^ *"k"$" {print $2; exit}'; }
+XCENT="$(_setting TARGET_TEMP_DIR)/$(_setting FULL_PRODUCT_NAME).xcent"
+
+# Both checks run BEFORE the first sudo, so a broken signing configuration cannot get as
+# far as touching /Library/Input Methods.
+if [ ! -f "$XCENT" ]; then
+    echo "ERROR: Xcode's generated entitlements (.xcent) were not found at:" >&2
+    echo "       $XCENT" >&2
+    echo "       A signed Release build always produces it, so signing was probably" >&2
+    echo "       disabled for this build. With no entitlements there is no iCloud sync;" >&2
+    echo "       if that is what you want, use scripts/build.sh --no-icloud instead." >&2
+    exit 1
+fi
+# NOTE: `plutil -extract` reads the key as a KEY PATH, so the dots must be escaped or it
+# reports a present key as missing. An unescaped probe here would be a false alarm that
+# aborts every install.
+if ! plutil -extract 'com\.apple\.application-identifier' raw -o - "$XCENT" > /dev/null 2>&1; then
+    echo "ERROR: $XCENT has no com.apple.application-identifier." >&2
+    echo "       iCloud Drive is refused at runtime without it, so installing this would" >&2
+    echo "       ship broken sync. The signing configuration changed — fix that rather" >&2
+    echo "       than relaxing this check." >&2
+    exit 1
+fi
+echo "  $XCENT"
+
 # Step 3: Stop old process
 echo "Stopping old process..."
 # Graceful shutdown: send SIGTERM first to allow proper cleanup (WAL checkpoint, etc.)
@@ -184,6 +224,40 @@ cp -f "dict/dictionary.db" "build/MarmotIM.app/Contents/Resources/"
 #                   the microphone entitlement's reason for existing.
 # `--deep` is deliberately absent: Apple discourages it for signing, and there are no
 # nested binaries here — the failure it would paper over is one worth seeing.
+#
+# THE ENTITLEMENTS COME FROM $XCENT, NOT FROM MarmotIM/MarmotIM.entitlements. (2026-08-13)
+#
+# Signing from the source file is what the first version of this step did, and it KILLED
+# iCLOUD SYNC. The source file lists 3 keys; Xcode's product lists 6, and the three it adds
+# — com.apple.application-identifier, com.apple.developer.team-identifier,
+# com.apple.security.get-task-allow — were silently dropped on every install. Measured
+# consequence, straight out of the unified log:
+#
+#   (CloudDocs) [ERROR] **** bundle <pid> is lacking the 'com.apple.application-identifier'
+#   entitlement which is required to use iCloud Drive ****
+#
+# The app kept writing its five JSON files into the container directory and looked healthy,
+# because writing into ~/Library/Mobile Documents is just file I/O for a non-sandboxed
+# process — but the daemon refuses to sync for a process without that entitlement. Every
+# check this script had still passed: `codesign --verify --strict` was happy, and the
+# team-identifier check was happy too (the SIGNATURE has a team; the ENTITLEMENTS did not).
+# That is why the post-install check below now compares the whole entitlement set.
+#
+# Rejected alternatives, each of which looks simpler and is worse:
+#   · `--preserve-metadata=entitlements`, or dumping the set out of build/MarmotIM.app.
+#     Both re-use whatever is already ON the bundle, which after one bad run is our own
+#     degraded set. When Xcode's CodeSign task is up-to-date it does not re-run, so nothing
+#     would ever correct it: this would have FROZEN the bug while appearing to fix it.
+#   · Hand-adding the two keys to MarmotIM.entitlements. That hardcodes team 6R7CZ58K47
+#     into a checked-in file and fixes only the keys we happen to know about today — the
+#     same failure again, one generation later.
+#
+# get-task-allow rides along deliberately: development identity, development profile,
+# development install, and it is what lets lldb attach under hardened runtime. It must
+# never reach a notarized build — that is scripts/release.sh's path, not this one.
+#
+# Note the .xcent lives in DerivedData, OUTSIDE the bundle, so step 4's dictionary
+# injection cannot contaminate it. That is precisely what keeps inject-then-sign safe.
 SIGN_IDENTITY="${MARMOT_SIGN_IDENTITY:-$(security find-identity -v -p codesigning 2>/dev/null \
     | sed -n 's/.*"\(Apple Development:[^"]*\)".*/\1/p' | head -1)}"
 if [ -z "$SIGN_IDENTITY" ]; then
@@ -195,7 +269,7 @@ if [ -z "$SIGN_IDENTITY" ]; then
 fi
 echo "Re-sealing the bundle as: $SIGN_IDENTITY"
 codesign --force --sign "$SIGN_IDENTITY" \
-    --entitlements MarmotIM/MarmotIM.entitlements \
+    --entitlements "$XCENT" \
     -o runtime \
     build/MarmotIM.app || {
     echo "ERROR: re-signing build/MarmotIM.app failed — see the output above." >&2
@@ -269,6 +343,44 @@ else
     echo "OK: signed by team $INSTALLED_TEAM (permissions survive reinstalls)."
 fi
 
+# ENTITLEMENTS: two checks, on purpose.
+#
+# The team-identifier check above is about the SIGNATURE and says nothing about the
+# entitlements — it passed happily throughout the window where iCloud sync was dead.
+# So: one named check that can explain itself, and one wholesale check that catches
+# whatever we have not thought of.
+INSTALLED_ENTS=$(codesign -d --entitlements - --xml /Library/Input\ Methods/MarmotIM.app 2>/dev/null)
+
+# 1. The specific key iCloud Drive refuses to work without. Dots escaped — see the note
+#    in step 2b; an unescaped key path reports a present key as missing.
+INSTALLED_APPID=$(printf '%s' "$INSTALLED_ENTS" \
+    | plutil -extract 'com\.apple\.application-identifier' raw -o - - 2>/dev/null || true)
+if [ -z "$INSTALLED_APPID" ]; then
+    echo "ERROR: the installed bundle has NO com.apple.application-identifier entitlement." >&2
+    echo "       iCloud Drive is refused without it, and the failure is SILENT: the app" >&2
+    echo "       keeps writing its JSON files into the container and looks healthy while" >&2
+    echo "       nothing ever reaches the cloud. The unified log is where it shows up:" >&2
+    echo "         (CloudDocs) [ERROR] **** bundle <pid> is lacking the" >&2
+    echo "         'com.apple.application-identifier' entitlement ... ****" >&2
+    echo "       Cause has always been the same: step 4b signed with the hand-maintained" >&2
+    echo "       MarmotIM/MarmotIM.entitlements instead of Xcode's generated .xcent." >&2
+    exit 1
+fi
+
+# 2. The whole set must match what Xcode produced — not merely contain the one key that
+#    burned us. This is the check that makes a FUTURE key going missing impossible.
+#    `plutil -convert xml1` normalises ordering and formatting, so comparing the two
+#    canonical forms as strings is meaningful.
+XCENT_CANON=$(plutil -convert xml1 -o - "$XCENT" 2>/dev/null)
+INSTALLED_CANON=$(printf '%s' "$INSTALLED_ENTS" | plutil -convert xml1 -o - - 2>/dev/null)
+if [ "$XCENT_CANON" != "$INSTALLED_CANON" ]; then
+    echo "ERROR: the installed entitlements differ from the ones Xcode generated." >&2
+    echo "       Left = Xcode's .xcent, right = what actually got installed:" >&2
+    diff <(printf '%s\n' "$XCENT_CANON") <(printf '%s\n' "$INSTALLED_CANON") >&2 || true
+    exit 1
+fi
+echo "OK: entitlements match Xcode's .xcent exactly (application-identifier = $INSTALLED_APPID)."
+
 # Step 6: Start
 echo "Starting..."
 open /Library/Input\ Methods/MarmotIM.app
@@ -307,10 +419,17 @@ echo "iCloud sync state markers auto-create on first sync after install."
 echo ""
 echo "To verify what actually landed in /Library/Input Methods:"
 echo "  codesign -dv --entitlements - '/Library/Input Methods/MarmotIM.app'"
-echo "  # expect: TeamIdentifier=6R7CZ58K47, flags=0x10000(runtime), both"
-echo "  # com.apple.developer.icloud-* keys, and com.apple.security.device.audio-input."
+echo "  # expect: TeamIdentifier=6R7CZ58K47, flags=0x10000(runtime), and SIX entitlements:"
+echo "  #   com.apple.application-identifier        <- no iCloud Drive without it"
+echo "  #   com.apple.developer.team-identifier"
+echo "  #   com.apple.developer.icloud-container-identifiers"
+echo "  #   com.apple.developer.ubiquity-container-identifiers"
+echo "  #   com.apple.security.device.audio-input   <- microphone under hardened runtime"
+echo "  #   com.apple.security.get-task-allow       <- dev build only; never notarize this"
 echo "  # A 'not set' team identifier means the ad-hoc re-sign came back and"
 echo "  # Accessibility / microphone grants will break on the next install."
+echo "  # Only three entitlements means sync is dead — that exact set is what the"
+echo "  # hand-maintained MarmotIM.entitlements produces. See step 4b."
 echo ""
 echo "Deliberately NOT suggesting 'log stream' here: on this machine bare 'log' is"
 echo "shadowed by a zsh function that errors out, and MarmotIM's NSLog payloads render"

@@ -16,6 +16,20 @@ class iCloudSyncManager {
     private(set) var isSyncing: Bool = false
     private(set) var isICloudAvailable: Bool = false
 
+    /// 最近一次同步失败的原因。成功时清空。
+    ///
+    /// **为什么它必须存在。** 在此之前失败原因只进 `NSLog`，而 NSLog 的 `%@` 载荷在
+    /// 统一日志里渲染成 `<private>` —— 也就是说那个原因事实上是拿不回来的。菜单里
+    /// 只有一句「同步失败 · 点击重试」，`containerNotFound`（签名缺 entitlement，
+    /// 永远不会自己好）和一次网络抖动（下次就好了）长得一模一样。
+    ///
+    /// 这不是假设：2026-08-13 安装脚本用源 entitlements 文件重签，丢掉了
+    /// `com.apple.application-identifier`，iCloud Drive 被系统拒绝，而界面上什么
+    /// 异常都看不出来 —— 五个 JSON 文件照常写进容器目录（非沙盒进程写自己家目录
+    /// 本来就不需要授权），只是再没有一个字节上过云。最后是靠翻 CloudDocs 的日志
+    /// 才找出来的。存下这个值，是为了下一次不必再翻。
+    private(set) var lastSyncError: Error?
+
     // MARK: - Private Properties
 
     private let syncQueue = DispatchQueue(label: "com.marmotim.sync", qos: .utility)
@@ -156,6 +170,7 @@ class iCloudSyncManager {
             NSLog("MarmotIM: iCloud not available (no identity token), aborting sync")
             // Update status to reflect failure due to unavailability
             lastSyncSuccess = false
+            lastSyncError = SyncError.iCloudNotAvailable
             return
         }
 
@@ -180,10 +195,12 @@ class iCloudSyncManager {
             // 3. Update status
             lastSyncTime = Date()
             lastSyncSuccess = true
+            lastSyncError = nil
             NSLog("MarmotIM: Sync completed successfully")
 
         } catch {
             lastSyncSuccess = false
+            lastSyncError = error
             NSLog("MarmotIM: Sync failed: \(error)")
         }
     }

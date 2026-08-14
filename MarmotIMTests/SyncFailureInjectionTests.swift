@@ -255,3 +255,83 @@ final class SyncFailureInjectionTests: XCTestCase {
         }
     }
 }
+
+// MARK: - 同步状态的呈现（SyncStatusPresenter）
+
+/// 菜单那一行同步状态的判定。
+///
+/// 这些用例存在的理由是一次真实的事故：2026-08-13 安装脚本用源 entitlements 文件重签，
+/// 丢掉了 `com.apple.application-identifier`，iCloud Drive 被系统拒绝，同步整整死着 ——
+/// 而菜单上始终写着「未同步」，因为 `lastSyncTime` 只在**成功**时才被赋值，
+/// 而「从未同步」这一档原先排在「失败」前面。一次都没成功过的失败，因此被显示成
+/// 「还没开始同步呢」，一直显示下去。
+///
+/// 判定逻辑为此从 `InputController`（IMKInputController，测试进程里造不出来）搬进了
+/// `SyncStatusPresenter`。下面每一条都是那次事故里被显示错的那一格。
+final class SyncStatusPresenterTests: XCTestCase {
+
+    private func text(available: Bool = true,
+                      syncing: Bool = false,
+                      lastTime: Date? = nil,
+                      success: Bool = true,
+                      error: Error? = nil) -> String {
+        SyncStatusPresenter.text(isAvailable: available,
+                                 isSyncing: syncing,
+                                 lastSyncTime: lastTime,
+                                 lastSyncSuccess: success,
+                                 lastSyncError: error,
+                                 timeAgo: { _ in "刚刚" })
+    }
+
+    /// 事故那一格：从未成功过的失败，必须说失败，不能说「未同步」。
+    func testFailureThatNeverSucceededReportsFailureNotNeverSynced() {
+        let status = text(lastTime: nil, success: false, error: SyncError.containerNotFound)
+        XCTAssertNotEqual(status, "未同步",
+                          "lastSyncTime 只在成功时赋值，所以一直失败的情形 lastSyncTime 恒为 nil —— "
+                          + "把「从未同步」排在「失败」前面，等于让一场持续的故障永远显示成还没开始")
+        XCTAssertEqual(status, "同步不可用 · 权限缺失")
+    }
+
+    /// entitlement 缺失和网络抖动必须是两句话：前者重试一百次也不会好。
+    func testUnrecoverableAndTransientFailuresReadDifferently() {
+        XCTAssertEqual(text(success: false, error: SyncError.containerNotFound),
+                       "同步不可用 · 权限缺失")
+        XCTAssertEqual(text(success: false, error: SyncError.decodingFailed),
+                       "同步失败 · 点击重试")
+        // 原因未知时退回通用文案，而不是猜一个更吓人的说法。
+        XCTAssertEqual(text(success: false, error: nil), "同步失败 · 点击重试")
+    }
+
+    func testIconDistinguishesBrokenPathFromFailedAttempt() {
+        XCTAssertEqual(SyncStatusPresenter.iconName(isAvailable: true, isSyncing: false,
+                                                    lastSyncSuccess: false,
+                                                    lastSyncError: SyncError.containerNotFound),
+                       "icloud.slash")
+        XCTAssertEqual(SyncStatusPresenter.iconName(isAvailable: true, isSyncing: false,
+                                                    lastSyncSuccess: false,
+                                                    lastSyncError: SyncError.writeFailed),
+                       "exclamationmark.icloud")
+        XCTAssertEqual(SyncStatusPresenter.iconName(isAvailable: true, isSyncing: false,
+                                                    lastSyncSuccess: true, lastSyncError: nil),
+                       "checkmark.icloud")
+    }
+
+    /// 其余各档没有因为上面的重排而挪位。
+    func testUnchangedStatesStillReadAsBefore() {
+        XCTAssertEqual(text(available: false), "iCloud 未连接")
+        XCTAssertEqual(text(syncing: true), "同步中...")
+        XCTAssertEqual(text(lastTime: nil, success: true), "未同步")
+        XCTAssertEqual(text(lastTime: Date(), success: true), "已同步 · 刚刚")
+        // 同步中优先于失败：正在重试时不该还挂着上一次的失败文案。
+        XCTAssertEqual(text(syncing: true, success: false, error: SyncError.containerNotFound),
+                       "同步中...")
+    }
+
+    /// `lastSyncError` 只在生产路径 `performSync` 上被赋值，而测试用的 `syncOnce` 完全
+    /// 绕开了容器查找 —— 所以 `containerNotFound` 本身在这套测试里是造不出来的，
+    /// 上面几条是直接喂给呈现层的。这里把这个缺口写明，免得日后有人误以为它被覆盖过。
+    func testLastSyncErrorStartsClean() {
+        XCTAssertNil(iCloudSyncManager.shared.lastSyncError,
+                     "还没同步过时不该有残留的失败原因")
+    }
+}
