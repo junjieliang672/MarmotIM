@@ -215,9 +215,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func handleUserDictionaryChanged() {
-        // Legacy notification handler - kept for backward compatibility
-        // New code uses direct API calls and doesn't need this
-        NSLog("MarmotIM: User dictionary changed notification received (legacy)")
+        // Fired after iCloud sync merges remote user_favorites into the local
+        // DB (via a raw sqlite3 connection that bypasses
+        // DictionaryEngine.addUserEntry()). Reconcile this process's
+        // in-memory userTierIndex/entries table against user_favorites so
+        // synced words are typable without restarting the input method.
+        guard let engine = dictionaryEngine, engine.isPreloaded else { return }
+        let fixedCount = engine.ensureUserFavoritesIndexed()
+        let cleanedCount = engine.cleanupDeletedUserFavorites()
+        NSLog("MarmotIM: User dictionary changed - reindexed \(fixedCount), cleaned \(cleanedCount)")
     }
 
     @objc private func handleSuppressedWordsChanged() {

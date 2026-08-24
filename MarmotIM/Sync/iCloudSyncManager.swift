@@ -344,6 +344,14 @@ class iCloudSyncManager {
             if !changed.isEmpty {
                 try writeLocalFavorites(changed)
                 NSLog("MarmotIM: Updated \(changed.count) favorite records")
+                // writeLocalFavorites only touches user_favorites via a raw
+                // sqlite3 connection — it never goes through
+                // DictionaryEngine.addUserEntry(), so the running process's
+                // in-memory userTierIndex/entries table is now stale. Notify
+                // so AppDelegate can reconcile it without a restart.
+                DispatchQueue.main.async {
+                    NotificationCenter.default.post(name: .userDictionaryDidChange, object: nil)
+                }
             }
 
             // Safe to write merged result back
