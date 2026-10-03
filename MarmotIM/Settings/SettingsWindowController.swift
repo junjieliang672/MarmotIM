@@ -38,7 +38,7 @@ class SettingsWindowController: NSWindowController {
 
         // Create the window
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 700, height: 520),
+            contentRect: NSRect(origin: .zero, size: Self.defaultContentSize()),
             styleMask: [.titled, .closable, .miniaturizable, .resizable],
             backing: .buffered,
             defer: false
@@ -46,11 +46,20 @@ class SettingsWindowController: NSWindowController {
 
         window.title = "设置"
         window.contentViewController = hostingController
-        window.center()
         window.isReleasedWhenClosed = false
 
         // Set minimum size
-        window.minSize = NSSize(width: 600, height: 450)
+        window.minSize = NSSize(width: 640, height: 560)
+
+        // Assigning contentViewController resizes the window to the SwiftUI
+        // content's fitting size, which can be shorter than the contentRect
+        // above — so the default size is applied after it. The autosave name
+        // then restores whatever size the user last dragged the window to;
+        // setFrameAutosaveName returns false and leaves the frame alone when
+        // there is no saved frame yet.
+        window.setContentSize(Self.defaultContentSize())
+        window.center()
+        window.setFrameAutosaveName("MarmotIMSettingsWindow")
 
         self.settingsWindow = window
         self.window = window
@@ -58,6 +67,14 @@ class SettingsWindowController: NSWindowController {
         // Show the window
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+    }
+
+    /// 760×700, shrunk to 90% of the screen's usable height on small screens
+    private static func defaultContentSize() -> NSSize {
+        let preferred = NSSize(width: 760, height: 700)
+        guard let visible = NSScreen.main?.visibleFrame else { return preferred }
+        return NSSize(width: min(preferred.width, visible.width * 0.9),
+                      height: min(preferred.height, visible.height * 0.9))
     }
 
     /// Close the settings window
@@ -135,7 +152,7 @@ struct SettingsView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .frame(minWidth: 600, minHeight: 450)
+        .frame(minWidth: 640, minHeight: 560)
         .onDisappear {
             viewModel.saveIfNeeded()
         }
@@ -269,7 +286,7 @@ struct SettingsSection<Content: View>: View {
 struct SettingsView_Previews: PreviewProvider {
     static var previews: some View {
         SettingsView()
-            .frame(width: 700, height: 520)
+            .frame(width: 760, height: 700)
     }
 }
 #endif
