@@ -253,6 +253,31 @@ final class CandidateRankerTests: XCTestCase {
         XCTAssertEqual(candidates[0].text, "工期", "3小时后 boost 衰减，Tier 1 应该恢复第一")
     }
 
+    /// Test 2.3b: 刚在四码选过的五笔词，不能靠 boost 以前缀身份挤掉三码精确词
+    func testRegularTier_WubiPrefix_DoesNotGetTierOverrideBoost() {
+        let ci = makeEntry(id: 1, text: "次", wubi: "uqw", wubiBaseFrequency: 50000)
+        let jiaoji = makeEntry(id: 2, text: "交集", wubi: "uqwy", wubiBaseFrequency: 50000)
+
+        // User just picked 交集 at uqwy
+        let now = UInt32(Date().timeIntervalSince1970)
+        engine.setUserLearning(entryId: 2, accessCount: 1, lastAccessTimestamp: now)
+
+        let threeKey = rankMatches([
+            makeMatch(entry: ci, matchedCode: "uqw", matchType: .full, codeType: .wubi),
+            makeMatch(entry: jiaoji, matchedCode: "uqwy", matchType: .prefix, codeType: .wubi),
+        ], inputCode: "uqw")
+
+        XCTAssertEqual(threeKey[0].text, "次", "三码 uqw 的精确匹配应排第一")
+        XCTAssertFalse(threeKey.contains { $0.isBoosted }, "前缀匹配不应被标记为 boosted")
+
+        let fourKey = rankMatches([
+            makeMatch(entry: ci, matchedCode: "uqwy", matchType: .full, codeType: .wubi),
+            makeMatch(entry: jiaoji, matchedCode: "uqwy", matchType: .full, codeType: .wubi),
+        ], inputCode: "uqwy")
+
+        XCTAssertEqual(fourKey[0].text, "交集", "四码 uqwy 下刚选过的交集应排第一")
+    }
+
     /// Test 2.4: 长码模式只区分完全/前缀匹配
     func testRegularTier_LongCodeMode_OnlyMatchTypeMa() {
         let fullPinyin = makeEntry(id: 1, text: "我们", pinyin: "women", pinyinBaseFrequency: 50000)

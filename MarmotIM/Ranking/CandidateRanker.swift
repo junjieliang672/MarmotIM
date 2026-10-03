@@ -130,8 +130,12 @@ struct CandidateRanker {
             let tierBonus = getTierBonus(match: match, inputCode: inputCode, engine: engine)
             let isSuppressed = suppressedSet.contains(match.entry.text)
             let timestamp = userData?.lastAccessTimestamp ?? 0
-            // Suppressed words have no tierOverrideBoost
-            let tierOverrideBoost = isSuppressed ? 0.0 : FrecencyScore.calculateTierOverrideBoost(lastAccessTimestamp: timestamp)
+            let tierOverrideBoost = effectiveTierOverrideBoost(
+                match: match,
+                inputCode: inputCode,
+                lastAccessTimestamp: timestamp,
+                isSuppressed: isSuppressed
+            )
 
             // Calculate full score using tier-based Frecency
             let score = calculateScore(
@@ -324,6 +328,24 @@ struct CandidateRanker {
 
     // MARK: - Score Calculation
 
+    /// Tier override boost after applying ranking exclusions.
+    ///
+    /// Returns 0 for suppressed words, and for Wubi prefix matches in short
+    /// code mode (Tier 3). The boost is keyed by entry id, not by the code it
+    /// was picked with, so without this exclusion picking 交集 at `uqwy` would
+    /// push it above the exact 3-key match 次 at `uqw` for ~2 hours.
+    private static func effectiveTierOverrideBoost(
+        match: DictionaryMatch,
+        inputCode: String,
+        lastAccessTimestamp: UInt32,
+        isSuppressed: Bool
+    ) -> Double {
+        if isSuppressed { return 0 }
+        let isWubiPrefix = match.matchType == .prefix && match.codeType == .wubi
+        if isWubiPrefix && inputCode.count <= 4 { return 0 }
+        return FrecencyScore.calculateTierOverrideBoost(lastAccessTimestamp: lastAccessTimestamp)
+    }
+
     /// Calculate score for a single match
     ///
     /// For suppressed words, only word-intrinsic scores are used:
@@ -372,7 +394,12 @@ struct CandidateRanker {
         if !isSuppressed {
             let accessCount = userData?.accessCount ?? 0
             let timestamp = userData?.lastAccessTimestamp ?? 0
-            tierOverrideBoost = FrecencyScore.calculateTierOverrideBoost(lastAccessTimestamp: timestamp)
+            tierOverrideBoost = effectiveTierOverrideBoost(
+                match: match,
+                inputCode: inputCode,
+                lastAccessTimestamp: timestamp,
+                isSuppressed: isSuppressed
+            )
             recencyScore = FrecencyScore.calculateRecencyScore(lastAccessTimestamp: timestamp)
             frequencyScore = FrecencyScore.calculateFrequencyScore(accessCount: accessCount)
         }
