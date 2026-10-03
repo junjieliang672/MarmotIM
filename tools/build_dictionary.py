@@ -32,7 +32,7 @@ import struct
 from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Set, Tuple
 
 # Note: Symbol dictionary building requires PyYAML: pip install pyyaml
 try:
@@ -307,10 +307,54 @@ def load_extra_pinyin_dict(filepath: str, char_table: Dict[str, str], name: str)
     return entries
 
 
+def find_redundant_wubi_codes(wubi_entries: List[dict]) -> Dict[str, Set[str]]:
+    """
+    Find wubi codes a single character doesn't need (出简不出全).
+
+    A code C of character w is redundant when w also has a shorter code S
+    that is a prefix of C, and w ranks first at S (highest baseFrequency).
+    Typing S already yields w with no selection, so keeping w at C only
+    pushes the phrases sharing C down. e.g. 次 is first at `uqw`, so its
+    full code `uqwy` is dropped and 交集/效仿 at `uqwy` are no longer
+    shadowed.
+
+    Characters that are NOT first at their short code keep the full code,
+    since it is the only unambiguous way to type them, e.g. 木 at `ssss`
+    (`s` -> 要).
+
+    Returns: dict mapping character -> set of codes to drop
+    """
+    char_codes: Dict[str, Set[str]] = defaultdict(set)
+    top_at_code: Dict[str, Tuple[int, str]] = {}  # code -> (baseFrequency, text)
+
+    for entry in wubi_entries:
+        code = entry['wubi']
+        text = entry['text']
+        if len(text) == 1:
+            char_codes[text].add(code)
+        # Strict > keeps the earliest entry on ties (wb_table.txt order)
+        if code not in top_at_code or entry['baseFrequency'] > top_at_code[code][0]:
+            top_at_code[code] = (entry['baseFrequency'], text)
+
+    redundant: Dict[str, Set[str]] = defaultdict(set)
+    for text, codes in char_codes.items():
+        for code in codes:
+            for k in range(1, len(code)):
+                short = code[:k]
+                if short in codes and top_at_code[short][1] == text:
+                    redundant[text].add(code)
+                    break
+
+    total = sum(len(c) for c in redundant.values())
+    print(f"  Dropping {total} redundant wubi codes from {len(redundant)} characters")
+    return dict(redundant)
+
+
 def merge_dictionaries(
     wubi_entries: List[dict],
     pinyin_entries: List[dict],
-    extra_entries: List[dict]
+    extra_entries: List[dict],
+    drop_wubi_codes: Optional[Dict[str, Set[str]]] = None
 ) -> List[dict]:
     """
     Merge wubi, pinyin, and extra pinyin entries into unified dictionary.
@@ -328,6 +372,10 @@ def merge_dictionaries(
     - Selecting "鬼" via wubi "rqc" updates the same entry as pinyin "gui"
     - Frecency scores are shared across input methods
     - Each input mode uses its own base frequency for ranking
+
+    drop_wubi_codes (from find_redundant_wubi_codes) is subtracted after all
+    sources are merged, because pinyin entries regenerate a character's
+    longest wubi code via get_wubi_code and would otherwise add it back.
     """
     # Key by text only - each text has ONE entry with all its codes
     merged: Dict[str, dict] = {}
@@ -433,6 +481,8 @@ def merge_dictionaries(
     # Attach all codes to each entry
     for text, entry in merged.items():
         entry['wubi_codes'] = text_wubi_codes.get(text, set())
+        if drop_wubi_codes and text in drop_wubi_codes:
+            entry['wubi_codes'] = entry['wubi_codes'] - drop_wubi_codes[text]
         entry['pinyin_codes'] = text_pinyin_codes.get(text, set())
 
     # Convert to list and assign IDs
@@ -1383,7 +1433,8 @@ def main():
     print(f"  Total extra pinyin entries: {len(extra_entries)}")
 
     print("\nStep 5: Merging dictionaries...")
-    entries = merge_dictionaries(wubi_entries, pinyin_entries, extra_entries)
+    drop_wubi_codes = find_redundant_wubi_codes(wubi_entries)
+    entries = merge_dictionaries(wubi_entries, pinyin_entries, extra_entries, drop_wubi_codes)
 
     # Apply corpus frequencies if provided
     if args.corpus:

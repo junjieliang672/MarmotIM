@@ -22,6 +22,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from build_dictionary import (
     merge_dictionaries,
     build_indexes,
+    find_redundant_wubi_codes,
     SOURCE_WUBI,
     SOURCE_PINYIN,
     SOURCE_EXTRA_PINYIN,
@@ -337,6 +338,55 @@ class TestFrecencySharingIntegration(unittest.TestCase):
 
         self.assertIn(du_poison_id, wubi_gxgu_ids, "'毒' should be found via wubi 'gxgu'")
         self.assertIn(du_poison_id, pinyin_du_ids, "'毒' should be found via pinyin 'du'")
+
+
+def _wubi(text, code, freq):
+    return {'text': text, 'wubi': code, 'pinyin': '', 'baseFrequency': freq,
+            'source': SOURCE_WUBI, 'length': len(text)}
+
+
+class TestRedundantWubiCodes(unittest.TestCase):
+    """出简不出全: drop a char's full code only when its short code is unambiguous."""
+
+    def setUp(self):
+        self.wubi_entries = [
+            _wubi('次', 'uqw', 44300),
+            _wubi('次', 'uqwy', 34300),
+            _wubi('效仿', 'uqwy', 33800),
+            _wubi('交集', 'uqwy', 32800),
+            _wubi('要', 's', 65000),
+            _wubi('木', 'ssss', 34000),
+            _wubi('森林', 'ssss', 33500),
+        ]
+        # Pinyin regenerates 次's longest wubi code; it must not come back
+        self.pinyin_entries = [
+            {'text': '次', 'wubi': 'uqwy', 'pinyin': 'ci', 'baseFrequency': 65000,
+             'source': SOURCE_PINYIN, 'length': 1},
+        ]
+
+    def test_full_code_dropped_when_char_first_at_short_code(self):
+        drop = find_redundant_wubi_codes(self.wubi_entries)
+        self.assertEqual(drop, {'次': {'uqwy'}})
+
+        entries = merge_dictionaries(self.wubi_entries, self.pinyin_entries, [], drop)
+        by_text = {e['text']: e for e in entries}
+        self.assertEqual(by_text['次']['wubi_codes'], {'uqw'})
+
+        _, wubi_index = build_indexes(entries)
+        uqwy_texts = {entries[i]['text'] for i in wubi_index['uqwy']}
+        self.assertEqual(uqwy_texts, {'效仿', '交集'})
+
+    def test_full_code_kept_when_char_not_first_at_short_code(self):
+        # 木 also sits at 's', but 要 is first there, so ssss is the only
+        # unambiguous way to type it
+        entries_with_short = self.wubi_entries + [_wubi('木', 's', 64500)]
+        drop = find_redundant_wubi_codes(entries_with_short)
+        self.assertNotIn('木', drop)
+
+    def test_no_drop_set_keeps_previous_behavior(self):
+        entries = merge_dictionaries(self.wubi_entries, self.pinyin_entries, [])
+        by_text = {e['text']: e for e in entries}
+        self.assertEqual(by_text['次']['wubi_codes'], {'uqw', 'uqwy'})
 
 
 if __name__ == '__main__':
