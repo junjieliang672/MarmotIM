@@ -1279,9 +1279,16 @@ def save_symbol_index_txt(entries: list, vocab_dir: str):
     print(f"  Saved symbol index to {output_path}")
 
 
-def build_reverse_lookup_tables(cursor, vocab_dir: str):
-    """Build reverse lookup tables from JSON files for 划词入库 feature."""
+def build_reverse_lookup_tables(cursor, vocab_dir: str, full_wubi_codes: Optional[Dict[str, str]] = None):
+    """Build reverse lookup tables from JSON files for 划词入库 feature.
+
+    full_wubi_codes (char -> longest code in wb_table.txt) overrides
+    char_to_wubi.json, which stores many characters' SHORT code (工 -> a,
+    我 -> q). Phrase codes take the first one or two letters of each
+    character's full code, so 我们 came out as qwu instead of trwu.
+    """
     print("Building reverse lookup tables...")
+    full_wubi_codes = full_wubi_codes or {}
 
     # Load char_to_wubi.json
     char_to_wubi_path = os.path.join(vocab_dir, 'char_to_wubi.json')
@@ -1291,14 +1298,21 @@ def build_reverse_lookup_tables(cursor, vocab_dir: str):
 
         cursor.execute("DELETE FROM char_to_wubi")
         count = 0
-        for char, code in char_to_wubi.items():
-            if len(char) == 1:  # Only single characters
-                cursor.execute(
-                    "INSERT OR IGNORE INTO char_to_wubi (char, wubi_code) VALUES (?, ?)",
-                    (char, code)
-                )
-                count += 1
-        print(f"  Added {count} char_to_wubi entries")
+        upgraded = 0
+        for char in set(char_to_wubi) | set(full_wubi_codes):
+            if len(char) != 1:  # Only single characters
+                continue
+            code = char_to_wubi.get(char, '')
+            full = full_wubi_codes.get(char, '')
+            if len(full) > len(code):
+                code = full
+                upgraded += 1
+            cursor.execute(
+                "INSERT OR IGNORE INTO char_to_wubi (char, wubi_code) VALUES (?, ?)",
+                (char, code)
+            )
+            count += 1
+        print(f"  Added {count} char_to_wubi entries ({upgraded} short codes replaced by full codes)")
     else:
         print(f"  Warning: {char_to_wubi_path} not found")
 
@@ -1574,7 +1588,7 @@ def main():
                 print(f"Warning: symbols.yaml not found at {symbol_path}")
 
         # Build reverse lookup tables for 划词入库 feature
-        build_reverse_lookup_tables(cursor, vocab_dir)
+        build_reverse_lookup_tables(cursor, vocab_dir, char_table)
 
         conn.commit()
         conn.close()

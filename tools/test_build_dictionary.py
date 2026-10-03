@@ -23,6 +23,7 @@ from build_dictionary import (
     merge_dictionaries,
     build_indexes,
     find_redundant_wubi_codes,
+    build_reverse_lookup_tables,
     backup_user_data,
     restore_user_data,
     USER_SUPPRESSED_WORDS_DDL,
@@ -466,6 +467,29 @@ class TestUserDataBackupRestore(unittest.TestCase):
                 sorted(new.execute("SELECT device_id, count FROM sync_counter_state").fetchall()),
                 [('A', 10), ('legacy-v1', 13278)])
             new.close()
+
+
+class TestReverseLookupFullCodes(unittest.TestCase):
+    """char_to_wubi must hold full codes: phrase codes take 1-2 letters per char."""
+
+    def test_short_json_codes_replaced_by_full_codes(self):
+        import json
+        import sqlite3
+        with tempfile.TemporaryDirectory() as vocab:
+            with open(os.path.join(vocab, 'char_to_wubi.json'), 'w', encoding='utf-8') as f:
+                json.dump({'我': 'q', '们': 'wu', '鑫': 'qqqf'}, f)
+            conn = sqlite3.connect(':memory:')
+            conn.execute("CREATE TABLE char_to_wubi (char TEXT PRIMARY KEY, wubi_code TEXT NOT NULL)")
+            conn.execute("CREATE TABLE char_to_pinyin (char TEXT, pinyin TEXT, is_primary INTEGER, PRIMARY KEY (char, pinyin))")
+            conn.execute("CREATE TABLE polyphone_words (word TEXT PRIMARY KEY, pinyin TEXT)")
+
+            build_reverse_lookup_tables(conn.cursor(), vocab, {'我': 'trnt', '们': 'wun', '工': 'aaaa'})
+
+            codes = dict(conn.execute("SELECT char, wubi_code FROM char_to_wubi").fetchall())
+            self.assertEqual(codes['我'], 'trnt', "jianma q replaced by the full code")
+            self.assertEqual(codes['们'], 'wun')
+            self.assertEqual(codes['鑫'], 'qqqf', "chars only in the JSON are kept")
+            self.assertEqual(codes['工'], 'aaaa', "chars only in wb_table are added")
 
 
 if __name__ == '__main__':
