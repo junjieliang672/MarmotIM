@@ -25,6 +25,8 @@ final class SyncCrossPayloadDualDeviceTests: XCTestCase {
     //         per device — all 5 payloads arrive on device 2.
     func testAll01_allFivePayloadsSyncInOneCycle() throws {
         // user_learning
+        SyncPayloadFixtures.insertEntry(dbPath: harness.device2DBPath, id: 0xAAAA,
+                                        text: SyncPayloadFixtures.fixtureText(forEntryId: 0xAAAA))
         SyncPayloadFixtures.insertUserLearning(
             dbPath: harness.device1DBPath,
             entryId: 0xAAAA,
@@ -83,9 +85,9 @@ final class SyncCrossPayloadDualDeviceTests: XCTestCase {
         try harness.runSyncCycle(device: 1)
 
         let payloadNames = [
-            "user_learning.json",
+            "user_learning_v2.json",
             "user_favorites.json",
-            "filter_user_freq.json",
+            "filter_user_freq_v2.json",
             "user_suppressed_words.json",
             "user_relative_ordering.json"
         ]
@@ -99,7 +101,7 @@ final class SyncCrossPayloadDualDeviceTests: XCTestCase {
         // Read cloud state before the second sync.
         let learningBefore = try snapshot(
             file: harness.iCloudDocuments.appendingPathComponent(payloadNames[0]),
-            type: LearningRecord.self
+            type: CounterRecord.self
         )
         let favBefore = try snapshot(
             file: harness.iCloudDocuments.appendingPathComponent(payloadNames[1]),
@@ -110,7 +112,7 @@ final class SyncCrossPayloadDualDeviceTests: XCTestCase {
 
         let learningAfter = try snapshot(
             file: harness.iCloudDocuments.appendingPathComponent(payloadNames[0]),
-            type: LearningRecord.self
+            type: CounterRecord.self
         )
         let favAfter = try snapshot(
             file: harness.iCloudDocuments.appendingPathComponent(payloadNames[1]),
@@ -119,27 +121,7 @@ final class SyncCrossPayloadDualDeviceTests: XCTestCase {
 
         XCTAssertEqual(learningBefore.keys.sorted(), learningAfter.keys.sorted())
         XCTAssertEqual(favBefore.keys.sorted(), favAfter.keys.sorted())
-        XCTAssertEqual(learningAfter[String(0xDEADBEEF)]?.accessCount, 5)
+        XCTAssertEqual(learningAfter[SyncPayloadFixtures.fixtureText(forEntryId: 0xDEADBEEF)]?.total, 5)
         XCTAssertEqual(favAfter["确定性词"]?.addedTimestamp, 1_700_000_000)
-    }
-}
-
-// Codable-conforming records so the Equatable requirement of the snapshot
-// helper works with them. All 5 record types already conform to Codable;
-// we just need Equatable synthesized via conformance extensions.
-extension LearningRecord: Equatable {
-    public static func == (lhs: LearningRecord, rhs: LearningRecord) -> Bool {
-        lhs.accessCount == rhs.accessCount
-            && lhs.lastAccessTimestamp == rhs.lastAccessTimestamp
-            && lhs.totalScore == rhs.totalScore
-    }
-}
-
-extension FavoriteRecord: Equatable {
-    public static func == (lhs: FavoriteRecord, rhs: FavoriteRecord) -> Bool {
-        lhs.wubiCode == rhs.wubiCode
-            && lhs.pinyinCode == rhs.pinyinCode
-            && lhs.addedTimestamp == rhs.addedTimestamp
-            && lhs.isDeleted == rhs.isDeleted
     }
 }

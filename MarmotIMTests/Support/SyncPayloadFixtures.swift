@@ -20,13 +20,23 @@ enum SyncPayloadFixtures {
 
     // MARK: - user_learning
 
-    /// Insert or replace a user_learning row. Returns true on SQLITE_DONE.
+    /// Text the fixtures give entry `id` when the test doesn't name one.
+    /// Learning syncs by text (format v2), so a learning row needs an entry.
+    static func fixtureText(forEntryId id: Int64) -> String {
+        "词\(String(id, radix: 16))"
+    }
+
+    /// Insert or replace a user_learning row, plus an `entries` row for
+    /// `text` (default `fixtureText(forEntryId:)`) if the id has none.
+    /// Returns true on SQLITE_DONE.
     @discardableResult
     static func insertUserLearning(dbPath: URL,
                                    entryId: Int64,
                                    accessCount: Int,
                                    lastAccessTimestamp: Int,
-                                   totalScore: Double) -> Bool {
+                                   totalScore: Double,
+                                   text: String? = nil) -> Bool {
+        insertEntry(dbPath: dbPath, id: entryId, text: text ?? fixtureText(forEntryId: entryId))
         return withOpenDB(dbPath, fallback: false) { db in
             let sql = """
                 INSERT OR REPLACE INTO user_learning
@@ -40,6 +50,21 @@ enum SyncPayloadFixtures {
             sqlite3_bind_int(stmt, 2, Int32(accessCount))
             sqlite3_bind_int(stmt, 3, Int32(lastAccessTimestamp))
             sqlite3_bind_double(stmt, 4, totalScore)
+            return sqlite3_step(stmt) == SQLITE_DONE
+        }
+    }
+
+    /// Insert an `entries` row unless the id already exists.
+    @discardableResult
+    static func insertEntry(dbPath: URL, id: Int64, text: String) -> Bool {
+        return withOpenDB(dbPath, fallback: false) { db in
+            let sql = "INSERT OR IGNORE INTO entries (id, text, pinyin, length) VALUES (?, ?, '', ?)"
+            var stmt: OpaquePointer?
+            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return false }
+            defer { sqlite3_finalize(stmt) }
+            sqlite3_bind_int64(stmt, 1, id)
+            sqlite3_bind_text(stmt, 2, text, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
+            sqlite3_bind_int(stmt, 3, Int32(text.count))
             return sqlite3_step(stmt) == SQLITE_DONE
         }
     }

@@ -638,6 +638,18 @@ USER_SUPPRESSED_WORDS_DDL = """
         is_deleted INTEGER NOT NULL DEFAULT 0
     )
 """
+# Per-device sync counters (iCloudSyncManager, format v2). Must survive a
+# rebuild: without it the next sync treats every local count as this device's
+# own and adds it on top of the copies already in iCloud.
+SYNC_COUNTER_STATE_DDL = """
+    CREATE TABLE IF NOT EXISTS sync_counter_state (
+        payload TEXT NOT NULL,
+        key TEXT NOT NULL,
+        device_id TEXT NOT NULL,
+        count INTEGER NOT NULL,
+        PRIMARY KEY (payload, key, device_id)
+    )
+"""
 USER_RELATIVE_ORDER_DDL = """
     CREATE TABLE IF NOT EXISTS user_relative_order (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -670,6 +682,7 @@ def backup_user_data(db_path: str) -> Dict[str, list]:
         'filter_user_freq': [],
         'user_suppressed_words': [],
         'user_relative_order': [],
+        'sync_counter_state': [],
     }
     if not os.path.exists(db_path):
         return backup
@@ -715,6 +728,7 @@ def backup_user_data(db_path: str) -> Dict[str, list]:
         ('user_suppressed_words', "SELECT text, suppressed_timestamp, is_deleted FROM user_suppressed_words"),
         ('user_relative_order',
          "SELECT word_a, word_b, created_at, updated_at, is_deleted FROM user_relative_order"),
+        ('sync_counter_state', "SELECT payload, key, device_id, count FROM sync_counter_state"),
     ]
     for table, sql in simple_tables:
         try:
@@ -799,6 +813,14 @@ def restore_user_data(db_path: str, backup: Dict[str, list]):
             backup['user_relative_order']
         )
         print(f"  Restored {len(backup['user_relative_order'])} user_relative_order records")
+
+    if backup['sync_counter_state']:
+        cursor.execute(SYNC_COUNTER_STATE_DDL)
+        cursor.executemany(
+            "INSERT OR REPLACE INTO sync_counter_state (payload, key, device_id, count) VALUES (?, ?, ?, ?)",
+            backup['sync_counter_state']
+        )
+        print(f"  Restored {len(backup['sync_counter_state'])} sync_counter_state records")
 
     conn.commit()
     conn.close()

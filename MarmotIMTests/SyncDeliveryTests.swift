@@ -65,14 +65,14 @@ final class SyncDeliveryTests: XCTestCase {
         XCTAssertEqual(cloudFinal.records["肓扫"]?.isDeleted, true)
     }
 
-    /// A corrupt user_learning.json used to abort syncOnce before favorites,
+    /// A corrupt user_learning_v2.json used to abort syncOnce before favorites,
     /// filter freq, suppressed words and ordering ran.
     func testCorruptPayloadDoesNotBlockOtherPayloads() throws {
         SyncPayloadFixtures.insertUserLearning(dbPath: harness.device1DBPath, entryId: 0xBEEF,
                                                accessCount: 1, lastAccessTimestamp: 1, totalScore: 1)
         try harness.runSyncCycle(device: 1)
         try SyncPayloadFixtures.corruptJSONFile(
-            at: harness.iCloudDocuments.appendingPathComponent("user_learning.json"))
+            at: harness.iCloudDocuments.appendingPathComponent("user_learning_v2.json"))
 
         SyncPayloadFixtures.insertUserFavorite(dbPath: harness.device2DBPath, text: "涉政",
                                                wubiCode: "ihgh", pinyinCode: "shezheng", addedTimestamp: 300)
@@ -105,6 +105,8 @@ final class SyncDeliveryTests: XCTestCase {
     }
 
     func testMergedLearningPostsReloadNotification() throws {
+        SyncPayloadFixtures.insertEntry(dbPath: harness.device2DBPath, id: 0xBEEF,
+                                        text: SyncPayloadFixtures.fixtureText(forEntryId: 0xBEEF))
         SyncPayloadFixtures.insertUserLearning(dbPath: harness.device1DBPath, entryId: 0xBEEF,
                                                accessCount: 5, lastAccessTimestamp: 1_790_000_000, totalScore: 1)
         try harness.runSyncCycle(device: 1)

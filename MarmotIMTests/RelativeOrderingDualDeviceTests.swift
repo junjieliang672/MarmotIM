@@ -120,6 +120,11 @@ final class RelativeOrderingDualDeviceTests: XCTestCase {
     func testUserLearningRegression_propagates() throws {
         // Insert a synthetic user_learning row on device 1.
         let entryId: Int64 = 0xDEADBEEF
+        // Learning syncs by text; both Macs need the word in their dictionary
+        for path in [harness.device1DBPath, harness.device2DBPath] {
+            SyncPayloadFixtures.insertEntry(dbPath: path, id: entryId,
+                                            text: SyncPayloadFixtures.fixtureText(forEntryId: entryId))
+        }
         writeUserLearningRow(to: harness.device1DBPath, entryId: entryId, accessCount: 3)
 
         try harness.runSyncCycle(device: 1)

@@ -386,6 +386,20 @@ final class VocabularyDatabase {
         """)
         executeSQL("CREATE INDEX IF NOT EXISTS idx_relorder_a ON user_relative_order(word_a, is_deleted)")
         executeSQL("CREATE INDEX IF NOT EXISTS idx_relorder_b ON user_relative_order(word_b, is_deleted)")
+
+        // Per-device counts as of the last iCloud sync, for the v2 counter
+        // payloads (user_learning, filter_user_freq). See CounterRecord.
+        // Owned by iCloudSyncManager; device_id "__baseline__" marks that
+        // this database has completed its first v2 sync for the payload.
+        executeSQL("""
+            CREATE TABLE IF NOT EXISTS sync_counter_state (
+                payload TEXT NOT NULL,
+                key TEXT NOT NULL,
+                device_id TEXT NOT NULL,
+                count INTEGER NOT NULL,
+                PRIMARY KEY (payload, key, device_id)
+            )
+        """)
     }
 
     // MARK: - Entry Operations

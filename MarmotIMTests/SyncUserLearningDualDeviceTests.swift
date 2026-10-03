@@ -23,9 +23,18 @@ final class SyncUserLearningDualDeviceTests: XCTestCase {
         super.tearDown()
     }
 
+    /// Learning syncs by text, so both Macs need the word in their
+    /// dictionary — as they do in production (same dictionary build).
+    private func addEntryOnBothDevices(_ id: Int64) {
+        let text = SyncPayloadFixtures.fixtureText(forEntryId: id)
+        SyncPayloadFixtures.insertEntry(dbPath: harness.device1DBPath, id: id, text: text)
+        SyncPayloadFixtures.insertEntry(dbPath: harness.device2DBPath, id: id, text: text)
+    }
+
     // E-SYNC-LEARN-01: Insert on device 1 propagates to device 2.
     func testLearn01_insertOnDevice1_propagatesToDevice2() throws {
         let entryId: Int64 = 0x11111111
+        addEntryOnBothDevices(entryId)
         SyncPayloadFixtures.insertUserLearning(
             dbPath: harness.device1DBPath,
             entryId: entryId,
@@ -42,11 +51,10 @@ final class SyncUserLearningDualDeviceTests: XCTestCase {
         XCTAssertEqual(row?.timestamp, 1_700_000_000)
     }
 
-    // E-SYNC-LEARN-02: Both devices record same entry. Merge keeps
-    // the record from the side with higher accessCount (the composite-record
-    // semantic documented in the SyncMerger contract — decision 010 pause
-    // trigger allows escalation only if this behavior is re-interpreted;
-    // we just pin it here).
+    // E-SYNC-LEARN-02: Both devices record the same entry before either has
+    // synced in format v2. Pre-v2 counts are shared history (v1 had already
+    // copied them across), so they merge by max into the `legacy` slot.
+    // Counts made after the first v2 sync add up — see LEARN-07.
     func testLearn02_bothDevices_mergeMaxAccessCount() throws {
         let entryId: Int64 = 0x22222222
         SyncPayloadFixtures.insertUserLearning(
@@ -109,6 +117,7 @@ final class SyncUserLearningDualDeviceTests: XCTestCase {
     // intentional in contracts.documented_invariants.
     func testLearn04_noTombstone_deleteDoesNotPropagate() throws {
         let entryId: Int64 = 0x44444444
+        addEntryOnBothDevices(entryId)
         SyncPayloadFixtures.insertUserLearning(
             dbPath: harness.device1DBPath,
             entryId: entryId, accessCount: 5,
@@ -168,7 +177,7 @@ final class SyncUserLearningDualDeviceTests: XCTestCase {
         // never contributed" language).
 
         // Delete the cloud file (simulate user-induced delete or inter-device race).
-        let cloudFile = harness.iCloudDocuments.appendingPathComponent("user_learning.json")
+        let cloudFile = harness.iCloudDocuments.appendingPathComponent("user_learning_v2.json")
         try FileManager.default.removeItem(at: cloudFile)
 
         // Device 2 syncs. Pre-fix: .notFound branch writes device 2's empty
@@ -182,9 +191,9 @@ final class SyncUserLearningDualDeviceTests: XCTestCase {
         try harness.runSyncCycle(device: 2)
         try harness.runSyncCycle(device: 1)
 
-        let cloudFinal = try SyncPayloadFixtures.readRemoteSyncFile(at: cloudFile, type: LearningRecord.self)
+        let cloudFinal = try SyncPayloadFixtures.readRemoteSyncFile(at: cloudFile, type: CounterRecord.self)
         for i in 0..<3 {
-            let key = String(Int64(0x55550000 | i))
+            let key = SyncPayloadFixtures.fixtureText(forEntryId: Int64(0x55550000 | i))
             XCTAssertNotNil(cloudFinal.records[key],
                 "cloud JSON must preserve device 1's entry 0x5555000\(i) across device 2 .notFound sync — decision 012 fix")
         }
@@ -198,6 +207,8 @@ final class SyncUserLearningDualDeviceTests: XCTestCase {
     func testLearn06_largeScale_mergeAllRows() throws {
         let n = 100
         for i in 0..<n {
+            addEntryOnBothDevices(Int64(0x66660000 | i))
+            addEntryOnBothDevices(Int64(0x77770000 | i))
             SyncPayloadFixtures.insertUserLearning(
                 dbPath: harness.device1DBPath,
                 entryId: Int64(0x66660000 | i),
@@ -222,5 +233,87 @@ final class SyncUserLearningDualDeviceTests: XCTestCase {
         let d2Count = SyncPayloadFixtures.countRows(dbPath: harness.device2DBPath, table: "user_learning")
         XCTAssertEqual(d1Count, 2 * n)
         XCTAssertEqual(d2Count, 2 * n)
+    }
+
+    // E-SYNC-LEARN-07: after the first v2 sync, selections on each Mac add up.
+    // Both start from shared history (100); Mac 1 then picks the word 10 more
+    // times and Mac 2 5 more. v1 merged by max and ended at 110.
+    func testLearn07_countsAfterMigrationAddUp_noDoubleCounting() throws {
+        let id: Int64 = 0x0D0D0D0D
+        addEntryOnBothDevices(id)
+        SyncPayloadFixtures.insertUserLearning(dbPath: harness.device1DBPath, entryId: id, accessCount: 100,
+                                               lastAccessTimestamp: 1_700_000_000, totalScore: 0)
+        SyncPayloadFixtures.insertUserLearning(dbPath: harness.device2DBPath, entryId: id, accessCount: 100,
+                                               lastAccessTimestamp: 1_700_000_000, totalScore: 0)
+        try harness.runSyncCycle(device: 1)
+        try harness.runSyncCycle(device: 2)
+        try harness.runSyncCycle(device: 1)
+        XCTAssertEqual(SyncPayloadFixtures.readUserLearning(dbPath: harness.device1DBPath, entryId: id)?.accessCount,
+                       100, "shared pre-v2 history must not be counted twice")
+        XCTAssertEqual(SyncPayloadFixtures.readUserLearning(dbPath: harness.device2DBPath, entryId: id)?.accessCount, 100)
+
+        SyncPayloadFixtures.insertUserLearning(dbPath: harness.device1DBPath, entryId: id, accessCount: 110,
+                                               lastAccessTimestamp: 1_700_000_100, totalScore: 0)
+        SyncPayloadFixtures.insertUserLearning(dbPath: harness.device2DBPath, entryId: id, accessCount: 105,
+                                               lastAccessTimestamp: 1_700_000_200, totalScore: 0)
+        try harness.runSyncCycle(device: 1)
+        try harness.runSyncCycle(device: 2)
+        try harness.runSyncCycle(device: 1)
+
+        let d1 = SyncPayloadFixtures.readUserLearning(dbPath: harness.device1DBPath, entryId: id)
+        let d2 = SyncPayloadFixtures.readUserLearning(dbPath: harness.device2DBPath, entryId: id)
+        XCTAssertEqual(d1?.accessCount, 115)
+        XCTAssertEqual(d2?.accessCount, 115)
+        XCTAssertEqual(d1?.timestamp, 1_700_000_200)
+
+        // Re-syncing with no new selections changes nothing
+        try harness.runSyncCycle(device: 2)
+        try harness.runSyncCycle(device: 1)
+        XCTAssertEqual(SyncPayloadFixtures.readUserLearning(dbPath: harness.device1DBPath, entryId: id)?.accessCount, 115)
+        XCTAssertEqual(SyncPayloadFixtures.readUserLearning(dbPath: harness.device2DBPath, entryId: id)?.accessCount, 115)
+    }
+
+    // E-SYNC-LEARN-08: a Mac still on the old build keeps writing the v1
+    // file. Its counts are picked up as history (max), and again when it
+    // writes a newer version.
+    func testLearn08_legacyV1FileIsFoldedIn() throws {
+        let id: Int64 = 0x0E0E0E0E
+        addEntryOnBothDevices(id)
+        let v1 = harness.iCloudDocuments.appendingPathComponent("user_learning.json")
+        func writeV1(count: Int) throws {
+            let file = SyncFile(records: [String(id): LearningRecord(accessCount: count,
+                                                                     lastAccessTimestamp: 1_700_000_000 + count,
+                                                                     totalScore: 0)])
+            try JSONEncoder().encode(file).write(to: v1)
+        }
+
+        try writeV1(count: 50)
+        try harness.runSyncCycle(device: 1)
+        XCTAssertEqual(SyncPayloadFixtures.readUserLearning(dbPath: harness.device1DBPath, entryId: id)?.accessCount, 50)
+
+        try writeV1(count: 60)
+        try harness.runSyncCycle(device: 1)
+        XCTAssertEqual(SyncPayloadFixtures.readUserLearning(dbPath: harness.device1DBPath, entryId: id)?.accessCount, 60)
+
+        let v1After = try SyncPayloadFixtures.readRemoteSyncFile(at: v1, type: LearningRecord.self)
+        XCTAssertEqual(v1After.records[String(id)]?.accessCount, 60, "v2 builds never write the v1 file")
+    }
+
+    // E-SYNC-LEARN-09: learning is keyed by text, so ids that differ between
+    // Macs (user entries are numbered per Mac) still meet. Mac 1 has the
+    // word as a system entry and a user entry; Mac 2 only as a user entry
+    // with a different id.
+    func testLearn09_sameWordDifferentIds() throws {
+        SyncPayloadFixtures.insertUserLearning(dbPath: harness.device1DBPath, entryId: 42, accessCount: 3,
+                                               lastAccessTimestamp: 1_700_000_000, totalScore: 0, text: "豆包")
+        SyncPayloadFixtures.insertUserLearning(dbPath: harness.device1DBPath, entryId: 0x8000_0000, accessCount: 7,
+                                               lastAccessTimestamp: 1_700_000_100, totalScore: 0, text: "豆包")
+        SyncPayloadFixtures.insertEntry(dbPath: harness.device2DBPath, id: 0x8000_0005, text: "豆包")
+
+        try harness.runSyncCycle(device: 1)
+        try harness.runSyncCycle(device: 2)
+
+        XCTAssertEqual(SyncPayloadFixtures.readUserLearning(dbPath: harness.device2DBPath, entryId: 0x8000_0005)?.accessCount,
+                       7, "the word's count reaches Mac 2 under Mac 2's own id")
     }
 }

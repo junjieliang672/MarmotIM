@@ -27,6 +27,7 @@ from build_dictionary import (
     restore_user_data,
     USER_SUPPRESSED_WORDS_DDL,
     USER_RELATIVE_ORDER_DDL,
+    SYNC_COUNTER_STATE_DDL,
     SOURCE_WUBI,
     SOURCE_PINYIN,
     SOURCE_EXTRA_PINYIN,
@@ -420,6 +421,7 @@ class TestUserDataBackupRestore(unittest.TestCase):
         if with_user_tables:
             conn.execute(USER_SUPPRESSED_WORDS_DDL)
             conn.execute(USER_RELATIVE_ORDER_DDL)
+            conn.execute(SYNC_COUNTER_STATE_DDL)
         conn.commit()
         return conn
 
@@ -438,6 +440,8 @@ class TestUserDataBackupRestore(unittest.TestCase):
                         "VALUES ('交集', 1790000000, 0), ('将领', 1790000100, 1)")
             old.execute("INSERT INTO user_relative_order (word_a, word_b, created_at, updated_at, is_deleted) "
                         "VALUES ('次', '交集', 1790000000, 1790000200, 1)")
+            old.execute("INSERT INTO sync_counter_state (payload, key, device_id, count) "
+                        "VALUES ('learning', '的', 'legacy-v1', 13278), ('learning', '的', 'A', 10)")
             old.commit()
             old.close()
 
@@ -458,6 +462,9 @@ class TestUserDataBackupRestore(unittest.TestCase):
             self.assertEqual(
                 new.execute("SELECT word_a, word_b, updated_at, is_deleted FROM user_relative_order").fetchall(),
                 [('次', '交集', 1790000200, 1)])
+            self.assertEqual(
+                sorted(new.execute("SELECT device_id, count FROM sync_counter_state").fetchall()),
+                [('A', 10), ('legacy-v1', 13278)])
             new.close()
 
 

@@ -1,37 +1,9 @@
 import Foundation
 
-/// Handles record-level merging for sync operations
-/// Uses "latest-write-wins" strategy based on numeric values
+/// Record-level merging for the last-writer-wins payloads (favorites,
+/// suppressed words, relative ordering). Counter payloads (learning, filter
+/// frequency) merge through CounterSync.
 struct SyncMerger {
-
-    // MARK: - User Learning Merge
-
-    /// Merge user_learning records
-    /// Conflict resolution: keep record with higher accessCount
-    /// - Parameters:
-    ///   - local: Local records (key: entry_id as string)
-    ///   - remote: Remote records from iCloud
-    /// - Returns: Merged records
-    static func mergeLearning(
-        local: [String: LearningRecord],
-        remote: [String: LearningRecord]
-    ) -> [String: LearningRecord] {
-        var result = local
-
-        for (key, remoteRecord) in remote {
-            if let localRecord = result[key] {
-                // Conflict: keep the one with higher accessCount
-                if remoteRecord.accessCount > localRecord.accessCount {
-                    result[key] = remoteRecord
-                }
-            } else {
-                // Only exists in remote: add it
-                result[key] = remoteRecord
-            }
-        }
-
-        return result
-    }
 
     // MARK: - Last-Writer-Wins
 
@@ -70,6 +42,13 @@ struct SyncMerger {
                 if remoteWins(remoteTimestamp: remoteRecord.addedTimestamp, remoteDeleted: remoteRecord.isDeleted,
                               localTimestamp: localRecord.addedTimestamp, localDeleted: localRecord.isDeleted) {
                     result[key] = remoteRecord
+                } else if remoteRecord.addedTimestamp == localRecord.addedTimestamp,
+                          remoteRecord.isDeleted == localRecord.isDeleted,
+                          codeOrder(remoteRecord) > codeOrder(localRecord) {
+                    // Full tie with different codes (the same word added on both
+                    // Macs in the same second): pick by content so both Macs
+                    // keep the same codes whichever side merges first.
+                    result[key] = remoteRecord
                 }
             } else {
                 // Only exists in remote: take it, tombstones included. Skipping
@@ -83,64 +62,11 @@ struct SyncMerger {
         return result
     }
 
-    // MARK: - Filter User Freq Merge
-
-    /// Merge filter_user_freq records
-    /// Conflict resolution: keep record with higher frequency
-    /// - Parameters:
-    ///   - local: Local records (key: "filter_type:code:word")
-    ///   - remote: Remote records from iCloud
-    /// - Returns: Merged records
-    static func mergeFilterFreq(
-        local: [String: FilterFreqRecord],
-        remote: [String: FilterFreqRecord]
-    ) -> [String: FilterFreqRecord] {
-        var result = local
-
-        for (key, remoteRecord) in remote {
-            if let localRecord = result[key] {
-                // Conflict: keep the one with higher frequency
-                if remoteRecord.frequency > localRecord.frequency {
-                    result[key] = remoteRecord
-                }
-            } else {
-                // Only exists in remote: add it
-                result[key] = remoteRecord
-            }
-        }
-
-        return result
+    private static func codeOrder(_ record: FavoriteRecord) -> String {
+        (record.wubiCode ?? "") + "\u{1}" + (record.pinyinCode ?? "")
     }
 
     // MARK: - Diff Detection
-
-    /// Find records that need to be updated in local database
-    /// - Parameters:
-    ///   - merged: Merged records
-    ///   - original: Original local records
-    /// - Returns: Records that are new or changed
-    static func findChangedLearning(
-        merged: [String: LearningRecord],
-        original: [String: LearningRecord]
-    ) -> [(String, LearningRecord)] {
-        var changed: [(String, LearningRecord)] = []
-
-        for (key, record) in merged {
-            if let orig = original[key] {
-                // Check if values differ
-                if record.accessCount != orig.accessCount ||
-                   record.lastAccessTimestamp != orig.lastAccessTimestamp ||
-                   record.totalScore != orig.totalScore {
-                    changed.append((key, record))
-                }
-            } else {
-                // New record
-                changed.append((key, record))
-            }
-        }
-
-        return changed
-    }
 
     static func findChangedFavorites(
         merged: [String: FavoriteRecord],
@@ -154,26 +80,6 @@ struct SyncMerger {
                    record.wubiCode != orig.wubiCode ||
                    record.pinyinCode != orig.pinyinCode ||
                    record.isDeleted != orig.isDeleted {
-                    changed.append((key, record))
-                }
-            } else {
-                changed.append((key, record))
-            }
-        }
-
-        return changed
-    }
-
-    static func findChangedFilterFreq(
-        merged: [String: FilterFreqRecord],
-        original: [String: FilterFreqRecord]
-    ) -> [(String, FilterFreqRecord)] {
-        var changed: [(String, FilterFreqRecord)] = []
-
-        for (key, record) in merged {
-            if let orig = original[key] {
-                if record.frequency != orig.frequency ||
-                   record.lastUsed != orig.lastUsed {
                     changed.append((key, record))
                 }
             } else {

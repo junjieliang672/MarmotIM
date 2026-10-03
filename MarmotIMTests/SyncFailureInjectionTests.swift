@@ -29,7 +29,7 @@ final class SyncFailureInjectionTests: XCTestCase {
     // SyncDeliveryTests.testCorruptPayloadDoesNotBlockOtherPayloads. We
     // pin the throw so any future change to silently-swallow is caught.
     func testFSync01_corruptJSON_learning_throws() throws {
-        let cloud = harness.iCloudDocuments.appendingPathComponent("user_learning.json")
+        let cloud = harness.iCloudDocuments.appendingPathComponent("user_learning_v2.json")
         // Seed cloud first so the file exists before we corrupt it.
         SyncPayloadFixtures.insertUserLearning(
             dbPath: harness.device1DBPath,
@@ -74,7 +74,7 @@ final class SyncFailureInjectionTests: XCTestCase {
         )
         try harness.runSyncCycle(device: 1)
         try SyncPayloadFixtures.corruptJSONFile(
-            at: harness.iCloudDocuments.appendingPathComponent("filter_user_freq.json")
+            at: harness.iCloudDocuments.appendingPathComponent("filter_user_freq_v2.json")
         )
         XCTAssertThrowsError(try harness.runSyncCycle(device: 2))
     }

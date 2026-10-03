@@ -100,12 +100,12 @@ final class SyncFilterFreqDualDeviceTests: XCTestCase {
             frequency: 1, lastUsed: 1_700_000_000
         )
         try harness.runSyncCycle(device: 1)
-        let cloud = harness.iCloudDocuments.appendingPathComponent("filter_user_freq.json")
+        let cloud = harness.iCloudDocuments.appendingPathComponent("filter_user_freq_v2.json")
         try FileManager.default.removeItem(at: cloud)
         try harness.runSyncCycle(device: 2)   // empty local → skip
         try harness.runSyncCycle(device: 1)   // restores cloud
 
-        let data = try SyncPayloadFixtures.readRemoteSyncFile(at: cloud, type: FilterFreqRecord.self)
+        let data = try SyncPayloadFixtures.readRemoteSyncFile(at: cloud, type: CounterRecord.self)
         XCTAssertNotNil(data.records["e:foo:🐸"])
     }
 
