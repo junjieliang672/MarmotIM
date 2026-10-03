@@ -33,11 +33,28 @@ struct SyncMerger {
         return result
     }
 
+    // MARK: - Last-Writer-Wins
+
+    /// Last-writer-wins for tombstoned records (favorites, suppressed words,
+    /// relative ordering). Newer timestamp wins; on an exact tie the deletion
+    /// wins. Both devices evaluate the same rule on the same pair, so they
+    /// converge regardless of which side is "local". Timestamps are in
+    /// seconds, so a delete and a re-add in the same second do tie.
+    static func remoteWins(
+        remoteTimestamp: Int, remoteDeleted: Bool,
+        localTimestamp: Int, localDeleted: Bool
+    ) -> Bool {
+        if remoteTimestamp != localTimestamp {
+            return remoteTimestamp > localTimestamp
+        }
+        return remoteDeleted && !localDeleted
+    }
+
     // MARK: - User Favorites Merge
 
     /// Merge user_favorites records
     /// Conflict resolution: keep record with newer addedTimestamp
-    /// IMPORTANT: Respects is_deleted flag to prevent resurrecting deleted entries
+    /// Tombstones are kept and propagated; ties go to the deletion (`remoteWins`)
     /// - Parameters:
     ///   - local: Local records (key: text)
     ///   - remote: Remote records from iCloud
@@ -50,19 +67,16 @@ struct SyncMerger {
 
         for (key, remoteRecord) in remote {
             if let localRecord = result[key] {
-                // Conflict: keep the one with newer timestamp
-                // The newer timestamp wins, regardless of is_deleted state
-                // This ensures that a deletion with newer timestamp takes precedence
-                if remoteRecord.addedTimestamp > localRecord.addedTimestamp {
+                if remoteWins(remoteTimestamp: remoteRecord.addedTimestamp, remoteDeleted: remoteRecord.isDeleted,
+                              localTimestamp: localRecord.addedTimestamp, localDeleted: localRecord.isDeleted) {
                     result[key] = remoteRecord
                 }
             } else {
-                // Only exists in remote: only add if NOT deleted
-                // This prevents resurrecting entries that were deleted locally
-                // and the local deletion record was purged
-                if !remoteRecord.isDeleted {
-                    result[key] = remoteRecord
-                }
+                // Only exists in remote: take it, tombstones included. Skipping
+                // a remote tombstone here drops it from `merged`, which is then
+                // written back to iCloud — the tombstone is gone for everyone,
+                // and the next device still holding the word active re-uploads it.
+                result[key] = remoteRecord
             }
         }
 
@@ -174,7 +188,7 @@ struct SyncMerger {
 
     /// Merge user_suppressed_words records
     /// Conflict resolution: keep record with newer suppressedTimestamp
-    /// IMPORTANT: Respects is_deleted flag to prevent resurrecting deleted entries
+    /// Tombstones are kept and propagated; ties go to the deletion (`remoteWins`)
     /// - Parameters:
     ///   - local: Local records (key: text)
     ///   - remote: Remote records from iCloud
@@ -187,19 +201,13 @@ struct SyncMerger {
 
         for (key, remoteRecord) in remote {
             if let localRecord = result[key] {
-                // Conflict: keep the one with newer timestamp
-                // The newer timestamp wins, regardless of is_deleted state
-                // This ensures that a deletion with newer timestamp takes precedence
-                if remoteRecord.suppressedTimestamp > localRecord.suppressedTimestamp {
+                if remoteWins(remoteTimestamp: remoteRecord.suppressedTimestamp, remoteDeleted: remoteRecord.isDeleted,
+                              localTimestamp: localRecord.suppressedTimestamp, localDeleted: localRecord.isDeleted) {
                     result[key] = remoteRecord
                 }
             } else {
-                // Only exists in remote: only add if NOT deleted
-                // This prevents resurrecting entries that were deleted locally
-                // and the local deletion record was purged
-                if !remoteRecord.isDeleted {
-                    result[key] = remoteRecord
-                }
+                // Only exists in remote: take it, tombstones included (see mergeFavorites)
+                result[key] = remoteRecord
             }
         }
 
@@ -232,9 +240,7 @@ struct SyncMerger {
     ///
     /// Algorithm:
     /// 1. Set-union all keys. For overlapping keys, max-wins on `updatedAt`;
-    ///    on exact timestamp tie, non-deleted beats deleted (resurrection
-    ///    beats tombstone on a tie — matches the existing favorites /
-    ///    suppressed-words tie policy).
+    ///    on exact timestamp tie, the tombstone wins (see `remoteWins`).
     /// 2. Build a candidate DAG from the surviving non-tombstoned edges.
     /// 3. Detect cycles (DFS-based topo walk). On cycle, drop the edge
     ///    with the OLDER `updatedAt`; tie-break by lexicographic key DESC
@@ -252,14 +258,9 @@ struct SyncMerger {
         var merged = local
         for (key, remoteRec) in remote {
             if let localRec = merged[key] {
-                if remoteRec.updatedAt > localRec.updatedAt {
+                if remoteWins(remoteTimestamp: remoteRec.updatedAt, remoteDeleted: remoteRec.isDeleted,
+                              localTimestamp: localRec.updatedAt, localDeleted: localRec.isDeleted) {
                     merged[key] = remoteRec
-                } else if remoteRec.updatedAt == localRec.updatedAt {
-                    // Tie: non-deleted wins (resurrection beats tombstone
-                    // on exact timestamp tie).
-                    if localRec.isDeleted && !remoteRec.isDeleted {
-                        merged[key] = remoteRec
-                    }
                 }
             } else {
                 merged[key] = remoteRec

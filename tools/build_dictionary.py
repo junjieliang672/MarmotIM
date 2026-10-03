@@ -627,22 +627,55 @@ def save_metadata(entries: List[dict], output_dir: str):
         json.dump(metadata, f, indent=2)
 
 
-def backup_user_data(db_path: str) -> Tuple[list, list, list]:
+# Same DDL as VocabularyDatabase.performMigrations (v6 / v8). The freshly built
+# database is schema version 5 and has neither table; the app creates them on
+# launch with CREATE TABLE IF NOT EXISTS, so creating them here first is safe.
+USER_SUPPRESSED_WORDS_DDL = """
+    CREATE TABLE IF NOT EXISTS user_suppressed_words (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        text TEXT NOT NULL UNIQUE,
+        suppressed_timestamp INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
+        is_deleted INTEGER NOT NULL DEFAULT 0
+    )
+"""
+USER_RELATIVE_ORDER_DDL = """
+    CREATE TABLE IF NOT EXISTS user_relative_order (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        word_a TEXT NOT NULL,
+        word_b TEXT NOT NULL,
+        created_at INTEGER NOT NULL DEFAULT (strftime('%s','now')),
+        updated_at INTEGER NOT NULL DEFAULT (strftime('%s','now')),
+        is_deleted INTEGER NOT NULL DEFAULT 0,
+        UNIQUE(word_a, word_b)
+    )
+"""
+
+
+def backup_user_data(db_path: str) -> Dict[str, list]:
     """
-    Backup user_learning and user_favorites data from existing database.
-    Returns (user_learning_rows, user_favorites_rows, filter_freq_rows)
+    Backup every user-owned table from the existing database.
+    Returns a dict with keys: user_learning, user_favorites, filter_user_freq,
+    user_suppressed_words, user_relative_order.
+
+    Tombstones (is_deleted = 1) are backed up too. Dropping them would bring
+    deleted words back: the restored row would be active with the deletion
+    timestamp, which ties the cloud tombstone and wins the next iCloud merge.
 
     IMPORTANT: Backs up by TEXT instead of entry_id because entry IDs change
     when dictionary is rebuilt with new merge strategy (text as unique key).
     """
+    backup: Dict[str, list] = {
+        'user_learning': [],
+        'user_favorites': [],
+        'filter_user_freq': [],
+        'user_suppressed_words': [],
+        'user_relative_order': [],
+    }
     if not os.path.exists(db_path):
-        return [], [], []
+        return backup
 
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
-
-    user_learning = []
-    user_favorites = []
 
     try:
         # Backup user_learning by TEXT (join with entries table)
@@ -657,42 +690,59 @@ def backup_user_data(db_path: str) -> Tuple[list, list, list]:
             JOIN entries e ON ul.entry_id = e.id
             GROUP BY e.text
         """)
-        user_learning = cursor.fetchall()
-        print(f"  Backed up {len(user_learning)} user_learning records (by text, aggregated)")
+        backup['user_learning'] = cursor.fetchall()
+        print(f"  Backed up {len(backup['user_learning'])} user_learning records (by text, aggregated)")
     except sqlite3.OperationalError as err:
         print(f"  No user_learning table found (new database): {err}")
 
     try:
-        # Backup user_favorites
-        cursor.execute("SELECT text, wubi_code, pinyin_code, added_timestamp FROM user_favorites")
-        user_favorites = cursor.fetchall()
-        print(f"  Backed up {len(user_favorites)} user_favorites records")
+        cursor.execute(
+            "SELECT text, wubi_code, pinyin_code, added_timestamp, is_deleted FROM user_favorites"
+        )
+        backup['user_favorites'] = cursor.fetchall()
+        print(f"  Backed up {len(backup['user_favorites'])} user_favorites records")
     except sqlite3.OperationalError:
-        print("  No user_favorites table found (new database)")
+        try:
+            # Pre-v4 schema: no is_deleted column, every row is active
+            cursor.execute("SELECT text, wubi_code, pinyin_code, added_timestamp, 0 FROM user_favorites")
+            backup['user_favorites'] = cursor.fetchall()
+            print(f"  Backed up {len(backup['user_favorites'])} user_favorites records (pre-v4 schema)")
+        except sqlite3.OperationalError:
+            print("  No user_favorites table found (new database)")
 
-    try:
-        # Also backup filter_user_freq if exists
-        cursor.execute("SELECT filter_type, code, word, frequency, last_used FROM filter_user_freq")
-        filter_freq = cursor.fetchall()
-        if filter_freq:
-            print(f"  Backed up {len(filter_freq)} filter_user_freq records")
-    except sqlite3.OperationalError:
-        filter_freq = []
+    simple_tables = [
+        ('filter_user_freq', "SELECT filter_type, code, word, frequency, last_used FROM filter_user_freq"),
+        ('user_suppressed_words', "SELECT text, suppressed_timestamp, is_deleted FROM user_suppressed_words"),
+        ('user_relative_order',
+         "SELECT word_a, word_b, created_at, updated_at, is_deleted FROM user_relative_order"),
+    ]
+    for table, sql in simple_tables:
+        try:
+            cursor.execute(sql)
+            backup[table] = cursor.fetchall()
+            if backup[table]:
+                print(f"  Backed up {len(backup[table])} {table} records")
+        except sqlite3.OperationalError:
+            pass  # Table not created yet on this database
 
     conn.close()
-    return user_learning, user_favorites, filter_freq
+    return backup
 
 
-def restore_user_data(db_path: str, user_learning: list, user_favorites: list, filter_freq: list):
+def restore_user_data(db_path: str, backup: Dict[str, list]):
     """
-    Restore user_learning and user_favorites data to new database.
+    Restore the tables saved by backup_user_data into the new database.
 
     IMPORTANT: user_learning is now backed up by TEXT (not entry_id).
     We look up the new entry_id for each text before inserting.
     """
-    if not user_learning and not user_favorites and not filter_freq:
+    if not any(backup.values()):
         print("  No user data to restore")
         return
+
+    user_learning = backup['user_learning']
+    user_favorites = backup['user_favorites']
+    filter_freq = backup['filter_user_freq']
 
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
@@ -719,7 +769,8 @@ def restore_user_data(db_path: str, user_learning: list, user_favorites: list, f
     # Restore user_favorites
     if user_favorites:
         cursor.executemany(
-            "INSERT OR REPLACE INTO user_favorites (text, wubi_code, pinyin_code, added_timestamp) VALUES (?, ?, ?, ?)",
+            "INSERT OR REPLACE INTO user_favorites (text, wubi_code, pinyin_code, added_timestamp, is_deleted) "
+            "VALUES (?, ?, ?, ?, ?)",
             user_favorites
         )
         print(f"  Restored {len(user_favorites)} user_favorites records")
@@ -731,6 +782,23 @@ def restore_user_data(db_path: str, user_learning: list, user_favorites: list, f
             filter_freq
         )
         print(f"  Restored {len(filter_freq)} filter_user_freq records")
+
+    if backup['user_suppressed_words']:
+        cursor.execute(USER_SUPPRESSED_WORDS_DDL)
+        cursor.executemany(
+            "INSERT OR REPLACE INTO user_suppressed_words (text, suppressed_timestamp, is_deleted) VALUES (?, ?, ?)",
+            backup['user_suppressed_words']
+        )
+        print(f"  Restored {len(backup['user_suppressed_words'])} user_suppressed_words records")
+
+    if backup['user_relative_order']:
+        cursor.execute(USER_RELATIVE_ORDER_DDL)
+        cursor.executemany(
+            "INSERT OR REPLACE INTO user_relative_order (word_a, word_b, created_at, updated_at, is_deleted) "
+            "VALUES (?, ?, ?, ?, ?)",
+            backup['user_relative_order']
+        )
+        print(f"  Restored {len(backup['user_relative_order'])} user_relative_order records")
 
     conn.commit()
     conn.close()
@@ -756,7 +824,7 @@ def install_to_marmotim(output_dir: str):
     if os.path.exists(src_db):
         # Step 1: Backup user data from existing database
         print("  Preserving user data...")
-        user_learning, user_favorites, filter_freq = backup_user_data(str(dst_db))
+        user_backup = backup_user_data(str(dst_db))
 
         # Step 2: Backup existing file
         if dst_db.exists():
@@ -780,7 +848,7 @@ def install_to_marmotim(output_dir: str):
 
         # Step 5: Restore user data to new database
         print("  Restoring user data...")
-        restore_user_data(str(dst_db), user_learning, user_favorites, filter_freq)
+        restore_user_data(str(dst_db), user_backup)
     else:
         print(f"  Warning: dictionary.db not found in output directory")
 

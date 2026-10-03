@@ -32,7 +32,11 @@ final class VocabularyDatabase {
     /// Version 8: Add user_relative_order table for relative-ordering rules
     ///            (spec-003). User-owned directed edges A→B with tombstones for
     ///            sync parity, UNIQUE(word_a, word_b).
-    private static let schemaVersion = 8
+    /// Version 9: user_favorites is unique by text. The old
+    ///            UNIQUE(text, wubi_code, pinyin_code) let one word hold several
+    ///            rows (SQLite treats NULLs as distinct), so a synced tombstone
+    ///            landed in a new row while the old active row kept the word alive.
+    private static let schemaVersion = 9
 
     // MARK: - Initialization
 
@@ -291,7 +295,7 @@ final class VocabularyDatabase {
                 pinyin_code TEXT,
                 added_timestamp INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
                 is_deleted INTEGER NOT NULL DEFAULT 0,
-                UNIQUE(text, wubi_code, pinyin_code)
+                UNIQUE(text)
             )
         """
 
@@ -517,6 +521,56 @@ final class VocabularyDatabase {
         return extractEntry(from: statement)
     }
 
+    /// All entries with this text whose id is >= minId (user-tier entries).
+    /// getEntryByText returns an arbitrary single row, usually the system
+    /// entry when one shares the text — callers that must touch every user
+    /// entry for a word use this instead.
+    func getEntriesByText(text: String, minId: UInt32) -> [DictionaryEntry] {
+        lock.lock()
+        defer { lock.unlock() }
+
+        let sql = "SELECT id, text, pinyin, wubi, wubi_base_frequency, pinyin_base_frequency, source, length FROM entries WHERE text = ? AND id >= ?"
+
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
+            return []
+        }
+        defer { sqlite3_finalize(statement) }
+
+        sqlite3_bind_text(statement, 1, text, -1, SQLITE_TRANSIENT)
+        sqlite3_bind_int64(statement, 2, Int64(minId))
+
+        var results: [DictionaryEntry] = []
+        while sqlite3_step(statement) == SQLITE_ROW {
+            if let entry = extractEntry(from: statement) {
+                results.append(entry)
+            }
+        }
+        return results
+    }
+
+    /// Largest entry id that is >= minId, or nil if there is none.
+    func maxEntryId(atLeast minId: UInt32) -> UInt32? {
+        lock.lock()
+        defer { lock.unlock() }
+
+        let sql = "SELECT MAX(id) FROM entries WHERE id >= ?"
+
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
+            return nil
+        }
+        defer { sqlite3_finalize(statement) }
+
+        sqlite3_bind_int64(statement, 1, Int64(minId))
+
+        guard sqlite3_step(statement) == SQLITE_ROW,
+              sqlite3_column_type(statement, 0) != SQLITE_NULL else {
+            return nil
+        }
+        return UInt32(sqlite3_column_int64(statement, 0))
+    }
+
     /// Get multiple entries by IDs (batch fetch)
     func getEntries(ids: [UInt32]) -> [UInt32: DictionaryEntry] {
         guard !ids.isEmpty else { return [:] }
@@ -554,7 +608,13 @@ final class VocabularyDatabase {
         lock.lock()
         defer { lock.unlock() }
 
-        return executeSQL("DELETE FROM entries WHERE id = \(id)")
+        // Index rows go too: a later user entry may reuse this id
+        // (addUserEntry allocates max+1), and orphan index rows would then
+        // show the new word under the deleted word's codes.
+        let ok = executeSQL("DELETE FROM entries WHERE id = \(id)")
+        executeSQL("DELETE FROM wubi_index WHERE entry_id = \(id)")
+        executeSQL("DELETE FROM pinyin_index WHERE entry_id = \(id)")
+        return ok
     }
 
     /// Get all user dictionary entries (source = 3)
@@ -1004,7 +1064,9 @@ final class VocabularyDatabase {
         let sql = """
             INSERT INTO user_favorites (text, wubi_code, pinyin_code, added_timestamp, is_deleted)
             VALUES (?, ?, ?, strftime('%s', 'now'), 0)
-            ON CONFLICT(text, wubi_code, pinyin_code) DO UPDATE SET
+            ON CONFLICT(text) DO UPDATE SET
+                wubi_code = COALESCE(excluded.wubi_code, user_favorites.wubi_code),
+                pinyin_code = COALESCE(excluded.pinyin_code, user_favorites.pinyin_code),
                 added_timestamp = excluded.added_timestamp,
                 is_deleted = 0
         """
@@ -1740,6 +1802,45 @@ final class VocabularyDatabase {
             """)
             executeSQL("CREATE INDEX IF NOT EXISTS idx_relorder_a ON user_relative_order(word_a, is_deleted)")
             executeSQL("CREATE INDEX IF NOT EXISTS idx_relorder_b ON user_relative_order(word_b, is_deleted)")
+        }
+
+        // Version 9: user_favorites unique by text. Collapse duplicate rows per
+        // text into one: the newest row wins (tombstone wins a timestamp tie,
+        // same rule as SyncMerger.remoteWins); NULL codes are filled from any
+        // other row of the same text.
+        if currentVersion < 9 {
+            NSLog("MarmotIM: [I][dict] migrating to version 9 user_favorites unique(text)")
+            executeSQL("BEGIN TRANSACTION")
+            executeSQL("""
+                CREATE TABLE user_favorites_new (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    text TEXT NOT NULL,
+                    wubi_code TEXT,
+                    pinyin_code TEXT,
+                    added_timestamp INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
+                    is_deleted INTEGER NOT NULL DEFAULT 0,
+                    UNIQUE(text)
+                )
+            """)
+            executeSQL("""
+                INSERT INTO user_favorites_new (text, wubi_code, pinyin_code, added_timestamp, is_deleted)
+                SELECT f.text,
+                       COALESCE(f.wubi_code, (SELECT MAX(o.wubi_code) FROM user_favorites o WHERE o.text = f.text)),
+                       COALESCE(f.pinyin_code, (SELECT MAX(o.pinyin_code) FROM user_favorites o WHERE o.text = f.text)),
+                       f.added_timestamp,
+                       f.is_deleted
+                FROM user_favorites f
+                WHERE f.id = (
+                    SELECT o.id FROM user_favorites o
+                    WHERE o.text = f.text
+                    ORDER BY o.added_timestamp DESC, o.is_deleted DESC, o.id DESC
+                    LIMIT 1
+                )
+            """)
+            executeSQL("DROP TABLE user_favorites")
+            executeSQL("ALTER TABLE user_favorites_new RENAME TO user_favorites")
+            executeSQL("CREATE INDEX IF NOT EXISTS idx_user_favorites_text ON user_favorites(text)")
+            executeSQL("COMMIT")
         }
 
         setSchemaVersion(targetVersion)

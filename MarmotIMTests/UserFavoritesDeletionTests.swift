@@ -89,9 +89,9 @@ final class UserFavoritesDeletionTests: XCTestCase {
             "Remote timestamp should be used")
     }
 
-    // MARK: - Test 2: SyncMerger should not add deleted remote entries
+    // MARK: - Test 2: SyncMerger keeps remote tombstones
 
-    func testMergeFavorites_shouldNotAddDeletedRemoteEntry() {
+    func testMergeFavorites_shouldKeepDeletedRemoteEntry() {
         // Local doesn't have this entry
         let local: [String: FavoriteRecord] = [:]
 
@@ -104,11 +104,12 @@ final class UserFavoritesDeletionTests: XCTestCase {
         )
         let remote = ["测试": remoteDeleted]
 
-        // Merge - should NOT add the deleted remote entry
+        // Merge - the tombstone must be carried into the merged result, otherwise
+        // writing `merged` back to iCloud erases it and another device resurrects the word
         let merged = SyncMerger.mergeFavorites(local: local, remote: remote)
 
-        XCTAssertNil(merged["测试"],
-            "Deleted remote entry should not be added to local")
+        XCTAssertEqual(merged["测试"]?.isDeleted, true,
+            "Deleted remote entry should be kept as a tombstone")
     }
 
     func testMergeFavorites_shouldAddActiveRemoteEntry() {
@@ -230,7 +231,7 @@ final class UserFavoritesDeletionTests: XCTestCase {
         XCTAssertNotNil(merged["词条4"], "Active remote entry should be added")
         XCTAssertFalse(merged["词条4"]?.isDeleted ?? true)
 
-        // Entry5: only in remote (deleted), should NOT be added
-        XCTAssertNil(merged["词条5"], "Deleted remote entry should not be added")
+        // Entry5: only in remote (deleted), kept as a tombstone
+        XCTAssertEqual(merged["词条5"]?.isDeleted, true, "Deleted remote entry should be kept as a tombstone")
     }
 }

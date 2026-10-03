@@ -53,15 +53,16 @@ final class RelativeOrderingSyncMergerTests: XCTestCase {
         XCTAssertEqual(merged[key]?.isDeleted, true)
     }
 
-    // Exact tie on updatedAt: resurrection (non-deleted) beats tombstone.
-    func testTimestampTie_resurrectionBeatsTombstone() {
+    // Exact tie on updatedAt: the tombstone wins, whichever side holds it.
+    func testTimestampTie_tombstoneWins() {
         let key = RelativeOrderingRecord.makeKey(wordA: "A", wordB: "B")
-        let local  = [key: RelativeOrderingRecord(createdAt: 100, updatedAt: 500, isDeleted: true)]
-        let remote = [key: RelativeOrderingRecord(createdAt: 100, updatedAt: 500, isDeleted: false)]
+        let deleted = [key: RelativeOrderingRecord(createdAt: 100, updatedAt: 500, isDeleted: true)]
+        let active  = [key: RelativeOrderingRecord(createdAt: 100, updatedAt: 500, isDeleted: false)]
 
-        let (merged, _) = SyncMerger.mergeRelativeOrdering(local: local, remote: remote)
-        XCTAssertEqual(merged[key]?.isDeleted, false,
-                       "non-deleted record should win on exact timestamp tie")
+        let (mergedA, _) = SyncMerger.mergeRelativeOrdering(local: deleted, remote: active)
+        let (mergedB, _) = SyncMerger.mergeRelativeOrdering(local: active, remote: deleted)
+        XCTAssertEqual(mergedA[key]?.isDeleted, true, "tombstone should win on exact timestamp tie")
+        XCTAssertEqual(mergedB[key]?.isDeleted, true, "both devices must converge on the tombstone")
     }
 
     // 3-node cycle on merge: oldest dropped, resulting graph acyclic.

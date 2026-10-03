@@ -23,6 +23,10 @@ from build_dictionary import (
     merge_dictionaries,
     build_indexes,
     find_redundant_wubi_codes,
+    backup_user_data,
+    restore_user_data,
+    USER_SUPPRESSED_WORDS_DDL,
+    USER_RELATIVE_ORDER_DDL,
     SOURCE_WUBI,
     SOURCE_PINYIN,
     SOURCE_EXTRA_PINYIN,
@@ -387,6 +391,74 @@ class TestRedundantWubiCodes(unittest.TestCase):
         entries = merge_dictionaries(self.wubi_entries, self.pinyin_entries, [])
         by_text = {e['text']: e for e in entries}
         self.assertEqual(by_text['次']['wubi_codes'], {'uqw', 'uqwy'})
+
+
+class TestUserDataBackupRestore(unittest.TestCase):
+    """Rebuilding the dictionary must not resurrect deleted user data."""
+
+    FAVORITES_DDL = """
+        CREATE TABLE user_favorites (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            text TEXT NOT NULL,
+            wubi_code TEXT,
+            pinyin_code TEXT,
+            added_timestamp INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
+            is_deleted INTEGER NOT NULL DEFAULT 0,
+            UNIQUE(text, wubi_code, pinyin_code)
+        )
+    """
+
+    def _make_db(self, path, with_user_tables):
+        import sqlite3
+        conn = sqlite3.connect(path)
+        conn.execute("CREATE TABLE entries (id INTEGER PRIMARY KEY, text TEXT)")
+        conn.execute("CREATE TABLE user_learning (entry_id INTEGER PRIMARY KEY, access_count INTEGER, "
+                     "last_access_timestamp INTEGER, total_score REAL)")
+        conn.execute(self.FAVORITES_DDL)
+        conn.execute("CREATE TABLE filter_user_freq (filter_type TEXT, code TEXT, word TEXT, "
+                     "frequency INTEGER, last_used REAL, PRIMARY KEY (filter_type, code, word))")
+        if with_user_tables:
+            conn.execute(USER_SUPPRESSED_WORDS_DDL)
+            conn.execute(USER_RELATIVE_ORDER_DDL)
+        conn.commit()
+        return conn
+
+    def test_tombstones_and_all_user_tables_survive_rebuild(self):
+        import sqlite3
+        with tempfile.TemporaryDirectory() as tmp:
+            old_path = os.path.join(tmp, 'old.db')
+            new_path = os.path.join(tmp, 'new.db')
+
+            old = self._make_db(old_path, with_user_tables=True)
+            old.execute("INSERT INTO user_favorites (text, wubi_code, pinyin_code, added_timestamp, is_deleted) "
+                        "VALUES ('肓扫', 'yerv', NULL, 1776474967, 1)")
+            old.execute("INSERT INTO user_favorites (text, wubi_code, pinyin_code, added_timestamp, is_deleted) "
+                        "VALUES ('涉政', 'ihgh', 'shezheng', 1768337938, 0)")
+            old.execute("INSERT INTO user_suppressed_words (text, suppressed_timestamp, is_deleted) "
+                        "VALUES ('交集', 1790000000, 0), ('将领', 1790000100, 1)")
+            old.execute("INSERT INTO user_relative_order (word_a, word_b, created_at, updated_at, is_deleted) "
+                        "VALUES ('次', '交集', 1790000000, 1790000200, 1)")
+            old.commit()
+            old.close()
+
+            # Fresh build: schema 5, no suppressed-words / relative-order tables
+            self._make_db(new_path, with_user_tables=False).close()
+
+            restore_user_data(new_path, backup_user_data(old_path))
+
+            new = sqlite3.connect(new_path)
+            self.assertEqual(
+                new.execute("SELECT is_deleted, added_timestamp FROM user_favorites WHERE text='肓扫'").fetchone(),
+                (1, 1776474967))
+            self.assertEqual(
+                new.execute("SELECT is_deleted FROM user_favorites WHERE text='涉政'").fetchone(), (0,))
+            self.assertEqual(
+                sorted(new.execute("SELECT text, is_deleted FROM user_suppressed_words").fetchall()),
+                [('交集', 0), ('将领', 1)])
+            self.assertEqual(
+                new.execute("SELECT word_a, word_b, updated_at, is_deleted FROM user_relative_order").fetchall(),
+                [('次', '交集', 1790000200, 1)])
+            new.close()
 
 
 if __name__ == '__main__':

@@ -320,38 +320,38 @@ class DictionaryEngine {
         NSLog("MarmotIM: Checking \(deletedFavorites.count) deleted user favorites for cleanup")
 
         for (_, text, wubiCode, pinyinCode) in deletedFavorites {
-            // Try to find and remove the entry from entries table and indexes
-            if let entry = db.getEntryByText(text: text) {
-                // Only remove user entries (source=3), not system entries
-                if entry.id >= DictionaryEngine.userDictStartId {
-                    // Remove from database
-                    if db.deleteEntry(id: entry.id) {
-                        cleanedCount += 1
-                        NSLog("MarmotIM: cleanupDeletedUserFavorites - removed entry '%@' (id: %u)", text, entry.id)
-                    }
-
-                    // Remove from userTierIndex
-                    if let code = wubiCode, !code.isEmpty {
-                        userTierIndex.remove(code: code, entryId: entry.id, codeType: .wubi)
-                    }
-                    if let code = pinyinCode, !code.isEmpty {
-                        userTierIndex.remove(code: code, entryId: entry.id, codeType: .pinyin)
-                    }
-
-                    // Also try to remove by entry's stored codes
-                    if !entry.pinyin.isEmpty {
-                        userTierIndex.remove(code: entry.pinyin, entryId: entry.id, codeType: .pinyin)
-                    }
-                    if let wubi = entry.wubi {
-                        userTierIndex.remove(code: wubi, entryId: entry.id, codeType: .wubi)
-                    }
-
-                    // Remove from cache
-                    cacheLock.lock()
-                    entriesCache.remove(entry.id)
-                    userLearningCache.removeValue(forKey: entry.id)
-                    cacheLock.unlock()
+            // Remove every user-tier entry for this text. getEntryByText would
+            // return one arbitrary row — the system entry when the word is also
+            // in the system dictionary — and the user entry would survive.
+            // System entries (id < userDictStartId) are never touched.
+            for entry in db.getEntriesByText(text: text, minId: DictionaryEngine.userDictStartId) {
+                // Remove from database
+                if db.deleteEntry(id: entry.id) {
+                    cleanedCount += 1
+                    NSLog("MarmotIM: cleanupDeletedUserFavorites - removed entry '%@' (id: %u)", text, entry.id)
                 }
+
+                // Remove from userTierIndex
+                if let code = wubiCode, !code.isEmpty {
+                    userTierIndex.remove(code: code, entryId: entry.id, codeType: .wubi)
+                }
+                if let code = pinyinCode, !code.isEmpty {
+                    userTierIndex.remove(code: code, entryId: entry.id, codeType: .pinyin)
+                }
+
+                // Also try to remove by entry's stored codes
+                if !entry.pinyin.isEmpty {
+                    userTierIndex.remove(code: entry.pinyin, entryId: entry.id, codeType: .pinyin)
+                }
+                if let wubi = entry.wubi {
+                    userTierIndex.remove(code: wubi, entryId: entry.id, codeType: .wubi)
+                }
+
+                // Remove from cache
+                cacheLock.lock()
+                entriesCache.remove(entry.id)
+                userLearningCache.removeValue(forKey: entry.id)
+                cacheLock.unlock()
             }
         }
 
@@ -696,6 +696,15 @@ class DictionaryEngine {
             return nil
         }
 
+        // The counter starts at userDictStartId on every launch, but user
+        // entries from earlier launches are still in the database. Without
+        // this, the first add after a restart reuses an existing id and
+        // insertEntry (INSERT OR REPLACE) overwrites that word, leaving its
+        // indexes and learning row attached to the new text.
+        if let maxExisting = db.maxEntryId(atLeast: DictionaryEngine.userDictStartId),
+           maxExisting >= userDictNextId {
+            userDictNextId = maxExisting + 1
+        }
         let entryId = userDictNextId
         userDictNextId += 1
 
