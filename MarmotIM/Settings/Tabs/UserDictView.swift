@@ -15,16 +15,13 @@ struct UserDictView: View {
     @ObservedObject var viewModel: SettingsViewModel
     @State private var userFavorites: [UserFavoriteEntry] = []
     @State private var isLoading: Bool = true
-    @State private var showingAddSheet: Bool = false
     @State private var searchText: String = ""
     @State private var selectedIds: Set<Int> = []
     @State private var statusMessage: String = ""
     @State private var showStatus: Bool = false
 
-    // Add sheet state
-    @State private var newCode: String = ""
-    @State private var newWords: String = ""
-    @State private var isWubiCode: Bool = false
+    /// Add / edit sheet; nil when closed
+    @State private var sheetMode: WordSheetMode?
 
     private var filteredEntries: [UserFavoriteEntry] {
         if searchText.isEmpty {
@@ -102,6 +99,13 @@ struct UserDictView: View {
                             .tag(entry.id)
                     }
                     .listStyle(.inset(alternatesRowBackgrounds: true))
+                    .contextMenu(forSelectionType: Int.self) { ids in
+                        Button("编辑编码…") { editEntry(id: ids.first) }
+                            .disabled(ids.count != 1)
+                    } primaryAction: { ids in
+                        // Double-click
+                        if ids.count == 1 { editEntry(id: ids.first) }
+                    }
                 }
             }
             .frame(minHeight: 200)
@@ -110,7 +114,7 @@ struct UserDictView: View {
 
             // Bottom toolbar
             HStack(spacing: 0) {
-                Button(action: { showingAddSheet = true }) {
+                Button(action: { sheetMode = .add }) {
                     Image(systemName: "plus")
                         .frame(width: 24, height: 20)
                 }
@@ -127,6 +131,17 @@ struct UserDictView: View {
                 .buttonStyle(.borderless)
                 .disabled(selectedIds.isEmpty)
                 .help("删除选中的词条")
+
+                Divider()
+                    .frame(height: 16)
+
+                Button(action: { editEntry(id: selectedIds.first) }) {
+                    Image(systemName: "pencil")
+                        .frame(width: 24, height: 20)
+                }
+                .buttonStyle(.borderless)
+                .disabled(selectedIds.count != 1)
+                .help("编辑选中词条的编码（也可以双击）")
 
                 Spacer()
 
@@ -149,16 +164,19 @@ struct UserDictView: View {
         .onAppear {
             loadUserFavorites()
         }
-        .sheet(isPresented: $showingAddSheet) {
-            AddWordSheet(
-                code: $newCode,
-                words: $newWords,
-                isWubi: $isWubiCode,
-                onAdd: { addWord() },
-                onCancel: {
-                    showingAddSheet = false
-                    clearInputs()
-                }
+        .sheet(item: $sheetMode) { mode in
+            WordSheet(
+                mode: mode,
+                onSubmit: { drafts in
+                    switch mode {
+                    case .add:
+                        addWords(drafts)
+                    case .edit(let entry):
+                        if let draft = drafts.first { saveEdit(original: entry, draft: draft) }
+                    }
+                    sheetMode = nil
+                },
+                onCancel: { sheetMode = nil }
             )
         }
     }
@@ -177,45 +195,50 @@ struct UserDictView: View {
         }
     }
 
-    private func addWord() {
-        guard !newCode.isEmpty, !newWords.isEmpty else { return }
-
-        let code = newCode.lowercased()
-        let codePattern = "^[a-z]{1,4}$"
-        guard code.range(of: codePattern, options: .regularExpression) != nil else {
-            showStatusMessage("编码格式错误")
-            return
-        }
-
-        let words = newWords.split(separator: " ")
+    private func addWords(_ drafts: [WordDraft]) {
         var addedCount = 0
-        let db = VocabularyDatabase.shared
 
-        for word in words {
-            let text = String(word).trimmingCharacters(in: .whitespaces)
-            guard !text.isEmpty else { continue }
+        for draft in drafts where draft.canSubmit {
+            let wubi = draft.wubi.isEmpty ? nil : draft.wubi
+            let pinyin = draft.pinyin.isEmpty ? nil : draft.pinyin
 
-            // Add to user_favorites
-            let wubiCode = isWubiCode ? code : nil
-            let pinyinCode = isWubiCode ? nil : code
-            if db.addUserFavorite(text: text, wubiCode: wubiCode, pinyinCode: pinyinCode) {
+            if let engine = AppDelegate.shared?.dictionaryEngine {
+                // Same path as Control+= : indexes both codes and records the favorite
+                if engine.addDualEntry(text: draft.text, wubiCode: wubi, pinyinCode: pinyin).success {
+                    addedCount += 1
+                }
+            } else if VocabularyDatabase.shared.addUserFavorite(text: draft.text, wubiCode: wubi, pinyinCode: pinyin) {
+                // Engine not available (settings window standalone): the favorite
+                // is indexed by ensureUserFavoritesIndexed on the next launch
                 addedCount += 1
             }
-
-            // Also try to add via engine if available (for immediate use)
-            if let engine = AppDelegate.shared?.dictionaryEngine {
-                _ = engine.addUserEntry(code: code, text: text, isWubi: isWubiCode)
-            }
         }
 
-        if addedCount > 0 {
-            showStatusMessage("已添加 \(addedCount) 个词条")
-            loadUserFavorites()
-            clearInputs()
-            showingAddSheet = false
-        } else {
-            showStatusMessage("添加失败")
+        loadUserFavorites()
+        showStatusMessage(addedCount > 0 ? "已添加 \(addedCount) 个词条" : "添加失败")
+    }
+
+    private func editEntry(id: Int?) {
+        guard let id = id, let entry = userFavorites.first(where: { $0.id == id }) else { return }
+        sheetMode = .edit(entry)
+    }
+
+    private func saveEdit(original: UserFavoriteEntry, draft: WordDraft) {
+        let wubi = draft.wubi.isEmpty ? nil : draft.wubi
+        let pinyin = draft.pinyin.isEmpty ? nil : draft.pinyin
+        guard wubi != original.wubiCode || pinyin != original.pinyinCode else { return }
+
+        if let engine = AppDelegate.shared?.dictionaryEngine {
+            // Drop the old codes from the index, then index the new ones
+            _ = engine.removeDualEntry(text: original.text, wubiCode: original.wubiCode, pinyinCode: original.pinyinCode)
+            _ = engine.addDualEntry(text: original.text, wubiCode: wubi, pinyinCode: pinyin)
         }
+        // addUserFavorite keeps an existing code when passed nil; an edit that
+        // clears a code must clear it in the favorite row too
+        let ok = VocabularyDatabase.shared.setUserFavoriteCodes(text: original.text, wubiCode: wubi, pinyinCode: pinyin)
+
+        loadUserFavorites()
+        showStatusMessage(ok ? "已更新 \(original.text)" : "更新失败")
     }
 
     private func deleteSelectedEntries() {
@@ -257,12 +280,6 @@ struct UserDictView: View {
         if deletedCount > 0 {
             showStatusMessage("已删除 \(deletedCount) 个词条")
         }
-    }
-
-    private func clearInputs() {
-        newCode = ""
-        newWords = ""
-        isWubiCode = false
     }
 
     private func showStatusMessage(_ message: String) {
@@ -315,51 +332,169 @@ struct UserFavoriteRow: View {
     }
 }
 
-// MARK: - Add Word Sheet
+// MARK: - Word Drafts
 
-struct AddWordSheet: View {
-    @Binding var code: String
-    @Binding var words: String
-    @Binding var isWubi: Bool
-    let onAdd: () -> Void
+/// One word in the add / edit sheet, with its auto-generated codes and the
+/// codes currently in the fields (which the user may have changed).
+struct WordDraft: Identifiable, Equatable {
+    var id: String { text }
+    let text: String
+    var wubi: String
+    var pinyin: String
+    /// What the generator produced; nil when it couldn't (rare character,
+    /// non-Chinese text). The ↺ button restores these.
+    let autoWubi: String?
+    let autoPinyin: String?
+
+    var wubiEdited: Bool { wubi != (autoWubi ?? "") }
+    var pinyinEdited: Bool { pinyin != (autoPinyin ?? "") }
+    var wubiIsValid: Bool { wubi.isEmpty || Self.isValidWubi(wubi) }
+    var pinyinIsValid: Bool { pinyin.isEmpty || Self.isValidPinyin(pinyin) }
+    /// Neither code could be generated, so the user has to type one
+    var needsManualCode: Bool { autoWubi == nil && autoPinyin == nil }
+    /// At least one code, and every non-empty code well-formed
+    var canSubmit: Bool { wubiIsValid && pinyinIsValid && !(wubi.isEmpty && pinyin.isEmpty) }
+
+    static func isValidWubi(_ code: String) -> Bool {
+        (1...4).contains(code.count) && isLowercaseLetters(code)
+    }
+
+    static func isValidPinyin(_ code: String) -> Bool {
+        !code.isEmpty && isLowercaseLetters(code)
+    }
+
+    private static func isLowercaseLetters(_ code: String) -> Bool {
+        code.unicodeScalars.allSatisfy { ("a"..."z").contains($0) }
+    }
+}
+
+enum WordDraftBuilder {
+
+    /// Words in the input box: split on spaces and newlines, duplicates
+    /// dropped, first occurrence's order kept.
+    static func words(in input: String) -> [String] {
+        var seen = Set<String>()
+        return input
+            .components(separatedBy: .whitespacesAndNewlines)
+            .filter { !$0.isEmpty && seen.insert($0).inserted }
+    }
+
+    /// Drafts for the current input. A word already in `previous` keeps its
+    /// draft as is, so typing another word doesn't wipe codes the user edited.
+    static func rebuild(
+        input: String,
+        previous: [WordDraft],
+        generateWubi: (String) -> String?,
+        generatePinyin: (String) -> String?
+    ) -> [WordDraft] {
+        words(in: input).map { word in
+            if let existing = previous.first(where: { $0.text == word }) {
+                return existing
+            }
+            return makeDraft(text: word, generateWubi: generateWubi, generatePinyin: generatePinyin)
+        }
+    }
+
+    static func makeDraft(
+        text: String,
+        wubi: String? = nil,
+        pinyin: String? = nil,
+        generateWubi: (String) -> String?,
+        generatePinyin: (String) -> String?
+    ) -> WordDraft {
+        let autoWubi = generateWubi(text)
+        let autoPinyin = generatePinyin(text)
+        return WordDraft(text: text,
+                         wubi: wubi ?? autoWubi ?? "",
+                         pinyin: pinyin ?? autoPinyin ?? "",
+                         autoWubi: autoWubi,
+                         autoPinyin: autoPinyin)
+    }
+}
+
+// MARK: - Word Sheet
+
+enum WordSheetMode: Identifiable {
+    case add
+    case edit(UserFavoriteEntry)
+
+    var id: String {
+        switch self {
+        case .add: return "add"
+        case .edit(let entry): return "edit-\(entry.id)"
+        }
+    }
+}
+
+/// Add words (codes generated, editable) or edit one word's codes
+struct WordSheet: View {
+    let mode: WordSheetMode
+    let onSubmit: ([WordDraft]) -> Void
     let onCancel: () -> Void
 
-    @State private var codeError: String = ""
+    @State private var input: String = ""
+    @State private var drafts: [WordDraft] = []
+
+    private static func generateWubi(_ text: String) -> String? {
+        ReverseLookupTable.shared.getWubiCode(for: text)
+    }
+
+    private static func generatePinyin(_ text: String) -> String? {
+        ReverseLookupTable.shared.getPinyinCode(for: text)
+    }
+
+    private var isEditing: Bool {
+        if case .edit = mode { return true }
+        return false
+    }
+
+    private var canSubmit: Bool {
+        !drafts.isEmpty && drafts.allSatisfy { $0.canSubmit }
+    }
 
     var body: some View {
-        VStack(spacing: 16) {
-            Text("添加词条")
+        VStack(alignment: .leading, spacing: 14) {
+            Text(isEditing ? "编辑编码" : "添加词条")
                 .font(.headline)
 
-            VStack(alignment: .leading, spacing: 12) {
-                Picker("编码类型", selection: $isWubi) {
-                    Text("拼音").tag(false)
-                    Text("五笔").tag(true)
-                }
-                .pickerStyle(.segmented)
-
+            if !isEditing {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("编码 (1-4位字母)")
+                    Text("词条（空格或换行分隔多个）")
                         .font(.caption)
                         .foregroundColor(.secondary)
-                    TextField("如: addr", text: $code)
+                    TextField("如: 交集 百感交集", text: $input, axis: .vertical)
                         .textFieldStyle(.roundedBorder)
-                        .onChange(of: code) { newValue in
-                            validateCode(newValue)
+                        .lineLimit(1...4)
+                        .onChange(of: input) { newValue in
+                            drafts = WordDraftBuilder.rebuild(
+                                input: newValue, previous: drafts,
+                                generateWubi: Self.generateWubi, generatePinyin: Self.generatePinyin)
                         }
-                    if !codeError.isEmpty {
-                        Text(codeError)
-                            .font(.caption)
-                            .foregroundColor(.red)
-                    }
                 }
+            }
 
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("词条 (空格分隔多个)")
+            if !drafts.isEmpty {
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(spacing: 8) {
+                        Text("词条").frame(width: 120, alignment: .leading)
+                        Text("五笔").frame(width: 96, alignment: .leading)
+                        Text("拼音").frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+
+                    ScrollView {
+                        VStack(spacing: 6) {
+                            ForEach($drafts) { $draft in
+                                WordDraftRow(draft: $draft)
+                            }
+                        }
+                    }
+                    .frame(maxHeight: 220)
+
+                    Text("编码自动生成，可以直接修改；清空某个编码，就不加入那种输入方式。")
                         .font(.caption)
                         .foregroundColor(.secondary)
-                    TextField("如: 北京市海淀区", text: $words)
-                        .textFieldStyle(.roundedBorder)
                 }
             }
 
@@ -369,29 +504,86 @@ struct AddWordSheet: View {
 
                 Spacer()
 
-                Button("添加") { onAdd() }
-                    .keyboardShortcut(.return)
-                    .disabled(code.isEmpty || words.isEmpty || !codeError.isEmpty)
+                Button(isEditing ? "保存" : (drafts.count > 1 ? "添加 \(drafts.count) 个" : "添加")) {
+                    onSubmit(drafts)
+                }
+                .keyboardShortcut(.return)
+                .disabled(!canSubmit)
             }
         }
         .padding(20)
-        .frame(width: 320)
+        .frame(width: 480)
+        .onAppear {
+            if case .edit(let entry) = mode {
+                drafts = [WordDraftBuilder.makeDraft(
+                    text: entry.text, wubi: entry.wubiCode ?? "", pinyin: entry.pinyinCode ?? "",
+                    generateWubi: Self.generateWubi, generatePinyin: Self.generatePinyin)]
+            }
+        }
+    }
+}
+
+struct WordDraftRow: View {
+    @Binding var draft: WordDraft
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: 8) {
+                Text(draft.text)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .frame(width: 120, alignment: .leading)
+                    .help(draft.text)
+
+                codeField("五笔", text: $draft.wubi, isValid: draft.wubiIsValid,
+                          edited: draft.wubiEdited, reset: { draft.wubi = draft.autoWubi ?? "" })
+                    .frame(width: 96)
+
+                codeField("拼音", text: $draft.pinyin, isValid: draft.pinyinIsValid,
+                          edited: draft.pinyinEdited, reset: { draft.pinyin = draft.autoPinyin ?? "" })
+                    .frame(maxWidth: .infinity)
+
+                Image(systemName: draft.canSubmit ? "checkmark.circle.fill" : "exclamationmark.circle.fill")
+                    .foregroundColor(draft.canSubmit ? .green : .red)
+            }
+            if draft.needsManualCode && draft.wubi.isEmpty && draft.pinyin.isEmpty {
+                Text("无法自动生成编码，请手动输入")
+                    .font(.caption)
+                    .foregroundColor(.red)
+                    .padding(.leading, 128)
+            } else if !draft.wubiIsValid {
+                Text("五笔编码是 1–4 个英文字母")
+                    .font(.caption)
+                    .foregroundColor(.red)
+                    .padding(.leading, 128)
+            } else if !draft.pinyinIsValid {
+                Text("拼音只能包含英文字母，不要空格")
+                    .font(.caption)
+                    .foregroundColor(.red)
+                    .padding(.leading, 128)
+            }
+        }
     }
 
-    private func validateCode(_ value: String) {
-        let lowercased = value.lowercased()
-        if value != lowercased {
-            code = lowercased
-        }
-
-        if value.isEmpty {
-            codeError = ""
-        } else if value.count > 4 {
-            codeError = "编码最多4位"
-        } else if !value.allSatisfy({ $0.isLetter && $0.isASCII }) {
-            codeError = "只能包含英文字母"
-        } else {
-            codeError = ""
+    private func codeField(_ placeholder: String, text: Binding<String>, isValid: Bool,
+                           edited: Bool, reset: @escaping () -> Void) -> some View {
+        HStack(spacing: 2) {
+            TextField(placeholder, text: Binding(
+                get: { text.wrappedValue },
+                set: { text.wrappedValue = $0.lowercased() }
+            ))
+            .textFieldStyle(.roundedBorder)
+            .overlay(
+                RoundedRectangle(cornerRadius: 5)
+                    .stroke(isValid ? Color.clear : Color.red, lineWidth: 1)
+            )
+            if edited {
+                Button(action: reset) {
+                    Image(systemName: "arrow.counterclockwise")
+                }
+                .buttonStyle(.borderless)
+                .help("恢复自动生成的编码")
+            }
         }
     }
 }

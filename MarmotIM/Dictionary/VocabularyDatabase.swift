@@ -1119,6 +1119,44 @@ final class VocabularyDatabase {
         return notifyIfSucceeded(sqlite3_step(statement) == SQLITE_DONE)
     }
 
+    /// Set a favorite's codes exactly (nil clears) and mark it active, for the
+    /// settings "edit codes" sheet. addUserFavorite keeps an existing code when
+    /// passed nil, so it can't express "remove the pinyin code".
+    func setUserFavoriteCodes(text: String, wubiCode: String?, pinyinCode: String?) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+
+        let sql = """
+            INSERT INTO user_favorites (text, wubi_code, pinyin_code, added_timestamp, is_deleted)
+            VALUES (?, ?, ?, strftime('%s', 'now'), 0)
+            ON CONFLICT(text) DO UPDATE SET
+                wubi_code = excluded.wubi_code,
+                pinyin_code = excluded.pinyin_code,
+                added_timestamp = excluded.added_timestamp,
+                is_deleted = 0
+        """
+
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
+            return false
+        }
+        defer { sqlite3_finalize(statement) }
+
+        sqlite3_bind_text(statement, 1, text, -1, SQLITE_TRANSIENT)
+        if let wubi = wubiCode {
+            sqlite3_bind_text(statement, 2, wubi, -1, SQLITE_TRANSIENT)
+        } else {
+            sqlite3_bind_null(statement, 2)
+        }
+        if let pinyin = pinyinCode {
+            sqlite3_bind_text(statement, 3, pinyin, -1, SQLITE_TRANSIENT)
+        } else {
+            sqlite3_bind_null(statement, 3)
+        }
+
+        return notifyIfSucceeded(sqlite3_step(statement) == SQLITE_DONE)
+    }
+
     /// Remove a user favorite entry (Soft Delete)
     func removeUserFavorite(text: String) -> Bool {
         lock.lock()
