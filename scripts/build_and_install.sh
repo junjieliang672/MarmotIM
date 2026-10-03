@@ -102,7 +102,20 @@ fi
 
 # Step 2: Build the app. We filter xcodebuild's output for readability, but
 # pipefail + set -e ensure a real failure still aborts here (previously masked).
-echo "Building app..."
+#
+# The filter STREAMS. It used to end in `| tail -5`, which cannot print a single
+# line until its input closes — tail has no way to know which five lines are last
+# until EOF — so nothing at all appeared between "Building app..." and xcodebuild
+# exiting. grep block-buffers down a pipe too, compounding it. The result was total
+# silence for the whole build, which is indistinguishable from a hang: the natural
+# response is to Ctrl-C a build that was working fine. That matters most on the
+# first build after an Xcode/SDK update, when llbuild serializes everything behind
+# a single clang-stat-cache pass over the SDK — minutes of 0% CPU, I/O-bound work
+# before the first Swift file compiles. --line-buffered + no tail makes progress
+# visible; tee keeps the unfiltered log for when the filtered view is not enough.
+# ClangStatCache is in the filter deliberately — it is the task that stalls, so it
+# is the one line that explains a multi-minute pause while it is happening.
+echo "Building app... (full log: build/xcodebuild.log)"
 # -allowProvisioningUpdates: the target is CODE_SIGN_STYLE=Automatic with iCloud
 # entitlements, so signing needs a provisioning profile for
 # com.marmotim.inputmethod.MarmotIM. When a valid one is already cached this flag
@@ -117,7 +130,10 @@ echo "Building app..."
 # least able to explain itself. Note it needs an Xcode signed in to the Apple ID that
 # owns DEVELOPMENT_TEAM; with no account at all, use scripts/build.sh --no-icloud,
 # which drops the entitlements that require a profile in the first place.
-xcodebuild -allowProvisioningUpdates -project MarmotIM.xcodeproj -scheme MarmotIM -configuration Release build CONFIGURATION_BUILD_DIR="$(pwd)/build" 2>&1 | grep -E "(error:|BUILD)" | tail -5
+mkdir -p build
+xcodebuild -allowProvisioningUpdates -project MarmotIM.xcodeproj -scheme MarmotIM -configuration Release build CONFIGURATION_BUILD_DIR="$(pwd)/build" 2>&1 \
+    | tee build/xcodebuild.log \
+    | grep --line-buffered -E "error:|^\*\* BUILD|^(ClangStatCache|CompileSwift|SwiftCompile|SwiftDriver|Ld|CodeSign|ProcessProductPackaging|CreateUniversalBinary)"
 
 if [ ! -d "build/MarmotIM.app" ]; then
     echo "ERROR: xcodebuild did not produce build/MarmotIM.app. Check build output above." >&2
