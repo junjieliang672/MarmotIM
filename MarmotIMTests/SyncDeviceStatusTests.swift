@@ -1,7 +1,7 @@
 import XCTest
 @testable import MarmotIM
 
-/// Each device publishes devices/<id>.json after a sync; the settings iCloud
+/// Each device publishes device-<id>.json after a sync; the settings iCloud
 /// page compares the fingerprints in them to say whether two Macs hold the
 /// same data.
 final class SyncDeviceStatusTests: XCTestCase {

@@ -30,7 +30,7 @@ struct PayloadSummary: Codable, Equatable {
 }
 
 /// What one Mac publishes about itself after each sync, to
-/// `devices/<deviceId>.json` in the iCloud container. Each Mac only ever
+/// `device-<deviceId>.json` in the iCloud container. Each Mac only ever
 /// writes its own file, so these never conflict.
 struct DeviceSyncStatus: Codable, Equatable, Identifiable {
     var deviceId: String

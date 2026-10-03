@@ -199,7 +199,7 @@ class iCloudSyncManager {
         guard !items.isEmpty else { return false }
         return items.allSatisfy { item in
             guard let url = item.value(forAttribute: NSMetadataItemURLKey) as? URL else { return false }
-            return url.deletingLastPathComponent().lastPathComponent == deviceStatusDirectoryName
+            return isDeviceStatusFile(url.lastPathComponent)
         }
     }
 
@@ -369,7 +369,14 @@ class iCloudSyncManager {
 
     // MARK: - Device Status (settings → iCloud page)
 
-    static let deviceStatusDirectoryName = "devices"
+    /// `device-<deviceId>.json`, next to the payload files. Not in a
+    /// subfolder: two Macs creating the same folder name independently makes
+    /// iCloud rename one to "devices 2". A per-device file name can't collide.
+    private static let deviceStatusPrefix = "device-"
+
+    static func isDeviceStatusFile(_ name: String) -> Bool {
+        name.hasPrefix(deviceStatusPrefix) && name.hasSuffix(".json")
+    }
 
     /// Counts and content fingerprints of the local synced tables. After a
     /// successful sync the local tables equal the merged result, so two Macs
@@ -422,9 +429,7 @@ class iCloudSyncManager {
                 lastError: error.map { ($0 as? LocalizedError)?.errorDescription ?? String(describing: $0) },
                 payloads: try localPayloadSummaries()
             )
-            let directory = documentsURL.appendingPathComponent(Self.deviceStatusDirectoryName)
-            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-            let url = directory.appendingPathComponent("\(status.deviceId).json")
+            let url = documentsURL.appendingPathComponent("\(Self.deviceStatusPrefix)\(status.deviceId).json")
             let data = try JSONEncoder().encode(status)
 
             var coordinatorError: NSError?
@@ -446,9 +451,9 @@ class iCloudSyncManager {
         return "\(version) (\(build))"
     }
 
-    /// Every device's published status in `documentsURL/devices`
+    /// Every device's published status file in `documentsURL`
     internal func readDeviceStatuses(documentsURL: URL) -> [DeviceSyncStatus] {
-        let directory = documentsURL.appendingPathComponent(Self.deviceStatusDirectoryName)
+        let directory = documentsURL
         guard let urls = try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil) else {
             return []
         }
@@ -459,7 +464,7 @@ class iCloudSyncManager {
                 name = String(name.dropFirst().dropLast(".icloud".count))
             }
             return name
-        }).filter { $0.hasSuffix(".json") }
+        }).filter { Self.isDeviceStatusFile($0) }
 
         return names.compactMap { name in
             let url = directory.appendingPathComponent(name)
@@ -551,6 +556,18 @@ class iCloudSyncManager {
         let legacyURL = documentsURL.appendingPathComponent(payload.legacyFileName)
         let legacy = readLegacyIfChanged(payload, at: legacyURL)
 
+        // "<name> 2.json": iCloud's rename when two Macs each created the file
+        // before seeing the other's. Its records belong in the merge too.
+        var duplicates: [URL] = []
+        for url in duplicateFiles(of: remoteURL) {
+            guard ensureFileDownloaded(at: url) == .ready,
+                  let records: [String: CounterRecord] = try? readRemoteRecords(from: url) else {
+                continue  // Unreadable now; left in place for a later sync
+            }
+            remoteFolded = CounterSync.merge(remoteFolded, records)
+            duplicates.append(url)
+        }
+
         let merged = CounterSync.merge(CounterSync.merge(local, remoteFolded), legacy.records)
 
         var changed: [String: CounterRecord] = [:]
@@ -569,10 +586,13 @@ class iCloudSyncManager {
 
         // Nothing local and nothing in the cloud: don't create an empty file
         // (spec-004 decision 012 — a fresh device has no standing to)
-        if !merged.isEmpty && (merged != remote || !conflicts.isEmpty) {
+        if !merged.isEmpty && (merged != remote || !conflicts.isEmpty || !duplicates.isEmpty) {
             try writeRemoteRecords(merged, to: remoteURL)
         }
         resolveConflictVersions(conflicts, at: remoteURL)
+        // Only after the merged file is written: every record of a duplicate
+        // is in it by then, so removing the copy loses nothing.
+        removeMergedDuplicates(duplicates)
         if let stamp = legacy.stamp {
             markLegacyRead(payload, stamp: stamp)
         }
@@ -1509,6 +1529,39 @@ class iCloudSyncManager {
         }
         if let error = writeError {
             throw error
+        }
+    }
+
+    // MARK: - iCloud Duplicate Files
+
+    /// Siblings named "<stem> <n>.<ext>" of a payload file
+    private func duplicateFiles(of url: URL) -> [URL] {
+        let directory = url.deletingLastPathComponent()
+        let stem = url.deletingPathExtension().lastPathComponent
+        let ext = url.pathExtension
+        guard let siblings = try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil) else {
+            return []
+        }
+        return siblings.filter { sibling in
+            guard sibling.pathExtension == ext else { return false }
+            let name = sibling.deletingPathExtension().lastPathComponent
+            guard name.hasPrefix(stem + " ") else { return false }
+            let suffix = name.dropFirst(stem.count + 1)
+            return !suffix.isEmpty && suffix.allSatisfy { $0.isNumber }
+        }
+    }
+
+    private func removeMergedDuplicates(_ urls: [URL]) {
+        for url in urls {
+            var coordinatorError: NSError?
+            NSFileCoordinator().coordinate(writingItemAt: url, options: .forDeleting, error: &coordinatorError) { coordURL in
+                do {
+                    try FileManager.default.removeItem(at: coordURL)
+                    NSLog("MarmotIM: [I][sync] merged duplicate removed file=\(url.lastPathComponent)")
+                } catch {
+                    NSLog("MarmotIM: [W][sync] merged duplicate not removed file=\(url.lastPathComponent) error=\(error)")
+                }
+            }
         }
     }
 

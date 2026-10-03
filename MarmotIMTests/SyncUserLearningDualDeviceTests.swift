@@ -316,4 +316,28 @@ final class SyncUserLearningDualDeviceTests: XCTestCase {
         XCTAssertEqual(SyncPayloadFixtures.readUserLearning(dbPath: harness.device2DBPath, entryId: 0x8000_0005)?.accessCount,
                        7, "the word's count reaches Mac 2 under Mac 2's own id")
     }
+
+    // E-SYNC-LEARN-10: two Macs each create user_learning_v2.json before
+    // seeing the other's; iCloud keeps one and renames the other to
+    // "user_learning_v2 2.json". The copy is merged in and then removed.
+    func testLearn10_duplicateFileFromNameCollisionIsMergedThenRemoved() throws {
+        let id: Int64 = 0x0F0F0F0F
+        addEntryOnBothDevices(id)
+        let text = SyncPayloadFixtures.fixtureText(forEntryId: id)
+        let duplicate = harness.iCloudDocuments.appendingPathComponent("user_learning_v2 2.json")
+        let other = SyncFile(records: [text: CounterRecord(counts: ["OTHER-MAC": 7], lastUsed: 1_700_000_500)])
+        try JSONEncoder().encode(other).write(to: duplicate)
+
+        SyncPayloadFixtures.insertUserLearning(dbPath: harness.device1DBPath, entryId: id, accessCount: 3,
+                                               lastAccessTimestamp: 1_700_000_000, totalScore: 0)
+        try harness.runSyncCycle(device: 1)
+
+        XCTAssertEqual(SyncPayloadFixtures.readUserLearning(dbPath: harness.device1DBPath, entryId: id)?.accessCount,
+                       10, "3 of this Mac's history + 7 from the other Mac's copy")
+        let main = try SyncPayloadFixtures.readRemoteSyncFile(
+            at: harness.iCloudDocuments.appendingPathComponent("user_learning_v2.json"), type: CounterRecord.self)
+        XCTAssertEqual(main.records[text]?.counts["OTHER-MAC"], 7, "the copy's records are in the main file")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: duplicate.path),
+                       "removed only after its records were written to the main file")
+    }
 }
