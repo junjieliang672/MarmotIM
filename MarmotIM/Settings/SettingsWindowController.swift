@@ -89,6 +89,7 @@ class SettingsWindowController: NSWindowController {
 enum SettingsTab: String, CaseIterable, Identifiable {
     case basic       = "基本"
     case dictionary  = "词库管理"
+    case icloud      = "iCloud"
     case punctuation = "标点符号"
     case transcribe  = "转写"
     case theme       = "主题"
@@ -100,6 +101,7 @@ enum SettingsTab: String, CaseIterable, Identifiable {
         switch self {
         case .basic:       return "gearshape"
         case .dictionary:  return "books.vertical"
+        case .icloud:      return "icloud"
         case .punctuation: return "number"
         case .transcribe:  return "mic"
         case .theme:       return "paintbrush"
@@ -140,6 +142,8 @@ struct SettingsView: View {
                     BasicSettingsView(viewModel: viewModel)
                 case .dictionary:
                     DictionaryManagementView(viewModel: viewModel)
+                case .icloud:
+                    ICloudSettingsView()
                 case .punctuation:
                     PunctuationView(viewModel: viewModel)
                 case .transcribe:

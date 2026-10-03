@@ -43,6 +43,7 @@
 		PUNCTUATION_SWIFT /* PunctuationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = PUNCTUATION_SWIFT_REF /* PunctuationView.swift */; };
 		RANKER_SWIFT /* CandidateRanker.swift in Sources */ = {isa = PBXBuildFile; fileRef = RANKER_SWIFT_REF /* CandidateRanker.swift */; };
 		RELORDERVIEW_SWIFT /* RelativeOrderingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = RELORDERVIEW_SWIFT_REF /* RelativeOrderingView.swift */; };
+		ICLOUDSETTINGSVIEW_SWIFT /* ICloudSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = ICLOUDSETTINGSVIEW_SWIFT_REF /* ICloudSettingsView.swift */; };
 		RELORDER_SWIFT /* RelativeOrderingRule.swift in Sources */ = {isa = PBXBuildFile; fileRef = RELORDER_SWIFT_REF /* RelativeOrderingRule.swift */; };
 		REVERSELOOKUP_SWIFT /* ReverseLookupTable.swift in Sources */ = {isa = PBXBuildFile; fileRef = REVERSELOOKUP_SWIFT_REF /* ReverseLookupTable.swift */; };
 		SELECTIONCAPTURE_SWIFT /* SelectionCapture.swift in Sources */ = {isa = PBXBuildFile; fileRef = SELECTIONCAPTURE_SWIFT_REF /* SelectionCapture.swift */; };
@@ -50,6 +51,7 @@
 		SQLITE_LIB /* libsqlite3.tbd in Frameworks */ = {isa = PBXBuildFile; fileRef = SQLITE_LIB_REF /* libsqlite3.tbd */; };
 		SYNCERROR_SWIFT /* SyncError.swift in Sources */ = {isa = PBXBuildFile; fileRef = SYNCERROR_SWIFT_REF /* SyncError.swift */; };
 		SYNCMERGER_SWIFT /* SyncMerger.swift in Sources */ = {isa = PBXBuildFile; fileRef = SYNCMERGER_SWIFT_REF /* SyncMerger.swift */; };
+		SYNCDEVICESTATUS_SWIFT /* SyncDeviceStatus.swift in Sources */ = {isa = PBXBuildFile; fileRef = SYNCDEVICESTATUS_SWIFT_REF /* SyncDeviceStatus.swift */; };
 		SYNCCOUNTERS_SWIFT /* SyncCounters.swift in Sources */ = {isa = PBXBuildFile; fileRef = SYNCCOUNTERS_SWIFT_REF /* SyncCounters.swift */; };
 		SYNCMODELS_SWIFT /* SyncModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = SYNCMODELS_SWIFT_REF /* SyncModels.swift */; };
 		THEMESETTINGS_SWIFT /* ThemeSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = THEMESETTINGS_SWIFT_REF /* ThemeSettingsView.swift */; };
@@ -102,6 +104,7 @@
 		PUNCTUATION_SWIFT_REF /* PunctuationView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PunctuationView.swift; sourceTree = "<group>"; };
 		RANKER_SWIFT_REF /* CandidateRanker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CandidateRanker.swift; sourceTree = "<group>"; };
 		RELORDERVIEW_SWIFT_REF /* RelativeOrderingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RelativeOrderingView.swift; sourceTree = "<group>"; };
+		ICLOUDSETTINGSVIEW_SWIFT_REF /* ICloudSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ICloudSettingsView.swift; sourceTree = "<group>"; };
 		RELORDER_SWIFT_REF /* RelativeOrderingRule.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RelativeOrderingRule.swift; sourceTree = "<group>"; };
 		REVERSELOOKUP_SWIFT_REF /* ReverseLookupTable.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReverseLookupTable.swift; sourceTree = "<group>"; };
 		SELECTIONCAPTURE_SWIFT_REF /* SelectionCapture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SelectionCapture.swift; sourceTree = "<group>"; };
@@ -109,6 +112,7 @@
 		SQLITE_LIB_REF /* libsqlite3.tbd */ = {isa = PBXFileReference; lastKnownFileType = "sourcecode.text-based-dylib-definition"; name = libsqlite3.tbd; path = usr/lib/libsqlite3.tbd; sourceTree = SDKROOT; };
 		SYNCERROR_SWIFT_REF /* SyncError.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncError.swift; sourceTree = "<group>"; };
 		SYNCMERGER_SWIFT_REF /* SyncMerger.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncMerger.swift; sourceTree = "<group>"; };
+		SYNCDEVICESTATUS_SWIFT_REF /* SyncDeviceStatus.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncDeviceStatus.swift; sourceTree = "<group>"; };
 		SYNCCOUNTERS_SWIFT_REF /* SyncCounters.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncCounters.swift; sourceTree = "<group>"; };
 		SYNCMODELS_SWIFT_REF /* SyncModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncModels.swift; sourceTree = "<group>"; };
 		THEMESETTINGS_SWIFT_REF /* ThemeSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThemeSettingsView.swift; sourceTree = "<group>"; };
@@ -238,6 +242,7 @@
 				ABOUTVIEW_SWIFT_REF /* AboutView.swift */,
 				30978ACAE0C248DBDF722697 /* SuppressedWordsView.swift */,
 				RELORDERVIEW_SWIFT_REF /* RelativeOrderingView.swift */,
+				ICLOUDSETTINGSVIEW_SWIFT_REF /* ICloudSettingsView.swift */,
 				DICTMGMT_SWIFT_REF /* DictionaryManagementView.swift */,
 				TRANSCRIBESETTINGS_SWIFT_REF /* TranscribeSettingsView.swift */,
 			);
@@ -272,6 +277,7 @@
 				SYNCERROR_SWIFT_REF /* SyncError.swift */,
 				SYNCMODELS_SWIFT_REF /* SyncModels.swift */,
 				SYNCMERGER_SWIFT_REF /* SyncMerger.swift */,
+				SYNCDEVICESTATUS_SWIFT_REF /* SyncDeviceStatus.swift */,
 				SYNCCOUNTERS_SWIFT_REF /* SyncCounters.swift */,
 				ICLOUDSYNCMGR_SWIFT_REF /* iCloudSyncManager.swift */,
 			);
@@ -385,12 +391,14 @@
 				THEMESETTINGS_SWIFT /* ThemeSettingsView.swift in Sources */,
 				ABOUTVIEW_SWIFT /* AboutView.swift in Sources */,
 				RELORDERVIEW_SWIFT /* RelativeOrderingView.swift in Sources */,
+				ICLOUDSETTINGSVIEW_SWIFT /* ICloudSettingsView.swift in Sources */,
 				DICTMGMT_SWIFT /* DictionaryManagementView.swift in Sources */,
 				REVERSELOOKUP_SWIFT /* ReverseLookupTable.swift in Sources */,
 				SELECTIONCAPTURE_SWIFT /* SelectionCapture.swift in Sources */,
 				SYNCERROR_SWIFT /* SyncError.swift in Sources */,
 				SYNCMODELS_SWIFT /* SyncModels.swift in Sources */,
 				SYNCMERGER_SWIFT /* SyncMerger.swift in Sources */,
+				SYNCDEVICESTATUS_SWIFT /* SyncDeviceStatus.swift in Sources */,
 				SYNCCOUNTERS_SWIFT /* SyncCounters.swift in Sources */,
 				ICLOUDSYNCMGR_SWIFT /* iCloudSyncManager.swift in Sources */,
 				96D86D02279F29A2CCB3451E /* MarmotLogoView.swift in Sources */,

@@ -177,10 +177,29 @@ class iCloudSyncManager {
     }
 
     @objc private func metadataQueryDidUpdate(_ notification: Notification) {
+        // Device status files are rewritten by every sync on every Mac. Syncing
+        // in response to them would make the Macs trigger each other forever;
+        // they only need the settings page refreshed.
+        if Self.changesAreOnlyDeviceStatusFiles(notification) {
+            NotificationCenter.default.post(name: .syncOverviewDidChange, object: nil)
+            return
+        }
+
         // Remote file changed, trigger sync
         syncQueue.async { [weak self] in
             NSLog("MarmotIM: iCloud file changed, syncing...")
             self?.performSync()
+        }
+    }
+
+    private static func changesAreOnlyDeviceStatusFiles(_ notification: Notification) -> Bool {
+        let keys = [NSMetadataQueryUpdateAddedItemsKey, NSMetadataQueryUpdateChangedItemsKey,
+                    NSMetadataQueryUpdateRemovedItemsKey]
+        let items = keys.flatMap { notification.userInfo?[$0] as? [NSMetadataItem] ?? [] }
+        guard !items.isEmpty else { return false }
+        return items.allSatisfy { item in
+            guard let url = item.value(forAttribute: NSMetadataItemURLKey) as? URL else { return false }
+            return url.deletingLastPathComponent().lastPathComponent == deviceStatusDirectoryName
         }
     }
 
@@ -235,6 +254,9 @@ class iCloudSyncManager {
             lastSyncError = error
             NSLog("MarmotIM: Sync failed: \(error)")
         }
+        DispatchQueue.main.async {
+            NotificationCenter.default.post(name: .syncOverviewDidChange, object: nil)
+        }
     }
 
     /// Test-facing sync entry point. Performs one full round of sync
@@ -272,6 +294,10 @@ class iCloudSyncManager {
                 if firstError == nil { firstError = error }
             }
         }
+        // Published even after a failure: the other Macs' settings page should
+        // show that this one tried and what went wrong.
+        writeDeviceStatus(documentsURL: documentsURL, error: firstError)
+
         if let error = firstError { throw error }
     }
 
@@ -339,6 +365,149 @@ class iCloudSyncManager {
                 NotificationCenter.default.post(name: .userLearningDidChange, object: nil)
             }
         }
+    }
+
+    // MARK: - Device Status (settings → iCloud page)
+
+    static let deviceStatusDirectoryName = "devices"
+
+    /// Counts and content fingerprints of the local synced tables. After a
+    /// successful sync the local tables equal the merged result, so two Macs
+    /// that have both synced the same state publish the same fingerprints.
+    private func localPayloadSummaries() throws -> [String: PayloadSummary] {
+        var result: [String: PayloadSummary] = [:]
+
+        let favorites = try readLocalFavorites()
+        result[SyncPayloadKind.favorites.rawValue] = PayloadSummary(
+            count: favorites.values.filter { !$0.isDeleted }.count,
+            digest: SyncDigest.digest(favorites.map {
+                "\($0.key)|\($0.value.wubiCode ?? "")|\($0.value.pinyinCode ?? "")|\($0.value.addedTimestamp)|\($0.value.isDeleted)"
+            }))
+
+        let suppressed = try readLocalSuppressedWords()
+        result[SyncPayloadKind.suppressed.rawValue] = PayloadSummary(
+            count: suppressed.values.filter { !$0.isDeleted }.count,
+            digest: SyncDigest.digest(suppressed.map {
+                "\($0.key)|\($0.value.suppressedTimestamp)|\($0.value.isDeleted)"
+            }))
+
+        // createdAt is left out: the local write keeps the earlier of the two
+        // sides' values, so it can differ between Macs holding the same rules.
+        let ordering = try readLocalRelativeOrdering()
+        result[SyncPayloadKind.ordering.rawValue] = PayloadSummary(
+            count: ordering.values.filter { !$0.isDeleted }.count,
+            digest: SyncDigest.digest(ordering.map {
+                "\($0.key)|\($0.value.updatedAt)|\($0.value.isDeleted)"
+            }))
+
+        for (kind, payload) in [(SyncPayloadKind.learning, "learning"), (SyncPayloadKind.filter, "filter")] {
+            let known = try readCounterState(payload).known
+            result[kind.rawValue] = PayloadSummary(
+                count: known.count,
+                digest: SyncDigest.digest(known.map { key, counts in
+                    key + "|" + counts.sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" }.joined(separator: ",")
+                }))
+        }
+        return result
+    }
+
+    private func writeDeviceStatus(documentsURL: URL, error: Error?) {
+        do {
+            let status = DeviceSyncStatus(
+                deviceId: localDeviceId(),
+                name: Host.current().localizedName ?? "Mac",
+                appVersion: Self.appVersionString(),
+                lastSyncAt: Date().timeIntervalSince1970,
+                lastSyncOK: error == nil,
+                lastError: error.map { ($0 as? LocalizedError)?.errorDescription ?? String(describing: $0) },
+                payloads: try localPayloadSummaries()
+            )
+            let directory = documentsURL.appendingPathComponent(Self.deviceStatusDirectoryName)
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            let url = directory.appendingPathComponent("\(status.deviceId).json")
+            let data = try JSONEncoder().encode(status)
+
+            var coordinatorError: NSError?
+            var writeError: Error?
+            NSFileCoordinator().coordinate(writingItemAt: url, options: .forReplacing, error: &coordinatorError) { coordURL in
+                do { try data.write(to: coordURL, options: .atomic) } catch { writeError = error }
+            }
+            if let failure = coordinatorError ?? writeError { throw failure }
+        } catch {
+            // Status is informational; never fail a sync over it
+            NSLog("MarmotIM: [W][sync] device status not written error=\(error)")
+        }
+    }
+
+    private static func appVersionString() -> String {
+        let info = Bundle.main.infoDictionary
+        let version = info?["CFBundleShortVersionString"] as? String ?? "?"
+        let build = info?["CFBundleVersion"] as? String ?? "?"
+        return "\(version) (\(build))"
+    }
+
+    /// Every device's published status in `documentsURL/devices`
+    internal func readDeviceStatuses(documentsURL: URL) -> [DeviceSyncStatus] {
+        let directory = documentsURL.appendingPathComponent(Self.deviceStatusDirectoryName)
+        guard let urls = try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil) else {
+            return []
+        }
+        // A not-yet-downloaded file shows up as ".<name>.json.icloud"
+        let names = Set(urls.map { url -> String in
+            var name = url.lastPathComponent
+            if name.hasPrefix("."), name.hasSuffix(".icloud") {
+                name = String(name.dropFirst().dropLast(".icloud".count))
+            }
+            return name
+        }).filter { $0.hasSuffix(".json") }
+
+        return names.compactMap { name in
+            let url = directory.appendingPathComponent(name)
+            guard ensureFileDownloaded(at: url) == .ready else { return nil }
+            var coordinatorError: NSError?
+            var status: DeviceSyncStatus?
+            NSFileCoordinator().coordinate(readingItemAt: url, options: [], error: &coordinatorError) { coordURL in
+                if let data = try? Data(contentsOf: coordURL) {
+                    status = try? JSONDecoder().decode(DeviceSyncStatus.self, from: data)
+                }
+            }
+            return status
+        }
+    }
+
+    /// Snapshot for the settings page. Reads files; call off the main thread.
+    func loadOverview() -> SyncOverview {
+        let available = FileManager.default.ubiquityIdentityToken != nil
+        let deviceId = localDeviceId()
+        guard available,
+              let container = FileManager.default.url(forUbiquityContainerIdentifier: containerIdentifier) else {
+            return SyncOverview(iCloudAvailable: available, containerFound: false,
+                                localDeviceId: deviceId, devices: [], files: [])
+        }
+        let documentsURL = container.appendingPathComponent("Documents")
+        let fileNames = [favoritesFileName, suppressedWordsFileName, relativeOrderingFileName,
+                         learningV2FileName, filterFreqV2FileName, learningFileName, filterFreqFileName]
+        let files = fileNames.compactMap { cloudState(of: documentsURL.appendingPathComponent($0)) }
+        return SyncOverview(iCloudAvailable: true, containerFound: true, localDeviceId: deviceId,
+                            devices: readDeviceStatuses(documentsURL: documentsURL), files: files)
+    }
+
+    private func cloudState(of url: URL) -> SyncFileCloudState? {
+        guard FileManager.default.fileExists(atPath: url.path) else { return nil }
+        var fresh = url
+        fresh.removeAllCachedResourceValues()
+        let values = try? fresh.resourceValues(forKeys: [
+            .ubiquitousItemIsUploadedKey, .ubiquitousItemIsUploadingKey,
+            .ubiquitousItemUploadingErrorKey, .contentModificationDateKey,
+        ])
+        return SyncFileCloudState(
+            name: url.lastPathComponent,
+            modified: values?.contentModificationDate,
+            isUploaded: values?.ubiquitousItemIsUploaded ?? false,
+            isUploading: values?.ubiquitousItemIsUploading ?? false,
+            conflictCount: NSFileVersion.unresolvedConflictVersionsOfItem(at: url)?.count ?? 0,
+            uploadError: values?.ubiquitousItemUploadingError?.localizedDescription
+        )
     }
 
     // MARK: - Counter Payloads (v2): user_learning, filter_user_freq
@@ -1394,6 +1563,10 @@ extension Notification.Name {
     /// Posted when sync merged remote rows into the local user_learning table.
     /// Observers (AppDelegate) reload DictionaryEngine.userLearningCache.
     static let userLearningDidChange = Notification.Name("MarmotIMUserLearningDidChange")
+
+    /// Posted when a sync finishes or another Mac's device status file
+    /// changes; the settings iCloud page reloads its overview.
+    static let syncOverviewDidChange = Notification.Name("MarmotIMSyncOverviewDidChange")
 
     /// Posted by VocabularyDatabase after a local (non-sync) change to a
     /// synced user table, so iCloudSyncManager can upload it soon instead of

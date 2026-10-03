@@ -1307,21 +1307,7 @@ class InputController: IMKInputController {
     }
 
     private func formatTimeAgo(_ date: Date) -> String {
-        let seconds = Int(-date.timeIntervalSinceNow)
-
-        if seconds < 60 {
-            return "刚刚"
-        } else if seconds < 3600 {
-            return "\(seconds / 60)分钟前"
-        } else if seconds < 86400 {
-            return "\(seconds / 3600)小时前"
-        } else if seconds < 604800 {
-            return "\(seconds / 86400)天前"
-        } else {
-            let formatter = DateFormatter()
-            formatter.dateFormat = "MM-dd HH:mm"
-            return formatter.string(from: date)
-        }
+        SyncStatusPresenter.timeAgo(date)
     }
 
     @objc private func syncNow(_ sender: Any?) {
@@ -1437,6 +1423,25 @@ final class ActiveInputControllerRegistry {
 /// 所以判定搬到这里：纯输入、纯输出、没有 IMK，测试可以把每一格都钉住。
 /// `InputController` 只负责把 `iCloudSyncManager` 的状态喂进来、把结果画出去。
 enum SyncStatusPresenter {
+
+    /// 「刚刚 / N分钟前 / N小时前 / N天前」，一周以上给日期。菜单和设置里的 iCloud 页共用。
+    static func timeAgo(_ date: Date, now: Date = Date()) -> String {
+        let seconds = Int(now.timeIntervalSince(date))
+
+        if seconds < 60 {
+            return "刚刚"
+        } else if seconds < 3600 {
+            return "\(seconds / 60)分钟前"
+        } else if seconds < 86400 {
+            return "\(seconds / 3600)小时前"
+        } else if seconds < 604800 {
+            return "\(seconds / 86400)天前"
+        } else {
+            let formatter = DateFormatter()
+            formatter.dateFormat = "MM-dd HH:mm"
+            return formatter.string(from: date)
+        }
+    }
 
     /// 顺序即语义，且**失败必须排在「从未同步」之前** —— 见上面那段。
     static func text(isAvailable: Bool,
