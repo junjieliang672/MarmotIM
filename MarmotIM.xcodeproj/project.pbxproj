@@ -9,13 +9,12 @@
 /* Begin PBXBuildFile section */
 		942FAF62E27825F3C56D93D3 /* CompactIndex.swift in Sources */ = {isa = PBXBuildFile; fileRef = F42251310BC5680321494D60 /* CompactIndex.swift */; };
 		96D86D02279F29A2CCB3451E /* MarmotLogoView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8614B2A644D450D6AF22833E /* MarmotLogoView.swift */; };
-		MARMOTRECORDINGVIEW_SWIFT /* MarmotRecordingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = MARMOTRECORDINGVIEW_SWIFT_REF /* MarmotRecordingView.swift */; };
 		A4A9314E072C1845129A0515 /* VisualEffectView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 82937A1A9F7D91EE509602A3 /* VisualEffectView.swift */; };
 		ABOUTVIEW_SWIFT /* AboutView.swift in Sources */ = {isa = PBXBuildFile; fileRef = ABOUTVIEW_SWIFT_REF /* AboutView.swift */; };
 		APPCONFIG_SWIFT /* AppConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = APPCONFIG_SWIFT_REF /* AppConfig.swift */; };
 		APPDELEGATE_SWIFT /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = APPDELEGATE_SWIFT_REF /* AppDelegate.swift */; };
-		ASRCLIENT_SWIFT /* ASRClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = ASRCLIENT_SWIFT_REF /* ASRClient.swift */; };
 		ASRAGENTSTATUS_SWIFT /* ASRAgentStatus.swift in Sources */ = {isa = PBXBuildFile; fileRef = ASRAGENTSTATUS_SWIFT_REF /* ASRAgentStatus.swift */; };
+		ASRCLIENT_SWIFT /* ASRClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = ASRCLIENT_SWIFT_REF /* ASRClient.swift */; };
 		ASRHEALTHMONITOR_SWIFT /* ASRHealthMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = ASRHEALTHMONITOR_SWIFT_REF /* ASRHealthMonitor.swift */; };
 		ASSETS_BUILD /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = ASSETS_REF /* Assets.xcassets */; };
 		AUDIORECORDER_SWIFT /* AudioRecorder.swift in Sources */ = {isa = PBXBuildFile; fileRef = AUDIORECORDER_SWIFT_REF /* AudioRecorder.swift */; };
@@ -24,10 +23,9 @@
 		CANDIDATEWIN_SWIFT /* CandidateWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = CANDIDATEWIN_SWIFT_REF /* CandidateWindow.swift */; };
 		CD79C8E494C4295842A8153C /* UserTierIndex.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2E829BD9C75CF11CD1945BC6 /* UserTierIndex.swift */; };
 		D1E9902BFDE961700B841B88 /* SuppressedWordsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 30978ACAE0C248DBDF722697 /* SuppressedWordsView.swift */; };
-		RELORDERVIEW_SWIFT /* RelativeOrderingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = RELORDERVIEW_SWIFT_REF /* RelativeOrderingView.swift */; };
-		DICTMGMT_SWIFT /* DictionaryManagementView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DICTMGMT_SWIFT_REF /* DictionaryManagementView.swift */; };
 		DICTENGINE_SWIFT /* DictionaryEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = DICTENGINE_SWIFT_REF /* DictionaryEngine.swift */; };
 		DICTENTRY_SWIFT /* DictionaryEntry.swift in Sources */ = {isa = PBXBuildFile; fileRef = DICTENTRY_SWIFT_REF /* DictionaryEntry.swift */; };
+		DICTMGMT_SWIFT /* DictionaryManagementView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DICTMGMT_SWIFT_REF /* DictionaryManagementView.swift */; };
 		ENGLISHWORDINDEX_SWIFT /* EnglishWordIndex.swift in Sources */ = {isa = PBXBuildFile; fileRef = ENGLISHWORDINDEX_SWIFT_REF /* EnglishWordIndex.swift */; };
 		ENTABLE_TXT /* en_table.txt in Resources */ = {isa = PBXBuildFile; fileRef = ENTABLE_TXT_REF /* en_table.txt */; };
 		F5FE4749BE7140CABCCD842A /* HotTierIndex.swift in Sources */ = {isa = PBXBuildFile; fileRef = 65A3A4EBE7E620D359EA4DA0 /* HotTierIndex.swift */; };
@@ -38,11 +36,13 @@
 		INPUTMETHOD_FW /* InputMethodKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = INPUTMETHOD_FW_REF /* InputMethodKit.framework */; };
 		JIANMA_TXT /* jianma.txt in Resources */ = {isa = PBXBuildFile; fileRef = JIANMA_TXT_REF /* jianma.txt */; };
 		MAIN_SWIFT /* main.swift in Sources */ = {isa = PBXBuildFile; fileRef = MAIN_SWIFT_REF /* main.swift */; };
+		MARMOTRECORDINGVIEW_SWIFT /* MarmotRecordingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = MARMOTRECORDINGVIEW_SWIFT_REF /* MarmotRecordingView.swift */; };
 		MODEINDICATOR_SWIFT /* ModeIndicator.swift in Sources */ = {isa = PBXBuildFile; fileRef = MODEINDICATOR_SWIFT_REF /* ModeIndicator.swift */; };
 		PREFIXTRIE_SWIFT /* PrefixTrie.swift in Sources */ = {isa = PBXBuildFile; fileRef = PREFIXTRIE_SWIFT_REF /* PrefixTrie.swift */; };
 		PRELOAD_SWIFT /* DictionaryPreloadService.swift in Sources */ = {isa = PBXBuildFile; fileRef = PRELOAD_SWIFT_REF /* DictionaryPreloadService.swift */; };
 		PUNCTUATION_SWIFT /* PunctuationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = PUNCTUATION_SWIFT_REF /* PunctuationView.swift */; };
 		RANKER_SWIFT /* CandidateRanker.swift in Sources */ = {isa = PBXBuildFile; fileRef = RANKER_SWIFT_REF /* CandidateRanker.swift */; };
+		RELORDERVIEW_SWIFT /* RelativeOrderingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = RELORDERVIEW_SWIFT_REF /* RelativeOrderingView.swift */; };
 		RELORDER_SWIFT /* RelativeOrderingRule.swift in Sources */ = {isa = PBXBuildFile; fileRef = RELORDER_SWIFT_REF /* RelativeOrderingRule.swift */; };
 		REVERSELOOKUP_SWIFT /* ReverseLookupTable.swift in Sources */ = {isa = PBXBuildFile; fileRef = REVERSELOOKUP_SWIFT_REF /* ReverseLookupTable.swift */; };
 		SELECTIONCAPTURE_SWIFT /* SelectionCapture.swift in Sources */ = {isa = PBXBuildFile; fileRef = SELECTIONCAPTURE_SWIFT_REF /* SelectionCapture.swift */; };
@@ -62,21 +62,18 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
-		1610DB0D2564315AA141A20A /* LRUCache.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = LRUCache.swift; path = LRUCache.swift; sourceTree = "<group>"; };
-		2E829BD9C75CF11CD1945BC6 /* UserTierIndex.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = UserTierIndex.swift; path = UserTierIndex.swift; sourceTree = "<group>"; };
+		1610DB0D2564315AA141A20A /* LRUCache.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = LRUCache.swift; sourceTree = "<group>"; };
+		2E829BD9C75CF11CD1945BC6 /* UserTierIndex.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = UserTierIndex.swift; sourceTree = "<group>"; };
 		30978ACAE0C248DBDF722697 /* SuppressedWordsView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SuppressedWordsView.swift; sourceTree = "<group>"; };
-		RELORDERVIEW_SWIFT_REF /* RelativeOrderingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RelativeOrderingView.swift; sourceTree = "<group>"; };
-		DICTMGMT_SWIFT_REF /* DictionaryManagementView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DictionaryManagementView.swift; sourceTree = "<group>"; };
-		65A3A4EBE7E620D359EA4DA0 /* HotTierIndex.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = HotTierIndex.swift; path = HotTierIndex.swift; sourceTree = "<group>"; };
+		65A3A4EBE7E620D359EA4DA0 /* HotTierIndex.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = HotTierIndex.swift; sourceTree = "<group>"; };
 		82937A1A9F7D91EE509602A3 /* VisualEffectView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = VisualEffectView.swift; sourceTree = "<group>"; };
 		8614B2A644D450D6AF22833E /* MarmotLogoView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MarmotLogoView.swift; sourceTree = "<group>"; };
-		MARMOTRECORDINGVIEW_SWIFT_REF /* MarmotRecordingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarmotRecordingView.swift; sourceTree = "<group>"; };
 		ABOUTVIEW_SWIFT_REF /* AboutView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AboutView.swift; sourceTree = "<group>"; };
 		APPCONFIG_SWIFT_REF /* AppConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppConfig.swift; sourceTree = "<group>"; };
 		APPDELEGATE_SWIFT_REF /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
 		APP_REF /* MarmotIM.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = MarmotIM.app; sourceTree = BUILT_PRODUCTS_DIR; };
-		ASRCLIENT_SWIFT_REF /* ASRClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ASRClient.swift; sourceTree = "<group>"; };
 		ASRAGENTSTATUS_SWIFT_REF /* ASRAgentStatus.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ASRAgentStatus.swift; sourceTree = "<group>"; };
+		ASRCLIENT_SWIFT_REF /* ASRClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ASRClient.swift; sourceTree = "<group>"; };
 		ASRHEALTHMONITOR_SWIFT_REF /* ASRHealthMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ASRHealthMonitor.swift; sourceTree = "<group>"; };
 		ASSETS_REF /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		AUDIORECORDER_SWIFT_REF /* AudioRecorder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioRecorder.swift; sourceTree = "<group>"; };
@@ -84,10 +81,11 @@
 		CANDIDATEWIN_SWIFT_REF /* CandidateWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CandidateWindow.swift; sourceTree = "<group>"; };
 		DICTENGINE_SWIFT_REF /* DictionaryEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DictionaryEngine.swift; sourceTree = "<group>"; };
 		DICTENTRY_SWIFT_REF /* DictionaryEntry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DictionaryEntry.swift; sourceTree = "<group>"; };
+		DICTMGMT_SWIFT_REF /* DictionaryManagementView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DictionaryManagementView.swift; sourceTree = "<group>"; };
 		ENGLISHWORDINDEX_SWIFT_REF /* EnglishWordIndex.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EnglishWordIndex.swift; sourceTree = "<group>"; };
 		ENTABLE_TXT_REF /* en_table.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = en_table.txt; sourceTree = "<group>"; };
 		ENTITLEMENTS_REF /* MarmotIM.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = MarmotIM.entitlements; sourceTree = "<group>"; };
-		F42251310BC5680321494D60 /* CompactIndex.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = CompactIndex.swift; path = CompactIndex.swift; sourceTree = "<group>"; };
+		F42251310BC5680321494D60 /* CompactIndex.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CompactIndex.swift; sourceTree = "<group>"; };
 		FRECENCY_SWIFT_REF /* FrecencyScore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FrecencyScore.swift; sourceTree = "<group>"; };
 		ICLOUDSYNCMGR_SWIFT_REF /* iCloudSyncManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = iCloudSyncManager.swift; sourceTree = "<group>"; };
 		INFOPLIST_EN_REF /* en */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = en; path = en.lproj/InfoPlist.strings; sourceTree = "<group>"; };
@@ -97,11 +95,13 @@
 		INPUTMETHOD_FW_REF /* InputMethodKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = InputMethodKit.framework; path = System/Library/Frameworks/InputMethodKit.framework; sourceTree = SDKROOT; };
 		JIANMA_TXT_REF /* jianma.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = jianma.txt; sourceTree = "<group>"; };
 		MAIN_SWIFT_REF /* main.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = main.swift; sourceTree = "<group>"; };
+		MARMOTRECORDINGVIEW_SWIFT_REF /* MarmotRecordingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarmotRecordingView.swift; sourceTree = "<group>"; };
 		MODEINDICATOR_SWIFT_REF /* ModeIndicator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModeIndicator.swift; sourceTree = "<group>"; };
 		PREFIXTRIE_SWIFT_REF /* PrefixTrie.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrefixTrie.swift; sourceTree = "<group>"; };
 		PRELOAD_SWIFT_REF /* DictionaryPreloadService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DictionaryPreloadService.swift; sourceTree = "<group>"; };
 		PUNCTUATION_SWIFT_REF /* PunctuationView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PunctuationView.swift; sourceTree = "<group>"; };
 		RANKER_SWIFT_REF /* CandidateRanker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CandidateRanker.swift; sourceTree = "<group>"; };
+		RELORDERVIEW_SWIFT_REF /* RelativeOrderingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RelativeOrderingView.swift; sourceTree = "<group>"; };
 		RELORDER_SWIFT_REF /* RelativeOrderingRule.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RelativeOrderingRule.swift; sourceTree = "<group>"; };
 		REVERSELOOKUP_SWIFT_REF /* ReverseLookupTable.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReverseLookupTable.swift; sourceTree = "<group>"; };
 		SELECTIONCAPTURE_SWIFT_REF /* SelectionCapture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SelectionCapture.swift; sourceTree = "<group>"; };
