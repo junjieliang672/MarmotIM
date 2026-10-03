@@ -136,6 +136,36 @@ class DictionaryEngine {
         NSLog("MarmotIM: Loaded \(userLearningCache.count) user learning entries")
     }
 
+    /// Pull user_learning rows that sync merged into the database back into
+    /// the cache. A row replaces the cached value only when it has more
+    /// selections or a newer last use, so a selection made while the sync
+    /// was running (cache ahead of the DB write) is not rolled back.
+    /// Returns the number of cache entries updated.
+    @discardableResult
+    func refreshUserLearningFromDatabase() -> Int {
+        let rows = db.loadAllUserLearning()
+
+        cacheLock.lock()
+        defer { cacheLock.unlock() }
+
+        var updated = 0
+        for (entryId, row) in rows {
+            if let cached = userLearningCache[entryId],
+               row.accessCount <= cached.accessCount,
+               row.lastAccessTimestamp <= cached.lastAccessTimestamp {
+                continue
+            }
+            userLearningCache[entryId] = UserEntryData(
+                entryId: entryId,
+                accessCount: row.accessCount,
+                lastAccessTimestamp: row.lastAccessTimestamp,
+                cachedScore: row.totalScore
+            )
+            updated += 1
+        }
+        return updated
+    }
+
     /// Finalize preloading
     func finalizePreload() {
         hotTierIndex.finalizePreload()

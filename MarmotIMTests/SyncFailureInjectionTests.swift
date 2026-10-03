@@ -22,16 +22,12 @@ final class SyncFailureInjectionTests: XCTestCase {
     }
 
     // F-SYNC-01: corrupt JSON on each of the 5 payload paths. syncOnce
-    // currently PROPAGATES the decode error; we assert it throws, and
-    // that device 2's local DB is unchanged.
+    // PROPAGATES the decode error; we assert it throws, and that device
+    // 2's local DB is unchanged for that payload.
     //
-    // NOTE: current production behavior is that ONE corrupt payload
-    // throws and bubbles up through syncOnce, which means the
-    // subsequent per-payload sync calls are skipped. That's not
-    // ideal (partial-payload skipping would be nicer) but fixing it
-    // is out of this spec's scope per the current_behavior_expectation
-    // note in the spec. We pin the throw so any future change to
-    // silently-swallow is caught.
+    // The other payloads still run before the error is rethrown — see
+    // SyncDeliveryTests.testCorruptPayloadDoesNotBlockOtherPayloads. We
+    // pin the throw so any future change to silently-swallow is caught.
     func testFSync01_corruptJSON_learning_throws() throws {
         let cloud = harness.iCloudDocuments.appendingPathComponent("user_learning.json")
         // Seed cloud first so the file exists before we corrupt it.

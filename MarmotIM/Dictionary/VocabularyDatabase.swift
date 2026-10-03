@@ -1054,6 +1054,19 @@ final class VocabularyDatabase {
         NSLog("MarmotIM: Dictionary entries cleared (user learning preserved)")
     }
 
+    /// Tell iCloudSyncManager a synced user table changed locally, so it
+    /// uploads within seconds instead of on the 30-minute timer. Only the
+    /// UI-facing mutators call this; sync writes through its own connection
+    /// and never posts, so a sync can't schedule itself.
+    private func notifyIfSucceeded(_ ok: Bool) -> Bool {
+        if ok {
+            DispatchQueue.main.async {
+                NotificationCenter.default.post(name: .localSyncedDataDidChange, object: nil)
+            }
+        }
+        return ok
+    }
+
     // MARK: - User Favorites (control+= added entries)
 
     /// Add a user favorite entry (called when user adds via control+=)
@@ -1089,7 +1102,7 @@ final class VocabularyDatabase {
             sqlite3_bind_null(statement, 3)
         }
 
-        return sqlite3_step(statement) == SQLITE_DONE
+        return notifyIfSucceeded(sqlite3_step(statement) == SQLITE_DONE)
     }
 
     /// Remove a user favorite entry (Soft Delete)
@@ -1112,7 +1125,7 @@ final class VocabularyDatabase {
         
         sqlite3_bind_text(statement, 1, text, -1, SQLITE_TRANSIENT)
         
-        return sqlite3_step(statement) == SQLITE_DONE
+        return notifyIfSucceeded(sqlite3_step(statement) == SQLITE_DONE)
     }
 
     /// Get all user favorites (active only)
@@ -1164,7 +1177,7 @@ final class VocabularyDatabase {
 
         // Update is_deleted flag and timestamp instead of physical delete
         let sql = "UPDATE user_favorites SET is_deleted = 1, added_timestamp = strftime('%s', 'now') WHERE id = \(id)"
-        return executeSQL(sql)
+        return notifyIfSucceeded(executeSQL(sql))
     }
 
     /// Get all deleted user favorites (for cleanup purposes)
@@ -1236,7 +1249,7 @@ final class VocabularyDatabase {
         if result {
             NSLog("MarmotIM: suppressWord - added '%@' to suppressed words", text)
         }
-        return result
+        return notifyIfSucceeded(result)
     }
 
     /// Remove a word from the suppressed words list (soft delete)
@@ -1264,7 +1277,7 @@ final class VocabularyDatabase {
         if result {
             NSLog("MarmotIM: unsuppressWord - removed '%@' from suppressed words", text)
         }
-        return result
+        return notifyIfSucceeded(result)
     }
 
     /// Get all active suppressed words (not deleted)
@@ -1345,7 +1358,7 @@ final class VocabularyDatabase {
         defer { lock.unlock() }
 
         let sql = "UPDATE user_suppressed_words SET is_deleted = 1, suppressed_timestamp = strftime('%s', 'now') WHERE id = \(id)"
-        return executeSQL(sql)
+        return notifyIfSucceeded(executeSQL(sql))
     }
 
     /// Get all suppressed words including deleted ones (for sync)
@@ -1505,6 +1518,7 @@ final class VocabularyDatabase {
         )
 
         NSLog("MarmotIM: [I][dict] relative order rule added rule_id=\(ruleId) chars_a=\(a.count) chars_b=\(b.count)")
+        _ = notifyIfSucceeded(true)
         return .success(rule)
     }
 
@@ -1534,7 +1548,7 @@ final class VocabularyDatabase {
         if ok {
             NSLog("MarmotIM: [I][dict] relative order rule removed rule_id=\(ruleId)")
         }
-        return ok
+        return notifyIfSucceeded(ok)
     }
 
     /// Return non-deleted relative-ordering rules, sorted by created_at ASC.

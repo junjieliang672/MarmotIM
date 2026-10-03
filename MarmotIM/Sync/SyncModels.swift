@@ -155,3 +155,12 @@ extension FilterFreqRecord {
         return (String(parts[0]), String(parts[1]), String(parts[2]))
     }
 }
+
+// Equality lets the sync skip rewriting an iCloud file whose content would not
+// change; every rewrite fires NSMetadataQuery on both Macs and triggers another
+// sync round.
+extension LearningRecord: Equatable {}
+extension FavoriteRecord: Equatable {}
+extension FilterFreqRecord: Equatable {}
+extension SuppressedWordRecord: Equatable {}
+extension RelativeOrderingRecord: Equatable {}

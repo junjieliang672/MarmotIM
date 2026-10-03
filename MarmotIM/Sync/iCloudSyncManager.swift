@@ -1,6 +1,8 @@
 import Foundation
 import SQLite3
 
+private let SQLITE_TRANSIENT_SYNC = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
+
 /// Manages iCloud sync for user dictionary data
 /// Runs entirely on a background queue - zero impact on main thread
 class iCloudSyncManager {
@@ -37,6 +39,11 @@ class iCloudSyncManager {
     private var metadataQuery: NSMetadataQuery?
     private let syncInterval: TimeInterval = 1800  // 30 minutes
 
+    /// Delay between a local edit and the sync it triggers. Several edits in a
+    /// row (deleting a batch of words in settings) collapse into one upload.
+    private let localChangeDebounce: TimeInterval = 5
+    private var pendingLocalSync: DispatchWorkItem?
+
     // Database path
     private let localDBPath: URL
 
@@ -69,6 +76,12 @@ class iCloudSyncManager {
         }
         setupMetadataQuery()
         startTimer()
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(localSyncedDataDidChange(_:)),
+            name: .localSyncedDataDidChange,
+            object: nil
+        )
         NSLog("MarmotIM: iCloudSyncManager started")
     }
 
@@ -141,6 +154,19 @@ class iCloudSyncManager {
 
             query.start()
             self.metadataQuery = query
+        }
+    }
+
+    @objc private func localSyncedDataDidChange(_ notification: Notification) {
+        syncQueue.async { [weak self] in
+            guard let self = self else { return }
+            self.pendingLocalSync?.cancel()
+            let work = DispatchWorkItem { [weak self] in
+                NSLog("MarmotIM: [I][sync] local change, syncing")
+                self?.performSync()
+            }
+            self.pendingLocalSync = work
+            self.syncQueue.asyncAfter(deadline: .now() + self.localChangeDebounce, execute: work)
         }
     }
 
@@ -221,11 +247,26 @@ class iCloudSyncManager {
         localDBPathOverride = dbPath
         defer { localDBPathOverride = savedPath }
 
-        try syncLearningData(documentsURL: documentsURL)
-        try syncFavoritesData(documentsURL: documentsURL)
-        try syncFilterFreqData(documentsURL: documentsURL)
-        try syncSuppressedWordsData(documentsURL: documentsURL)
-        try syncRelativeOrderingData(documentsURL: documentsURL)
+        // Each payload is independent: a corrupt or unreadable file must not
+        // stop the other four from syncing. The first error is rethrown at
+        // the end so the menu still reports the failure.
+        let payloads: [(String, (URL) throws -> Void)] = [
+            (learningFileName, syncLearningData),
+            (favoritesFileName, syncFavoritesData),
+            (filterFreqFileName, syncFilterFreqData),
+            (suppressedWordsFileName, syncSuppressedWordsData),
+            (relativeOrderingFileName, syncRelativeOrderingData),
+        ]
+        var firstError: Error?
+        for (name, sync) in payloads {
+            do {
+                try sync(documentsURL)
+            } catch {
+                NSLog("MarmotIM: [E][sync] payload failed file=\(name) error=\(error)")
+                if firstError == nil { firstError = error }
+            }
+        }
+        if let error = firstError { throw error }
     }
 
     /// Dynamic DB path used by all read/write helpers. Defaults to the
@@ -286,16 +327,26 @@ class iCloudSyncManager {
         case .ready:
             // Normal case: file is ready, proceed with merge
             let remoteRecords = try readRemoteLearningContent(from: remoteURL)
-            let merged = SyncMerger.mergeLearning(local: localRecords, remote: remoteRecords)
+            let (remoteFolded, conflicts) = foldConflictVersions(
+                remoteRecords, at: remoteURL, merge: SyncMerger.mergeLearning)
+            let merged = SyncMerger.mergeLearning(local: localRecords, remote: remoteFolded)
 
             let changed = SyncMerger.findChangedLearning(merged: merged, original: localRecords)
             if !changed.isEmpty {
                 try writeLocalLearning(changed)
                 NSLog("MarmotIM: Updated \(changed.count) learning records")
+                // The ranker reads userLearningCache, which is only filled at
+                // preload. Without a reload the synced rows never reach ranking,
+                // and the next selection writes the stale cached score back.
+                DispatchQueue.main.async {
+                    NotificationCenter.default.post(name: .userLearningDidChange, object: nil)
+                }
             }
 
-            // Safe to write merged result back
-            try writeRemoteLearning(merged, to: remoteURL)
+            if merged != remoteRecords || !conflicts.isEmpty {
+                try writeRemoteLearning(merged, to: remoteURL)
+            }
+            resolveConflictVersions(conflicts, at: remoteURL)
             markPayloadSynced(learningFileName)
 
         case .notFound:
@@ -338,7 +389,9 @@ class iCloudSyncManager {
         case .ready:
             // Normal case: file is ready, proceed with merge
             let remoteRecords = try readRemoteFavoritesContent(from: remoteURL)
-            let merged = SyncMerger.mergeFavorites(local: localRecords, remote: remoteRecords)
+            let (remoteFolded, conflicts) = foldConflictVersions(
+                remoteRecords, at: remoteURL, merge: SyncMerger.mergeFavorites)
+            let merged = SyncMerger.mergeFavorites(local: localRecords, remote: remoteFolded)
 
             let changed = SyncMerger.findChangedFavorites(merged: merged, original: localRecords)
             if !changed.isEmpty {
@@ -354,8 +407,10 @@ class iCloudSyncManager {
                 }
             }
 
-            // Safe to write merged result back
-            try writeRemoteFavorites(merged, to: remoteURL)
+            if merged != remoteRecords || !conflicts.isEmpty {
+                try writeRemoteFavorites(merged, to: remoteURL)
+            }
+            resolveConflictVersions(conflicts, at: remoteURL)
             markPayloadSynced(favoritesFileName)
 
         case .notFound:
@@ -389,7 +444,9 @@ class iCloudSyncManager {
         case .ready:
             // Normal case: file is ready, proceed with merge
             let remoteRecords = try readRemoteFilterFreqContent(from: remoteURL)
-            let merged = SyncMerger.mergeFilterFreq(local: localRecords, remote: remoteRecords)
+            let (remoteFolded, conflicts) = foldConflictVersions(
+                remoteRecords, at: remoteURL, merge: SyncMerger.mergeFilterFreq)
+            let merged = SyncMerger.mergeFilterFreq(local: localRecords, remote: remoteFolded)
 
             let changed = SyncMerger.findChangedFilterFreq(merged: merged, original: localRecords)
             if !changed.isEmpty {
@@ -397,8 +454,10 @@ class iCloudSyncManager {
                 NSLog("MarmotIM: Updated \(changed.count) filter freq records")
             }
 
-            // Safe to write merged result back
-            try writeRemoteFilterFreq(merged, to: remoteURL)
+            if merged != remoteRecords || !conflicts.isEmpty {
+                try writeRemoteFilterFreq(merged, to: remoteURL)
+            }
+            resolveConflictVersions(conflicts, at: remoteURL)
             markPayloadSynced(filterFreqFileName)
 
         case .notFound:
@@ -432,7 +491,9 @@ class iCloudSyncManager {
         case .ready:
             // Normal case: file is ready, proceed with merge
             let remoteRecords = try readRemoteSuppressedWordsContent(from: remoteURL)
-            let merged = SyncMerger.mergeSuppressedWords(local: localRecords, remote: remoteRecords)
+            let (remoteFolded, conflicts) = foldConflictVersions(
+                remoteRecords, at: remoteURL, merge: SyncMerger.mergeSuppressedWords)
+            let merged = SyncMerger.mergeSuppressedWords(local: localRecords, remote: remoteFolded)
 
             let changed = SyncMerger.findChangedSuppressedWords(merged: merged, original: localRecords)
             if !changed.isEmpty {
@@ -444,8 +505,10 @@ class iCloudSyncManager {
                 }
             }
 
-            // Safe to write merged result back
-            try writeRemoteSuppressedWords(merged, to: remoteURL)
+            if merged != remoteRecords || !conflicts.isEmpty {
+                try writeRemoteSuppressedWords(merged, to: remoteURL)
+            }
+            resolveConflictVersions(conflicts, at: remoteURL)
             markPayloadSynced(suppressedWordsFileName)
 
         case .notFound:
@@ -478,9 +541,12 @@ class iCloudSyncManager {
         case .ready:
             NSLog("MarmotIM: [I][sync] syncing relative order file status=ready")
             let remoteRecords = try readRemoteRelativeOrderingContent(from: remoteURL)
+            let (remoteFolded, conflicts) = foldConflictVersions(remoteRecords, at: remoteURL) {
+                SyncMerger.mergeRelativeOrdering(local: $0, remote: $1).merged
+            }
             let (merged, dropped) = SyncMerger.mergeRelativeOrdering(
                 local: localRecords,
-                remote: remoteRecords
+                remote: remoteFolded
             )
             let changed = SyncMerger.findChangedRelativeOrdering(merged: merged, original: localRecords)
             if !changed.isEmpty {
@@ -492,7 +558,10 @@ class iCloudSyncManager {
             } else {
                 NSLog("MarmotIM: [I][sync] relative order merge complete records_received=\(remoteRecords.count) records_new=0 records_cycle_dropped=\(dropped.count)")
             }
-            try writeRemoteRelativeOrdering(merged, to: remoteURL)
+            if merged != remoteRecords || !conflicts.isEmpty {
+                try writeRemoteRelativeOrdering(merged, to: remoteURL)
+            }
+            resolveConflictVersions(conflicts, at: remoteURL)
             markPayloadSynced(relativeOrderingFileName)
 
         case .notFound:
@@ -566,14 +635,7 @@ class iCloudSyncManager {
     }
 
     private func writeLocalRelativeOrdering(_ records: [(String, RelativeOrderingRecord)]) throws {
-        var db: OpaquePointer?
-        guard sqlite3_open(activeLocalDBPath.path, &db) == SQLITE_OK else {
-            throw SyncError.databaseOpenFailed
-        }
-        defer { sqlite3_close(db) }
-
-        sqlite3_exec(db, "BEGIN TRANSACTION", nil, nil, nil)
-        let sql = """
+        try writeLocalRows(records, sql: """
             INSERT INTO user_relative_order
             (word_a, word_b, created_at, updated_at, is_deleted)
             VALUES (?, ?, ?, ?, ?)
@@ -581,50 +643,23 @@ class iCloudSyncManager {
                 created_at = MIN(user_relative_order.created_at, excluded.created_at),
                 updated_at = excluded.updated_at,
                 is_deleted = excluded.is_deleted
-        """
-        var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
-            sqlite3_exec(db, "ROLLBACK", nil, nil, nil)
-            throw SyncError.queryFailed
-        }
-        defer { sqlite3_finalize(stmt) }
-
-        for (key, record) in records {
+        """) { stmt, row in
+            let (key, record) = row
             guard let pair = RelativeOrderingRecord.parseKey(key) else {
                 NSLog("MarmotIM: [W][sync] relative order skipping invalid key action=noop")
-                continue
+                return false
             }
-            let aNS = pair.wordA as NSString
-            let bNS = pair.wordB as NSString
-            sqlite3_bind_text(stmt, 1, aNS.utf8String, -1, nil)
-            sqlite3_bind_text(stmt, 2, bNS.utf8String, -1, nil)
+            sqlite3_bind_text(stmt, 1, pair.wordA, -1, SQLITE_TRANSIENT_SYNC)
+            sqlite3_bind_text(stmt, 2, pair.wordB, -1, SQLITE_TRANSIENT_SYNC)
             sqlite3_bind_int(stmt, 3, Int32(record.createdAt))
             sqlite3_bind_int(stmt, 4, Int32(record.updatedAt))
             sqlite3_bind_int(stmt, 5, record.isDeleted ? 1 : 0)
-            sqlite3_step(stmt)
-            sqlite3_reset(stmt)
+            return true
         }
-        sqlite3_exec(db, "COMMIT", nil, nil, nil)
     }
 
     private func writeRemoteRelativeOrdering(_ records: [String: RelativeOrderingRecord], to url: URL) throws {
-        let syncFile = SyncFile(records: records)
-        let data = try JSONEncoder().encode(syncFile)
-
-        var coordinatorError: NSError?
-        var writeError: Error?
-        let coordinator = NSFileCoordinator()
-        coordinator.coordinate(writingItemAt: url, options: .forReplacing, error: &coordinatorError) { coordURL in
-            do {
-                try data.write(to: coordURL, options: .atomic)
-            } catch {
-                writeError = error
-            }
-        }
-        if let error = coordinatorError {
-            throw SyncError.fileCoordinationFailed(underlying: error)
-        }
-        if let error = writeError { throw error }
+        try writeRemoteRecords(records, to: url)
     }
 
     // MARK: - Read Local Database
@@ -786,8 +821,13 @@ class iCloudSyncManager {
             let resourceValues = try url.resourceValues(forKeys: [.ubiquitousItemDownloadingStatusKey])
             if let status = resourceValues.ubiquitousItemDownloadingStatus {
                 switch status {
-                case .current, .downloaded:
+                case .current:
                     return .ready
+                case .downloaded:
+                    // A local copy exists but iCloud has a newer one. Merging the
+                    // stale copy and writing it back with .forReplacing would
+                    // overwrite the other Mac's changes.
+                    return triggerDownloadAndWait(at: url)
                 case .notDownloaded:
                     return triggerDownloadAndWait(at: url)
                 default:
@@ -818,14 +858,17 @@ class iCloudSyncManager {
             let startTime = Date()
 
             while true {
-                if FileManager.default.fileExists(atPath: url.path) {
-                    // Double-check it's actually downloaded
-                    if let values = try? url.resourceValues(forKeys: [.ubiquitousItemDownloadingStatusKey]),
-                       let status = values.ubiquitousItemDownloadingStatus,
-                       status == .current || status == .downloaded {
-                        return .ready
-                    }
-                    // File exists locally, assume it's ready
+                // Wait for .current. A dataless (evicted) file already "exists"
+                // on macOS 14+, so fileExists says nothing about freshness.
+                var fetchURL = url
+                fetchURL.removeAllCachedResourceValues()
+                let status = (try? fetchURL.resourceValues(forKeys: [.ubiquitousItemDownloadingStatusKey]))?
+                    .ubiquitousItemDownloadingStatus
+                if status == .current {
+                    return .ready
+                }
+                if status == nil && FileManager.default.fileExists(atPath: url.path) {
+                    // Not an iCloud item: the local file is the file
                     return .ready
                 }
 
@@ -955,206 +998,155 @@ class iCloudSyncManager {
     // MARK: - Write Local Database
 
     private func writeLocalLearning(_ records: [(String, LearningRecord)]) throws {
-        var db: OpaquePointer?
-        guard sqlite3_open(activeLocalDBPath.path, &db) == SQLITE_OK else {
-            throw SyncError.databaseOpenFailed
-        }
-        defer { sqlite3_close(db) }
-
-        sqlite3_exec(db, "BEGIN TRANSACTION", nil, nil, nil)
-
-        let sql = """
+        try writeLocalRows(records, sql: """
             INSERT OR REPLACE INTO user_learning
             (entry_id, access_count, last_access_timestamp, total_score)
             VALUES (?, ?, ?, ?)
-        """
-        var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
-            sqlite3_exec(db, "ROLLBACK", nil, nil, nil)
-            throw SyncError.queryFailed
-        }
-        defer { sqlite3_finalize(stmt) }
-
-        for (entryIdStr, record) in records {
-            guard let entryId = Int64(entryIdStr) else { continue }
+        """) { stmt, row in
+            let (entryIdStr, record) = row
+            guard let entryId = Int64(entryIdStr) else { return false }
             sqlite3_bind_int64(stmt, 1, entryId)
             sqlite3_bind_int(stmt, 2, Int32(record.accessCount))
             sqlite3_bind_int(stmt, 3, Int32(record.lastAccessTimestamp))
             sqlite3_bind_double(stmt, 4, record.totalScore)
-            sqlite3_step(stmt)
-            sqlite3_reset(stmt)
+            return true
         }
-
-        sqlite3_exec(db, "COMMIT", nil, nil, nil)
     }
 
     private func writeLocalFavorites(_ records: [(String, FavoriteRecord)]) throws {
-        var db: OpaquePointer?
-        guard sqlite3_open(activeLocalDBPath.path, &db) == SQLITE_OK else {
-            throw SyncError.databaseOpenFailed
-        }
-        defer { sqlite3_close(db) }
-
-        sqlite3_exec(db, "BEGIN TRANSACTION", nil, nil, nil)
-
-        let sql = """
+        // user_favorites is UNIQUE(text) since schema v9, so REPLACE swaps the
+        // word's single row instead of adding a second one next to it.
+        try writeLocalRows(records, sql: """
             INSERT OR REPLACE INTO user_favorites
             (text, wubi_code, pinyin_code, added_timestamp, is_deleted)
             VALUES (?, ?, ?, ?, ?)
-        """
-        var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
-            sqlite3_exec(db, "ROLLBACK", nil, nil, nil)
-            throw SyncError.queryFailed
-        }
-        defer { sqlite3_finalize(stmt) }
-
-        for (text, record) in records {
-            let textNS = text as NSString
-            sqlite3_bind_text(stmt, 1, textNS.utf8String, -1, nil)
+        """) { stmt, row in
+            let (text, record) = row
+            sqlite3_bind_text(stmt, 1, text, -1, SQLITE_TRANSIENT_SYNC)
             if let wubi = record.wubiCode {
-                let wubiNS = wubi as NSString
-                sqlite3_bind_text(stmt, 2, wubiNS.utf8String, -1, nil)
+                sqlite3_bind_text(stmt, 2, wubi, -1, SQLITE_TRANSIENT_SYNC)
             } else {
                 sqlite3_bind_null(stmt, 2)
             }
             if let pinyin = record.pinyinCode {
-                let pinyinNS = pinyin as NSString
-                sqlite3_bind_text(stmt, 3, pinyinNS.utf8String, -1, nil)
+                sqlite3_bind_text(stmt, 3, pinyin, -1, SQLITE_TRANSIENT_SYNC)
             } else {
                 sqlite3_bind_null(stmt, 3)
             }
             sqlite3_bind_int(stmt, 4, Int32(record.addedTimestamp))
             sqlite3_bind_int(stmt, 5, record.isDeleted ? 1 : 0)
-            sqlite3_step(stmt)
-            sqlite3_reset(stmt)
+            return true
         }
-
-        sqlite3_exec(db, "COMMIT", nil, nil, nil)
     }
 
     private func writeLocalFilterFreq(_ records: [(String, FilterFreqRecord)]) throws {
-        var db: OpaquePointer?
-        guard sqlite3_open(activeLocalDBPath.path, &db) == SQLITE_OK else {
-            throw SyncError.databaseOpenFailed
-        }
-        defer { sqlite3_close(db) }
-
-        sqlite3_exec(db, "BEGIN TRANSACTION", nil, nil, nil)
-
-        let sql = """
+        try writeLocalRows(records, sql: """
             INSERT OR REPLACE INTO filter_user_freq
             (filter_type, code, word, frequency, last_used)
             VALUES (?, ?, ?, ?, ?)
-        """
-        var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
-            sqlite3_exec(db, "ROLLBACK", nil, nil, nil)
-            throw SyncError.queryFailed
-        }
-        defer { sqlite3_finalize(stmt) }
-
-        for (key, record) in records {
-            guard let parts = FilterFreqRecord.parseKey(key) else { continue }
-            let filterTypeNS = parts.filterType as NSString
-            let codeNS = parts.code as NSString
-            let wordNS = parts.word as NSString
-            sqlite3_bind_text(stmt, 1, filterTypeNS.utf8String, -1, nil)
-            sqlite3_bind_text(stmt, 2, codeNS.utf8String, -1, nil)
-            sqlite3_bind_text(stmt, 3, wordNS.utf8String, -1, nil)
+        """) { stmt, row in
+            let (key, record) = row
+            guard let parts = FilterFreqRecord.parseKey(key) else { return false }
+            sqlite3_bind_text(stmt, 1, parts.filterType, -1, SQLITE_TRANSIENT_SYNC)
+            sqlite3_bind_text(stmt, 2, parts.code, -1, SQLITE_TRANSIENT_SYNC)
+            sqlite3_bind_text(stmt, 3, parts.word, -1, SQLITE_TRANSIENT_SYNC)
             sqlite3_bind_int(stmt, 4, Int32(record.frequency))
             sqlite3_bind_double(stmt, 5, record.lastUsed)
-            sqlite3_step(stmt)
-            sqlite3_reset(stmt)
+            return true
         }
-
-        sqlite3_exec(db, "COMMIT", nil, nil, nil)
     }
 
     private func writeLocalSuppressedWords(_ records: [(String, SuppressedWordRecord)]) throws {
-        var db: OpaquePointer?
-        guard sqlite3_open(activeLocalDBPath.path, &db) == SQLITE_OK else {
-            throw SyncError.databaseOpenFailed
-        }
-        defer { sqlite3_close(db) }
-
-        sqlite3_exec(db, "BEGIN TRANSACTION", nil, nil, nil)
-
-        let sql = """
+        try writeLocalRows(records, sql: """
             INSERT OR REPLACE INTO user_suppressed_words
             (text, suppressed_timestamp, is_deleted)
             VALUES (?, ?, ?)
-        """
+        """) { stmt, row in
+            let (text, record) = row
+            sqlite3_bind_text(stmt, 1, text, -1, SQLITE_TRANSIENT_SYNC)
+            sqlite3_bind_int(stmt, 2, Int32(record.suppressedTimestamp))
+            sqlite3_bind_int(stmt, 3, record.isDeleted ? 1 : 0)
+            return true
+        }
+    }
+
+    /// Open the local DB for a sync write. The input method's own connection
+    /// writes user_learning on every selection; without a busy timeout a sync
+    /// insert that hits its lock fails immediately with SQLITE_BUSY.
+    private func openLocalDBForWriting() throws -> OpaquePointer {
+        var db: OpaquePointer?
+        guard sqlite3_open(activeLocalDBPath.path, &db) == SQLITE_OK, let handle = db else {
+            sqlite3_close(db)
+            throw SyncError.databaseOpenFailed
+        }
+        sqlite3_busy_timeout(handle, 2000)
+        return handle
+    }
+
+    /// Write `rows` in one transaction. `bind` fills the statement for a row
+    /// and returns false to skip it. Any failed step rolls the whole batch
+    /// back and throws, so the caller never uploads or marks synced a merge
+    /// that didn't land locally.
+    private func writeLocalRows<Row>(
+        _ rows: [Row],
+        sql: String,
+        bind: (OpaquePointer, Row) -> Bool
+    ) throws {
+        let db = try openLocalDBForWriting()
+        defer { sqlite3_close(db) }
+
+        guard sqlite3_exec(db, "BEGIN IMMEDIATE", nil, nil, nil) == SQLITE_OK else {
+            NSLog("MarmotIM: [E][sync] local write begin failed msg=\(String(cString: sqlite3_errmsg(db)))")
+            throw SyncError.writeFailed
+        }
+
         var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK, let statement = stmt else {
             sqlite3_exec(db, "ROLLBACK", nil, nil, nil)
             throw SyncError.queryFailed
         }
-        defer { sqlite3_finalize(stmt) }
+        defer { sqlite3_finalize(statement) }
 
-        for (text, record) in records {
-            let textNS = text as NSString
-            sqlite3_bind_text(stmt, 1, textNS.utf8String, -1, nil)
-            sqlite3_bind_int(stmt, 2, Int32(record.suppressedTimestamp))
-            sqlite3_bind_int(stmt, 3, record.isDeleted ? 1 : 0)
-            sqlite3_step(stmt)
-            sqlite3_reset(stmt)
+        for row in rows {
+            sqlite3_reset(statement)
+            sqlite3_clear_bindings(statement)
+            guard bind(statement, row) else { continue }
+            let rc = sqlite3_step(statement)
+            if rc != SQLITE_DONE {
+                NSLog("MarmotIM: [E][sync] local write step failed rc=\(rc) msg=\(String(cString: sqlite3_errmsg(db)))")
+                sqlite3_reset(statement)
+                sqlite3_exec(db, "ROLLBACK", nil, nil, nil)
+                throw SyncError.writeFailed
+            }
         }
+        sqlite3_reset(statement)
 
-        sqlite3_exec(db, "COMMIT", nil, nil, nil)
+        guard sqlite3_exec(db, "COMMIT", nil, nil, nil) == SQLITE_OK else {
+            NSLog("MarmotIM: [E][sync] local write commit failed msg=\(String(cString: sqlite3_errmsg(db)))")
+            sqlite3_exec(db, "ROLLBACK", nil, nil, nil)
+            throw SyncError.writeFailed
+        }
     }
 
     // MARK: - Write Remote (iCloud)
 
     private func writeRemoteLearning(_ records: [String: LearningRecord], to url: URL) throws {
-        let syncFile = SyncFile(records: records)
-        let data = try JSONEncoder().encode(syncFile)
-
-        var coordinatorError: NSError?
-        var writeError: Error?
-
-        let coordinator = NSFileCoordinator()
-        coordinator.coordinate(writingItemAt: url, options: .forReplacing, error: &coordinatorError) { coordURL in
-            do {
-                try data.write(to: coordURL, options: .atomic)
-            } catch {
-                writeError = error
-            }
-        }
-
-        if let error = coordinatorError {
-            throw SyncError.fileCoordinationFailed(underlying: error)
-        }
-        if let error = writeError {
-            throw error
-        }
+        try writeRemoteRecords(records, to: url)
     }
 
     private func writeRemoteFavorites(_ records: [String: FavoriteRecord], to url: URL) throws {
-        let syncFile = SyncFile(records: records)
-        let data = try JSONEncoder().encode(syncFile)
-
-        var coordinatorError: NSError?
-        var writeError: Error?
-
-        let coordinator = NSFileCoordinator()
-        coordinator.coordinate(writingItemAt: url, options: .forReplacing, error: &coordinatorError) { coordURL in
-            do {
-                try data.write(to: coordURL, options: .atomic)
-            } catch {
-                writeError = error
-            }
-        }
-
-        if let error = coordinatorError {
-            throw SyncError.fileCoordinationFailed(underlying: error)
-        }
-        if let error = writeError {
-            throw error
-        }
+        try writeRemoteRecords(records, to: url)
     }
 
     private func writeRemoteFilterFreq(_ records: [String: FilterFreqRecord], to url: URL) throws {
+        try writeRemoteRecords(records, to: url)
+    }
+
+    private func writeRemoteSuppressedWords(_ records: [String: SuppressedWordRecord], to url: URL) throws {
+        try writeRemoteRecords(records, to: url)
+    }
+
+    private func writeRemoteRecords<T: Codable>(_ records: [String: T], to url: URL) throws {
         let syncFile = SyncFile(records: records)
         let data = try JSONEncoder().encode(syncFile)
 
@@ -1178,27 +1170,47 @@ class iCloudSyncManager {
         }
     }
 
-    private func writeRemoteSuppressedWords(_ records: [String: SuppressedWordRecord], to url: URL) throws {
-        let syncFile = SyncFile(records: records)
-        let data = try JSONEncoder().encode(syncFile)
+    // MARK: - iCloud Conflict Versions
 
-        var coordinatorError: NSError?
-        var writeError: Error?
-
-        let coordinator = NSFileCoordinator()
-        coordinator.coordinate(writingItemAt: url, options: .forReplacing, error: &coordinatorError) { coordURL in
+    /// Fold every unresolved conflict version of the file into `base`.
+    ///
+    /// When two Macs write the same file before seeing each other's copy,
+    /// iCloud keeps one as current and the other as a conflict version. Only
+    /// reading the current one silently loses the other Mac's changes. The
+    /// returned versions must be passed to `resolveConflictVersions` after
+    /// the merged result has been written.
+    private func foldConflictVersions<T: Codable>(
+        _ base: [String: T],
+        at url: URL,
+        merge: ([String: T], [String: T]) -> [String: T]
+    ) -> (records: [String: T], conflicts: [NSFileVersion]) {
+        guard let versions = NSFileVersion.unresolvedConflictVersionsOfItem(at: url),
+              !versions.isEmpty else {
+            return (base, [])
+        }
+        var result = base
+        for version in versions {
             do {
-                try data.write(to: coordURL, options: .atomic)
+                let data = try Data(contentsOf: version.url)
+                let file = try JSONDecoder().decode(SyncFile<T>.self, from: data)
+                result = merge(result, file.records)
             } catch {
-                writeError = error
+                NSLog("MarmotIM: [W][sync] conflict version unreadable file=\(url.lastPathComponent) error=\(error)")
             }
         }
+        NSLog("MarmotIM: [I][sync] folded conflict versions file=\(url.lastPathComponent) count=\(versions.count)")
+        return (result, versions)
+    }
 
-        if let error = coordinatorError {
-            throw SyncError.fileCoordinationFailed(underlying: error)
+    private func resolveConflictVersions(_ versions: [NSFileVersion], at url: URL) {
+        guard !versions.isEmpty else { return }
+        for version in versions {
+            version.isResolved = true
         }
-        if let error = writeError {
-            throw error
+        do {
+            try NSFileVersion.removeOtherVersionsOfItem(at: url)
+        } catch {
+            NSLog("MarmotIM: [W][sync] removing resolved versions failed file=\(url.lastPathComponent) error=\(error)")
         }
     }
 }
@@ -1206,6 +1218,15 @@ class iCloudSyncManager {
 // MARK: - Notification Names
 
 extension Notification.Name {
+    /// Posted when sync merged remote rows into the local user_learning table.
+    /// Observers (AppDelegate) reload DictionaryEngine.userLearningCache.
+    static let userLearningDidChange = Notification.Name("MarmotIMUserLearningDidChange")
+
+    /// Posted by VocabularyDatabase after a local (non-sync) change to a
+    /// synced user table, so iCloudSyncManager can upload it soon instead of
+    /// waiting for the 30-minute timer.
+    static let localSyncedDataDidChange = Notification.Name("MarmotIMLocalSyncedDataDidChange")
+
     /// Posted when suppressed words are updated via sync
     static let suppressedWordsDidChange = Notification.Name("MarmotIMSuppressedWordsDidChange")
 

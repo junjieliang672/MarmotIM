@@ -150,6 +150,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             object: nil
         )
 
+        // User learning merged in by iCloud sync
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleUserLearningChanged),
+            name: .userLearningDidChange,
+            object: nil
+        )
+
         // 转写设置变更。设置页每次保存都先发 .configurationDidChange（上面那条观察者
         // 已经把整份配置从盘上重载过），再发这一条，两次都是同步 post，所以处理这一条时
         // Self.config 一定已经是新值。
@@ -224,6 +232,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let fixedCount = engine.ensureUserFavoritesIndexed()
         let cleanedCount = engine.cleanupDeletedUserFavorites()
         NSLog("MarmotIM: User dictionary changed - reindexed \(fixedCount), cleaned \(cleanedCount)")
+    }
+
+    @objc private func handleUserLearningChanged() {
+        guard let engine = dictionaryEngine, engine.isPreloaded else { return }
+        // ~10k rows; keep the read off the main thread the IME types on
+        DispatchQueue.global(qos: .utility).async {
+            let updated = engine.refreshUserLearningFromDatabase()
+            NSLog("MarmotIM: User learning changed via sync - refreshed \(updated) cache entries")
+        }
     }
 
     @objc private func handleSuppressedWordsChanged() {
