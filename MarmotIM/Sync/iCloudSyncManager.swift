@@ -273,7 +273,11 @@ class iCloudSyncManager {
         // restore on exit so the same manager can be reused for either.
         let savedPath = localDBPathOverride
         localDBPathOverride = dbPath
-        defer { localDBPathOverride = savedPath }
+        entryTextCache = [:]  // Per database, per round
+        defer {
+            localDBPathOverride = savedPath
+            entryTextCache = [:]
+        }
 
         // Each payload is independent: a corrupt or unreadable file must not
         // stop the other four from syncing. The first error is rethrown at
@@ -523,7 +527,8 @@ class iCloudSyncManager {
         let fileName: String
         let legacyFileName: String
         let readTotals: () throws -> [String: (count: Int, lastUsed: Double)]
-        let readLegacy: (URL) throws -> [String: CounterRecord]
+        /// Decodes one v1 file (or one conflict version of it)
+        let readLegacy: (Data) throws -> [String: CounterRecord]
         /// Returns the number of rows written
         let writeLocal: ([String: CounterRecord]) throws -> Int
     }
@@ -590,6 +595,8 @@ class iCloudSyncManager {
             try writeRemoteRecords(merged, to: remoteURL)
         }
         resolveConflictVersions(conflicts, at: remoteURL)
+        // Their counts are in `merged`, which is now local and in iCloud
+        resolveConflictVersions(legacy.conflicts, at: legacyURL)
         // Only after the merged file is written: every record of a duplicate
         // is in it by then, so removing the copy loses nothing.
         removeMergedDuplicates(duplicates)
@@ -665,27 +672,68 @@ class iCloudSyncManager {
 
     // MARK: Legacy (v1) files
 
-    /// The v1 file's records as `legacy` counters, or empty if the file is
-    /// missing, unreadable, or unchanged since it was last folded in. `stamp`
-    /// identifies the version read; store it only after the sync succeeds.
+    /// What the v1 file contributes to this sync, as `legacy` counters:
+    /// - the file itself, if it changed since it was last folded in (`stamp`
+    ///   identifies the version read; store it only after the sync succeeds);
+    /// - every unresolved conflict version of it. v1 builds never resolved
+    ///   conflicts, so the file accumulated up to 100 losing versions from the
+    ///   other Macs, each possibly holding counts the winner lacks. They are
+    ///   merged here and resolved by the caller once the merge is written.
     private func readLegacyIfChanged(_ payload: CounterPayload, at url: URL)
-        -> (records: [String: CounterRecord], stamp: String?) {
+        -> (records: [String: CounterRecord], stamp: String?, conflicts: [NSFileVersion]) {
         guard ensureFileDownloaded(at: url) == .ready,
               let attrs = try? FileManager.default.attributesOfItem(atPath: url.path),
               let modified = attrs[.modificationDate] as? Date else {
-            return ([:], nil)
+            return ([:], nil, [])
         }
-        let stamp = "\(modified.timeIntervalSince1970)-\((attrs[.size] as? NSNumber)?.intValue ?? 0)"
+
+        var records: [String: CounterRecord] = [:]
+        func fold(_ data: Data) throws {
+            for (key, incoming) in try payload.readLegacy(data) {
+                if var existing = records[key] {
+                    for (device, count) in incoming.counts {
+                        existing.counts[device] = max(existing.counts[device] ?? 0, count)
+                    }
+                    existing.lastUsed = max(existing.lastUsed, incoming.lastUsed)
+                    records[key] = existing
+                } else {
+                    records[key] = incoming
+                }
+            }
+        }
+
+        var stamp: String? = "\(modified.timeIntervalSince1970)-\((attrs[.size] as? NSNumber)?.intValue ?? 0)"
         let markerURL = syncStateMarkerURL(for: payload.legacyFileName + ".v1-read")
         if let previous = try? String(contentsOf: markerURL, encoding: .utf8), previous == stamp {
-            return ([:], nil)
+            stamp = nil
+        } else {
+            do {
+                var coordinatorError: NSError?
+                var readError: Error?
+                NSFileCoordinator().coordinate(readingItemAt: url, options: [], error: &coordinatorError) { coordURL in
+                    do { try fold(try Data(contentsOf: coordURL)) } catch { readError = error }
+                }
+                if let failure = coordinatorError ?? readError { throw failure }
+            } catch {
+                NSLog("MarmotIM: [W][sync] legacy file unreadable file=\(payload.legacyFileName) error=\(error) action=ignore")
+                stamp = nil
+            }
         }
-        do {
-            return (try payload.readLegacy(url), stamp)
-        } catch {
-            NSLog("MarmotIM: [W][sync] legacy file unreadable file=\(payload.legacyFileName) error=\(error) action=ignore")
-            return ([:], nil)
+
+        var folded: [NSFileVersion] = []
+        for version in NSFileVersion.unresolvedConflictVersionsOfItem(at: url) ?? [] {
+            do {
+                try fold(try Data(contentsOf: version.url))
+                folded.append(version)
+            } catch {
+                // Left unresolved so a later sync can try again
+                NSLog("MarmotIM: [W][sync] legacy conflict version unreadable file=\(payload.legacyFileName) error=\(error)")
+            }
         }
+        if !folded.isEmpty {
+            NSLog("MarmotIM: [I][sync] folded legacy conflict versions file=\(payload.legacyFileName) count=\(folded.count)")
+        }
+        return (records, stamp, folded)
     }
 
     private func markLegacyRead(_ payload: CounterPayload, stamp: String) {
@@ -693,26 +741,37 @@ class iCloudSyncManager {
         try? stamp.write(to: markerURL, atomically: true, encoding: .utf8)
     }
 
-    /// v1 learning is keyed by the WRITER's entry_id. Ids only match across
-    /// Macs with the same dictionary build; they are mapped through this
-    /// Mac's entries table, which is the best that can be done for history.
-    private func readLegacyLearning(_ url: URL) throws -> [String: CounterRecord] {
-        let file: [String: LearningRecord] = try readRemoteRecords(from: url)
-        let ids = file.keys.compactMap { Int64($0) }
-        let texts = try lookupTexts(forEntryIds: ids)
+    /// First id of the user tier (DictionaryEngine.userDictStartId)
+    private static let userEntryStartId: Int64 = 0x8000_0000
+
+    /// v1 learning is keyed by the WRITER's entry_id. System-dictionary ids
+    /// match across Macs built from the same vocab, so they are mapped
+    /// through this Mac's entries table. User-entry ids are numbered per Mac
+    /// (0x80000000 is a different word on each), so those rows are skipped
+    /// rather than credited to whatever word holds that id here.
+    private func readLegacyLearning(_ data: Data) throws -> [String: CounterRecord] {
+        let file = try JSONDecoder().decode(SyncFile<LearningRecord>.self, from: data).records
+
+        var wanted: [(id: Int64, record: LearningRecord)] = []
+        for (idString, record) in file {
+            guard let id = Int64(idString), id < Self.userEntryStartId, record.accessCount > 0 else { continue }
+            wanted.append((id, record))
+        }
+        let texts = try lookupTexts(forEntryIds: wanted.map { $0.id })
 
         var result: [String: CounterRecord] = [:]
-        for (idString, record) in file {
-            guard let id = Int64(idString), let text = texts[id], record.accessCount > 0 else { continue }
-            let incoming = CounterRecord(counts: [CounterSync.legacyDeviceId: record.accessCount],
-                                         lastUsed: Double(record.lastAccessTimestamp))
-            result = CounterSync.merge(result, [text: incoming])
+        for (id, record) in wanted {
+            guard let text = texts[id] else { continue }
+            let existing = result[text]
+            result[text] = CounterRecord(
+                counts: [CounterSync.legacyDeviceId: max(existing?.counts[CounterSync.legacyDeviceId] ?? 0, record.accessCount)],
+                lastUsed: max(existing?.lastUsed ?? 0, Double(record.lastAccessTimestamp)))
         }
         return result
     }
 
-    private func readLegacyFilterFreq(_ url: URL) throws -> [String: CounterRecord] {
-        let file: [String: FilterFreqRecord] = try readRemoteRecords(from: url)
+    private func readLegacyFilterFreq(_ data: Data) throws -> [String: CounterRecord] {
+        let file = try JSONDecoder().decode(SyncFile<FilterFreqRecord>.self, from: data).records
         return file.compactMapValues { record in
             record.frequency > 0
                 ? CounterRecord(counts: [CounterSync.legacyDeviceId: record.frequency], lastUsed: record.lastUsed)
@@ -839,7 +898,28 @@ class iCloudSyncManager {
         return result
     }
 
+    /// id -> text for one sync round. Up to 100 legacy conflict versions each
+    /// reference the same ~10k ids; looking them up once keeps that pass short.
+    private var entryTextCache: [Int64: String?] = [:]
+
     private func lookupTexts(forEntryIds ids: [Int64]) throws -> [Int64: String] {
+        let missing = ids.filter { entryTextCache[$0] == nil }
+        if !missing.isEmpty {
+            for (id, text) in try queryTexts(forEntryIds: missing) {
+                entryTextCache[id] = text
+            }
+            for id in missing where entryTextCache[id] == nil {
+                entryTextCache[id] = .some(nil)  // Known absent
+            }
+        }
+        var result: [Int64: String] = [:]
+        for id in ids {
+            if let text = entryTextCache[id] ?? nil { result[id] = text }
+        }
+        return result
+    }
+
+    private func queryTexts(forEntryIds ids: [Int64]) throws -> [Int64: String] {
         let db = try openLocalDBForWriting()
         defer { sqlite3_close(db) }
 

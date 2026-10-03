@@ -340,4 +340,29 @@ final class SyncUserLearningDualDeviceTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: duplicate.path),
                        "removed only after its records were written to the main file")
     }
+
+    // E-SYNC-LEARN-11: v1 rows for user-tier ids are not carried over. User
+    // entries are numbered per Mac, so 0x80000001 written by another Mac is
+    // some other word there; crediting this Mac's 0x80000001 would put the
+    // count on the wrong word.
+    func testLearn11_legacyUserTierIdsAreNotMappedToLocalWords() throws {
+        let systemId: Int64 = 0x0A0A0A0A
+        let userId: Int64 = 0x8000_0001
+        SyncPayloadFixtures.insertEntry(dbPath: harness.device1DBPath, id: systemId,
+                                        text: SyncPayloadFixtures.fixtureText(forEntryId: systemId))
+        SyncPayloadFixtures.insertEntry(dbPath: harness.device1DBPath, id: userId, text: "本机的用户词")
+
+        let v1 = harness.iCloudDocuments.appendingPathComponent("user_learning.json")
+        let file = SyncFile(records: [
+            String(systemId): LearningRecord(accessCount: 9, lastAccessTimestamp: 1_700_000_000, totalScore: 0),
+            String(userId): LearningRecord(accessCount: 500, lastAccessTimestamp: 1_700_000_000, totalScore: 0),
+        ])
+        try JSONEncoder().encode(file).write(to: v1)
+
+        try harness.runSyncCycle(device: 1)
+
+        XCTAssertEqual(SyncPayloadFixtures.readUserLearning(dbPath: harness.device1DBPath, entryId: systemId)?.accessCount, 9)
+        XCTAssertNil(SyncPayloadFixtures.readUserLearning(dbPath: harness.device1DBPath, entryId: userId),
+                     "another Mac's user-tier id must not credit this Mac's word with that id")
+    }
 }
