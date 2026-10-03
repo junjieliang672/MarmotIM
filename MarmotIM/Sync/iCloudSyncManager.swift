@@ -117,6 +117,78 @@ class iCloudSyncManager {
         }
     }
 
+    // MARK: - Per-Mac Sync Switch
+
+    /// Whether this Mac takes part in iCloud sync. A local marker file next
+    /// to the database, deliberately not part of any synced data: it is a
+    /// property of the machine (a work Mac that must not sync), not of the
+    /// user's dictionary.
+    var isSyncEnabled: Bool {
+        Self.isSyncEnabled(inDirectory: localDBPath.deletingLastPathComponent())
+    }
+
+    private var syncDisabledMarkerURL: URL {
+        Self.syncDisabledMarkerURL(inDirectory: localDBPath.deletingLastPathComponent())
+    }
+
+    static func syncDisabledMarkerURL(inDirectory directory: URL) -> URL {
+        directory.appendingPathComponent(".marmotim.sync-disabled")
+    }
+
+    /// Enabled unless the marker file exists, so a fresh install syncs
+    static func isSyncEnabled(inDirectory directory: URL) -> Bool {
+        !FileManager.default.fileExists(atPath: syncDisabledMarkerURL(inDirectory: directory).path)
+    }
+
+    /// Turn sync on or off for this Mac. Off: nothing is read from or written
+    /// to iCloud any more, local data stays as it is, and this Mac's status
+    /// file is removed so the other Macs stop listing it. On: syncs at once.
+    func setSyncEnabled(_ enabled: Bool) {
+        syncQueue.async { [weak self] in
+            guard let self = self else { return }
+            if enabled {
+                try? FileManager.default.removeItem(at: self.syncDisabledMarkerURL)
+                NSLog("MarmotIM: [I][sync] sync enabled on this Mac")
+                self.performSync()
+            } else {
+                FileManager.default.createFile(atPath: self.syncDisabledMarkerURL.path, contents: nil)
+                self.pendingLocalSync?.cancel()
+                self.removeOwnDeviceStatus()
+                self.lastSyncError = nil
+                self.lastSyncSuccess = true
+                NSLog("MarmotIM: [I][sync] sync disabled on this Mac")
+                DispatchQueue.main.async {
+                    NotificationCenter.default.post(name: .syncOverviewDidChange, object: nil)
+                }
+            }
+        }
+    }
+
+    private func removeOwnDeviceStatus() {
+        guard let container = FileManager.default.url(forUbiquityContainerIdentifier: containerIdentifier) else {
+            return
+        }
+        let url = container.appendingPathComponent("Documents")
+            .appendingPathComponent("\(Self.deviceStatusPrefix)\(localDeviceId()).json")
+        removeCloudFile(url)
+    }
+
+    @discardableResult
+    private func removeCloudFile(_ url: URL) -> Bool {
+        guard FileManager.default.fileExists(atPath: url.path) else { return false }
+        var coordinatorError: NSError?
+        var removed = false
+        NSFileCoordinator().coordinate(writingItemAt: url, options: .forDeleting, error: &coordinatorError) { coordURL in
+            do {
+                try FileManager.default.removeItem(at: coordURL)
+                removed = true
+            } catch {
+                NSLog("MarmotIM: [W][sync] cloud file not removed file=\(url.lastPathComponent) error=\(error)")
+            }
+        }
+        return removed
+    }
+
     // MARK: - Timer Management
 
     private func startTimer() {
@@ -206,6 +278,10 @@ class iCloudSyncManager {
     // MARK: - Core Sync Logic
 
     private func performSync() {
+        // Every trigger (launch, timer, iCloud change, local edit, menu) comes
+        // through here, so this one check keeps a sync-disabled Mac off iCloud.
+        guard isSyncEnabled else { return }
+
         if isSyncing {
             NSLog("MarmotIM: Sync already in progress, skipping")
             return
@@ -274,6 +350,7 @@ class iCloudSyncManager {
         let savedPath = localDBPathOverride
         localDBPathOverride = dbPath
         entryTextCache = [:]  // Per database, per round
+        adoptLegacyRetirement(documentsURL: documentsURL)
         defer {
             localDBPathOverride = savedPath
             entryTextCache = [:]
@@ -431,7 +508,8 @@ class iCloudSyncManager {
                 lastSyncAt: Date().timeIntervalSince1970,
                 lastSyncOK: error == nil,
                 lastError: error.map { ($0 as? LocalizedError)?.errorDescription ?? String(describing: $0) },
-                payloads: try localPayloadSummaries()
+                payloads: try localPayloadSummaries(),
+                legacyRetired: isLegacyRetired ? true : nil
             )
             let url = documentsURL.appendingPathComponent("\(Self.deviceStatusPrefix)\(status.deviceId).json")
             let data = try JSONEncoder().encode(status)
@@ -486,8 +564,13 @@ class iCloudSyncManager {
 
     /// Snapshot for the settings page. Reads files; call off the main thread.
     func loadOverview() -> SyncOverview {
-        let available = FileManager.default.ubiquityIdentityToken != nil
         let deviceId = localDeviceId()
+        guard isSyncEnabled else {
+            // Sync is off here: don't touch the container at all
+            return SyncOverview(syncEnabled: false, iCloudAvailable: false, containerFound: false,
+                                localDeviceId: deviceId, devices: [], files: [])
+        }
+        let available = FileManager.default.ubiquityIdentityToken != nil
         guard available,
               let container = FileManager.default.url(forUbiquityContainerIdentifier: containerIdentifier) else {
             return SyncOverview(iCloudAvailable: available, containerFound: false,
@@ -497,7 +580,12 @@ class iCloudSyncManager {
         let fileNames = [favoritesFileName, suppressedWordsFileName, relativeOrderingFileName,
                          learningV2FileName, filterFreqV2FileName, learningFileName, filterFreqFileName]
         let files = fileNames.compactMap { cloudState(of: documentsURL.appendingPathComponent($0)) }
-        return SyncOverview(iCloudAvailable: true, containerFound: true, localDeviceId: deviceId,
+        return SyncOverview(iCloudAvailable: true, containerFound: true,
+                            obsoleteFiles: obsoleteFiles(documentsURL: documentsURL).map { url in
+                                let size = (try? FileManager.default.attributesOfItem(atPath: url.path))?[.size] as? NSNumber
+                                return SyncObsoleteFile(name: url.lastPathComponent, bytes: size?.intValue ?? 0)
+                            },
+                            localDeviceId: deviceId,
                             devices: readDeviceStatuses(documentsURL: documentsURL), files: files)
     }
 
@@ -517,6 +605,74 @@ class iCloudSyncManager {
             conflictCount: NSFileVersion.unresolvedConflictVersionsOfItem(at: url)?.count ?? 0,
             uploadError: values?.ubiquitousItemUploadingError?.localizedDescription
         )
+    }
+
+    // MARK: - Retiring the v1 Files
+
+    private static let legacyRetiredMarker = "legacy-retired"
+
+    /// True once the v1 files have been retired for this database: by the
+    /// user here, or adopted from another Mac's status file.
+    internal var isLegacyRetired: Bool {
+        hasPayloadEverSynced(Self.legacyRetiredMarker)
+    }
+
+    private func adoptLegacyRetirement(documentsURL: URL) {
+        guard !isLegacyRetired else { return }
+        if readDeviceStatuses(documentsURL: documentsURL).contains(where: { $0.legacyRetired == true }) {
+            markPayloadSynced(Self.legacyRetiredMarker)
+            NSLog("MarmotIM: [I][sync] v1 files retired by another Mac, adopted")
+        }
+    }
+
+    /// v1 payload files and manual backups present in `documentsURL`
+    internal func obsoleteFiles(documentsURL: URL) -> [URL] {
+        let names = (try? FileManager.default.contentsOfDirectory(atPath: documentsURL.path)) ?? []
+        return names
+            .filter { $0 == learningFileName || $0 == filterFreqFileName || $0.contains(".json.bak") }
+            .sorted()
+            .map { documentsURL.appendingPathComponent($0) }
+    }
+
+    /// Fold whatever the v1 files still hold into the v2 data, then delete
+    /// them and the manual backups. Nothing is deleted unless that last merge
+    /// succeeds. Returns the removed file names.
+    internal func retireLegacyFiles(documentsURL: URL, dbPath: URL) throws -> [String] {
+        // The sync inside reads the v1 files (and their conflict versions)
+        // one last time; it throws if any payload failed.
+        try syncOnce(documentsURL: documentsURL, dbPath: dbPath)
+
+        let savedPath = localDBPathOverride
+        localDBPathOverride = dbPath
+        defer { localDBPathOverride = savedPath }
+
+        markPayloadSynced(Self.legacyRetiredMarker)
+        let removed = obsoleteFiles(documentsURL: documentsURL).filter { removeCloudFile($0) }
+        // Announce it, so the other Macs stop reading v1 files as well
+        writeDeviceStatus(documentsURL: documentsURL, error: nil)
+        return removed.map { $0.lastPathComponent }
+    }
+
+    /// Settings entry point; `completion` runs on the main queue.
+    func retireLegacyFiles(completion: @escaping (Result<[String], Error>) -> Void) {
+        syncQueue.async { [weak self] in
+            guard let self = self else { return }
+            let result: Result<[String], Error>
+            if !self.isSyncEnabled {
+                result = .failure(SyncError.iCloudNotAvailable)
+            } else if let container = FileManager.default.url(forUbiquityContainerIdentifier: self.containerIdentifier) {
+                result = Result {
+                    try self.retireLegacyFiles(documentsURL: container.appendingPathComponent("Documents"),
+                                               dbPath: self.localDBPath)
+                }
+            } else {
+                result = .failure(SyncError.containerNotFound)
+            }
+            DispatchQueue.main.async {
+                completion(result)
+                NotificationCenter.default.post(name: .syncOverviewDidChange, object: nil)
+            }
+        }
     }
 
     // MARK: - Counter Payloads (v2): user_learning, filter_user_freq
@@ -559,7 +715,11 @@ class iCloudSyncManager {
         }
 
         let legacyURL = documentsURL.appendingPathComponent(payload.legacyFileName)
-        let legacy = readLegacyIfChanged(payload, at: legacyURL)
+        // Once retired, a v1 file that reappears (a Mac still on an old build
+        // re-uploading it) is ignored rather than merged again.
+        let legacy = isLegacyRetired
+            ? (records: [String: CounterRecord](), stamp: String?.none, conflicts: [NSFileVersion]())
+            : readLegacyIfChanged(payload, at: legacyURL)
 
         // "<name> 2.json": iCloud's rename when two Macs each created the file
         // before seeing the other's. Its records belong in the merge too.
@@ -1632,16 +1792,8 @@ class iCloudSyncManager {
     }
 
     private func removeMergedDuplicates(_ urls: [URL]) {
-        for url in urls {
-            var coordinatorError: NSError?
-            NSFileCoordinator().coordinate(writingItemAt: url, options: .forDeleting, error: &coordinatorError) { coordURL in
-                do {
-                    try FileManager.default.removeItem(at: coordURL)
-                    NSLog("MarmotIM: [I][sync] merged duplicate removed file=\(url.lastPathComponent)")
-                } catch {
-                    NSLog("MarmotIM: [W][sync] merged duplicate not removed file=\(url.lastPathComponent) error=\(error)")
-                }
-            }
+        for url in urls where removeCloudFile(url) {
+            NSLog("MarmotIM: [I][sync] merged duplicate removed file=\(url.lastPathComponent)")
         }
     }
 

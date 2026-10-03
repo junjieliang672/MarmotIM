@@ -41,6 +41,11 @@ struct DeviceSyncStatus: Codable, Equatable, Identifiable {
     var lastError: String?
     /// Keyed by SyncPayloadKind.rawValue
     var payloads: [String: PayloadSummary]
+    /// Set once this Mac has retired the v1 files (see
+    /// iCloudSyncManager.retireLegacyFiles). Other Macs adopt it on their
+    /// next sync and stop reading v1 files too. Optional: absent in status
+    /// files written before the field existed.
+    var legacyRetired: Bool?
 
     var id: String { deviceId }
 
@@ -79,10 +84,23 @@ struct SyncFileCloudState: Equatable, Identifiable {
     }
 }
 
+/// A v1 payload file or manual backup still in the container
+struct SyncObsoleteFile: Equatable, Identifiable {
+    var name: String
+    var bytes: Int
+
+    var id: String { name }
+}
+
 /// Everything the iCloud settings page shows
 struct SyncOverview: Equatable {
+    /// False when the user turned sync off on this Mac
+    var syncEnabled: Bool = true
     var iCloudAvailable: Bool
     var containerFound: Bool
+    /// v1 payload files and manual backups still in the container; the
+    /// settings page offers to remove them
+    var obsoleteFiles: [SyncObsoleteFile] = []
     var localDeviceId: String
     var devices: [DeviceSyncStatus]
     var files: [SyncFileCloudState]

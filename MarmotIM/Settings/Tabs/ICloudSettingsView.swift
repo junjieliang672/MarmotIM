@@ -7,15 +7,23 @@ struct ICloudSettingsView: View {
     @State private var isLoading = false
     @State private var isSyncing = false
     @State private var showFiles = false
+    @State private var syncEnabled = iCloudSyncManager.shared.isSyncEnabled
+    @State private var confirmCleanup = false
+    @State private var isCleaning = false
+    @State private var cleanupMessage: String?
 
     private let overviewChanged = NotificationCenter.default.publisher(for: .syncOverviewDidChange)
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
-                localSection
-                devicesSection
-                filesSection
+                enableSection
+                if syncEnabled {
+                    localSection
+                    devicesSection
+                    obsoleteSection
+                    filesSection
+                }
             }
             .padding(20)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -23,6 +31,99 @@ struct ICloudSettingsView: View {
         .onAppear(perform: reload)
         .onReceive(overviewChanged) { _ in
             isSyncing = false
+            syncEnabled = iCloudSyncManager.shared.isSyncEnabled
+            reload()
+        }
+    }
+
+    // MARK: - Per-Mac switch
+
+    private var enableSection: some View {
+        GroupBox {
+            VStack(alignment: .leading, spacing: 6) {
+                Toggle("在这台 Mac 上使用 iCloud 同步", isOn: Binding(
+                    get: { syncEnabled },
+                    set: { enabled in
+                        syncEnabled = enabled
+                        isSyncing = enabled
+                        iCloudSyncManager.shared.setSyncEnabled(enabled)
+                    }
+                ))
+                .toggleStyle(.switch)
+
+                Text(syncEnabled
+                     ? "这个开关只影响这台 Mac，不会同步到其他设备。"
+                     : "这台 Mac 不参与同步。本机的词库和学习记录只保存在本机，不会上传，也不会接收其他设备的改动。"
+                       + "以前已经同步上去的数据不会被撤回。")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(6)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    // MARK: - Obsolete files
+
+    @ViewBuilder
+    private var obsoleteSection: some View {
+        if let files = overview?.obsoleteFiles, !files.isEmpty || cleanupMessage != nil {
+            GroupBox(label: Text("旧文件")) {
+                VStack(alignment: .leading, spacing: 6) {
+                    if !files.isEmpty {
+                        Text("这些文件已经不再使用：旧格式的数据文件（内容已并入新格式）和手动留下的备份。")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                        ForEach(files) { file in
+                            HStack {
+                                Text(file.name).font(.system(.caption, design: .monospaced))
+                                Spacer()
+                                Text(ByteCountFormatter.string(fromByteCount: Int64(file.bytes), countStyle: .file))
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
+                        }
+                        HStack {
+                            Button("清理…") { confirmCleanup = true }
+                                .disabled(isCleaning)
+                            if isCleaning { ProgressView().controlSize(.small) }
+                        }
+                    }
+                    if let message = cleanupMessage {
+                        Text(message)
+                            .font(.caption)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .padding(6)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .alert("清理旧文件？", isPresented: $confirmCleanup) {
+                Button("清理", role: .destructive, action: cleanUp)
+                Button("取消", role: .cancel) {}
+            } message: {
+                Text("会先同步一次，把这些文件里还没并入的内容合并进来；只有同步全部成功，才会删除它们。"
+                     + "不会删除任何用户词或学习记录。\n\n"
+                     + (overview?.obsoleteFiles.map(\.name).joined(separator: "\n") ?? ""))
+            }
+        }
+    }
+
+    private func cleanUp() {
+        isCleaning = true
+        cleanupMessage = nil
+        iCloudSyncManager.shared.retireLegacyFiles { result in
+            isCleaning = false
+            switch result {
+            case .success(let removed):
+                cleanupMessage = removed.isEmpty
+                    ? "没有需要清理的文件。"
+                    : "已清理 \(removed.count) 个文件：\(removed.joined(separator: "、"))"
+            case .failure(let error):
+                cleanupMessage = "没有清理：同步没有全部成功（\(error.localizedDescription)）。文件都还在。"
+            }
             reload()
         }
     }

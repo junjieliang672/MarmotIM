@@ -1210,6 +1210,10 @@ class InputController: IMKInputController {
         )
         syncItem.target = self
         syncItem.image = syncStatusIcon()
+        if !iCloudSyncManager.shared.isSyncEnabled {
+            // Sync is switched off on this Mac (settings → iCloud); nothing to trigger
+            syncItem.action = nil
+        }
         menu.addItem(syncItem)
 
         menu.addItem(NSMenuItem.separator())
@@ -1285,6 +1289,7 @@ class InputController: IMKInputController {
     private func syncStatusText() -> String {
         let sync = iCloudSyncManager.shared
         return SyncStatusPresenter.text(
+            isEnabled: sync.isSyncEnabled,
             isAvailable: sync.isICloudAvailable,
             isSyncing: sync.isSyncing,
             lastSyncTime: sync.lastSyncTime,
@@ -1296,6 +1301,7 @@ class InputController: IMKInputController {
     private func syncStatusIcon() -> NSImage? {
         let sync = iCloudSyncManager.shared
         let iconName = SyncStatusPresenter.iconName(
+            isEnabled: sync.isSyncEnabled,
             isAvailable: sync.isICloudAvailable,
             isSyncing: sync.isSyncing,
             lastSyncSuccess: sync.lastSyncSuccess,
@@ -1444,12 +1450,15 @@ enum SyncStatusPresenter {
     }
 
     /// 顺序即语义，且**失败必须排在「从未同步」之前** —— 见上面那段。
-    static func text(isAvailable: Bool,
+    static func text(isEnabled: Bool = true,
+                     isAvailable: Bool,
                      isSyncing: Bool,
                      lastSyncTime: Date?,
                      lastSyncSuccess: Bool,
                      lastSyncError: Error?,
                      timeAgo: (Date) -> String) -> String {
+        // 用户在这台 Mac 上关掉了同步：这不是故障，排在所有故障文案之前。
+        guard isEnabled else { return "同步已关闭" }
         guard isAvailable else { return "iCloud 未连接" }
         if isSyncing { return "同步中..." }
         if !lastSyncSuccess { return failureText(lastSyncError) }
@@ -1457,10 +1466,12 @@ enum SyncStatusPresenter {
         return "已同步 · \(timeAgo(lastSyncTime))"
     }
 
-    static func iconName(isAvailable: Bool,
+    static func iconName(isEnabled: Bool = true,
+                         isAvailable: Bool,
                          isSyncing: Bool,
                          lastSyncSuccess: Bool,
                          lastSyncError: Error?) -> String {
+        if !isEnabled { return "icloud.slash" }
         if !isAvailable { return "icloud.slash" }
         if isSyncing { return "arrow.triangle.2.circlepath" }
         if !lastSyncSuccess {
