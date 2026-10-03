@@ -550,7 +550,14 @@ class iCloudSyncManager {
 
         return names.compactMap { name in
             let url = directory.appendingPathComponent(name)
-            guard ensureFileDownloaded(at: url) == .ready else { return nil }
+            // Read-only and purely informational: this is the settings page's
+            // view of the other Macs, never merged and never written back. Every
+            // Mac rewrites its own status file on every sync, so these flicker
+            // out of `.current` constantly; waiting 30 s for one to settle hung
+            // the page for up to 30 s per device while the data on disk was
+            // already fine to show. Take what is here, within a short grace
+            // period for a file that has genuinely never been downloaded.
+            guard ensureFileDownloaded(at: url, timeout: 2.0, acceptStale: true) == .ready else { return nil }
             var coordinatorError: NSError?
             var status: DeviceSyncStatus?
             NSFileCoordinator().coordinate(readingItemAt: url, options: [], error: &coordinatorError) { coordURL in
@@ -1468,7 +1475,15 @@ class iCloudSyncManager {
 
     /// Ensure an iCloud file is downloaded before reading
     /// Uses URL resource values to check actual download status (Apple recommended approach)
-    private func ensureFileDownloaded(at url: URL) -> FileDownloadStatus {
+    ///
+    /// - timeout: how long to wait for a download to land. The default suits a
+    ///   payload read, where the caller is about to merge and write back.
+    /// - acceptStale: treat an out-of-date local copy as good enough. Only for
+    ///   read-only callers that never write the file back; see the `.downloaded`
+    ///   case below for why the merging callers must not set it.
+    private func ensureFileDownloaded(at url: URL,
+                                      timeout: TimeInterval = 30.0,
+                                      acceptStale: Bool = false) -> FileDownloadStatus {
         let fileManager = FileManager.default
 
         // First check if the file is an iCloud ubiquitous item or exists locally
@@ -1479,7 +1494,7 @@ class iCloudSyncManager {
 
             if fileManager.fileExists(atPath: placeholderURL.path) {
                 // Placeholder exists - file is in iCloud but not downloaded
-                return triggerDownloadAndWait(at: url)
+                return triggerDownloadAndWait(at: url, timeout: timeout)
             }
 
             // No file and no placeholder - file doesn't exist
@@ -1496,13 +1511,16 @@ class iCloudSyncManager {
                 case .downloaded:
                     // A local copy exists but iCloud has a newer one. Merging the
                     // stale copy and writing it back with .forReplacing would
-                    // overwrite the other Mac's changes.
-                    return triggerDownloadAndWait(at: url)
+                    // overwrite the other Mac's changes, so a merging caller has
+                    // to wait. A read-only caller does not: it can show the copy
+                    // it has and pick up the newer one next time.
+                    if acceptStale { return .ready }
+                    return triggerDownloadAndWait(at: url, timeout: timeout)
                 case .notDownloaded:
-                    return triggerDownloadAndWait(at: url)
+                    return triggerDownloadAndWait(at: url, timeout: timeout)
                 default:
                     // Handle any future cases by attempting download
-                    return triggerDownloadAndWait(at: url)
+                    return triggerDownloadAndWait(at: url, timeout: timeout)
                 }
             }
         } catch {
@@ -1518,13 +1536,11 @@ class iCloudSyncManager {
     }
 
     /// Trigger download of an iCloud file and wait for it to complete
-    private func triggerDownloadAndWait(at url: URL) -> FileDownloadStatus {
+    private func triggerDownloadAndWait(at url: URL, timeout: TimeInterval) -> FileDownloadStatus {
         do {
             try FileManager.default.startDownloadingUbiquitousItem(at: url)
             NSLog("MarmotIM: Triggered download for iCloud file: \(url.lastPathComponent)")
 
-            // Wait for download with timeout
-            let timeout: TimeInterval = 30.0  // 30 seconds for larger files
             let startTime = Date()
 
             while true {
