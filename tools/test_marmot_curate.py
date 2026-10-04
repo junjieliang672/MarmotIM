@@ -155,6 +155,19 @@ class UserDictCandidates(CurateTestCase):
         _, out = self.run_cli('candidates', 'user-dict')
         self.assertFalse(any(c['text'] == '输入法' for c in out['phrases']))
 
+    def test_reactivation_in_the_same_app_does_not_break_a_run(self):
+        # Seen on real data: the system re-activates the input method in the
+        # middle of a sentence, in the same app, and that is logged as a break
+        for day in range(3):
+            for k in range(3):
+                t = self.now - day * DAY - k * 100
+                self.select('输入', t, code='lwty')
+                self.add('break', t + 0.5, trigger='app')                    # Same app
+                self.select('法', t + 1, code='if')
+                self.add('break', t + 2, trigger='punct')
+        _, out = self.run_cli('candidates', 'user-dict')
+        self.assertEqual(next(c for c in out['phrases'] if c['text'] == '输入法')['count'], 9)
+
     def test_fragment_has_low_cohesion_and_fixed_neighbours(self):
         for day in range(3):
             for n in range(3):

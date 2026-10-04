@@ -211,13 +211,23 @@ def entropy(counter: Counter) -> float:
     return round(-sum(c / total * math.log2(c / total) for c in counter.values()), 2)
 
 
+def is_spurious_break(event: dict, last_app: Optional[str]) -> bool:
+    """An "app" break that did not change app. The input method logs one every
+    time the system re-activates it, which also happens without any switch
+    (seen mid-sentence in a terminal). The pause limit and the app comparison
+    already end a run when the user really went somewhere else."""
+    return event['kind'] == 'break' and event['trigger'] == 'app' and event['app'] == last_app
+
+
 def runs_of_commits(events: List[dict], gap: float) -> List[List[dict]]:
     """Runs of consecutive Chinese selections: the user typed these one after
-    another with nothing in between. A run ends at punctuation, an app switch,
-    dictation, a correction, a raw/abandoned code, a different app, or a pause
-    longer than `gap` seconds."""
+    another with nothing in between. A run ends at punctuation, dictation, a
+    correction, a raw/abandoned code, a different app, or a pause longer than
+    `gap` seconds."""
     runs, run = [], []
     for event in events:
+        if run and is_spurious_break(event, run[-1]['app']):
+            continue
         continues = (
             event['kind'] == 'select'
             and is_cjk(event['text'] or '')
