@@ -399,6 +399,21 @@ echo "OK: entitlements match Xcode's .xcent exactly (application-identifier = $I
 
 # Step 6: Start
 echo "Starting..."
+# macOS relaunches an active input method on its own within a second or two of step 3
+# killing it — i.e. BEFORE step 5 has copied the new bundle. That process keeps the old
+# binary mapped (the `rm -rf` only unlinks it), and `open` on an already-running app does
+# nothing, so the install "succeeds" while the old code keeps running. (Observed
+# 2026-10-04: disk had the new 5,846,080-byte binary, lsof showed the running process
+# still on the previous 5,820,128-byte one.) Stop whatever came back, now that the
+# bundle on disk is the new one.
+if pgrep -x MarmotIM > /dev/null 2>&1; then
+    killall -TERM MarmotIM 2>/dev/null || true
+    for i in {1..6}; do
+        pgrep -x MarmotIM > /dev/null 2>&1 || break
+        sleep 0.5
+    done
+    pgrep -x MarmotIM > /dev/null 2>&1 && killall -KILL MarmotIM 2>/dev/null || true
+fi
 open /Library/Input\ Methods/MarmotIM.app
 
 # Step 7: Post-install sanity check. Confirms the installed binary is the one
