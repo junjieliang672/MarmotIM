@@ -12,7 +12,10 @@ release/
 MarmotIM-*.zip
 
 # Claude Code
-.claude/
+# Claude Code: everything local stays out (settings, memory, data); only the
+# project skills are shared so they work on every Mac with this repo
+.claude/*
+!.claude/skills/
 
 # kingjj Project Knowledge Base — agent-local workspace, never committed
 .knowledge/
