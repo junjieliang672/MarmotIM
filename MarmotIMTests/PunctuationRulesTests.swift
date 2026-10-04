@@ -2,27 +2,34 @@ import XCTest
 import AppKit
 @testable import MarmotIM
 
-/// "." right after a digit stays "." (3.14), instead of becoming "。".
+/// ".", "," and ":" right after a digit stay as typed (3.14, 1,000, 12:30)
+/// instead of becoming "。", "，" and "：".
 final class PunctuationRulesTests: XCTestCase {
 
-    func testPeriodAfterDigitStaysASCII() {
-        XCTAssertTrue(PunctuationRules.keepsASCII(".", followsDigit: true, enabled: true))
+    func testNumberPunctuationAfterDigitStaysASCII() {
+        for char in [".", ",", ":"] as [Character] {
+            XCTAssertTrue(PunctuationRules.keepsASCII(char, followsDigit: true, enabled: true), String(char))
+        }
     }
 
-    func testPeriodElsewhereIsConvertedAsBefore() {
-        XCTAssertFalse(PunctuationRules.keepsASCII(".", followsDigit: false, enabled: true),
-                       "after a word, the period is still 。")
+    func testElsewhereItIsConvertedAsBefore() {
+        for char in [".", ",", ":"] as [Character] {
+            XCTAssertFalse(PunctuationRules.keepsASCII(char, followsDigit: false, enabled: true),
+                           "after a word, \(char) is still Chinese punctuation")
+        }
     }
 
-    func testOnlyThePeriodIsAffected() {
-        for char in [",", ";", ":", "?", "!"] as [Character] {
+    func testOtherPunctuationIsNotAffected() {
+        for char in [";", "?", "!", "(", "\"", "\\"] as [Character] {
             XCTAssertFalse(PunctuationRules.keepsASCII(char, followsDigit: true, enabled: true), String(char))
         }
     }
 
     func testCanBeSwitchedOff() {
-        XCTAssertFalse(PunctuationRules.keepsASCII(".", followsDigit: true, enabled: false))
-        XCTAssertTrue(AppConfig.default.periodAfterDigitStaysASCII, "on unless the user turns it off")
+        for char in [".", ",", ":"] as [Character] {
+            XCTAssertFalse(PunctuationRules.keepsASCII(char, followsDigit: true, enabled: false), String(char))
+        }
+        XCTAssertTrue(AppConfig.default.punctuationAfterDigitStaysASCII, "on unless the user turns it off")
     }
 
     func testPlainDigit() {
@@ -49,6 +56,6 @@ final class PunctuationRulesTests: XCTestCase {
     func testConfigWrittenBeforeTheFieldExistedStillLoads() throws {
         let decoded = try JSONDecoder().decode(AppConfig.self, from: Data(#"{"candidateCount":7}"#.utf8))
         XCTAssertEqual(decoded.candidateCount, 7)
-        XCTAssertTrue(decoded.periodAfterDigitStaysASCII)
+        XCTAssertTrue(decoded.punctuationAfterDigitStaysASCII)
     }
 }

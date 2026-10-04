@@ -108,15 +108,15 @@ struct PunctuationView: View {
                         viewModel.save()
                     }
 
-                    Toggle(isOn: $viewModel.config.periodAfterDigitStaysASCII) {
+                    Toggle(isOn: $viewModel.config.punctuationAfterDigitStaysASCII) {
                         VStack(alignment: .leading, spacing: 2) {
-                            Text("数字后的句号输出为小数点")
-                            Text("刚打完数字就按句号键时输出「.」而不是「。」，方便打 3.14、1.5 这样的数字。")
+                            Text("数字后的句号、逗号、冒号保持英文")
+                            Text("刚打完数字就按这三个键时，输出「.」「,」「:」而不是「。」「，」「：」，方便打 3.14、1,000、12:30。")
                                 .font(.caption)
                                 .foregroundColor(.secondary)
                         }
                     }
-                    .onChange(of: viewModel.config.periodAfterDigitStaysASCII) { _ in
+                    .onChange(of: viewModel.config.punctuationAfterDigitStaysASCII) { _ in
                         viewModel.markDirty()
                         viewModel.save()
                     }

@@ -73,7 +73,7 @@ class InputController: IMKInputController {
     private var filterBuffer: String = ""
 
     /// The previous key was a digit that went straight to the app (not a
-    /// candidate pick). A "." right after it is a decimal point.
+    /// candidate pick). A ".", "," or ":" right after it belongs to the number.
     private var digitJustTyped: Bool = false
 
     /// Backspaces straight after a commit, for the behaviour log (整理词库)
@@ -315,8 +315,8 @@ class InputController: IMKInputController {
                 return true
             } else {
                 if PunctuationRules.keepsASCII(char, followsDigit: followsDigit,
-                                               enabled: AppDelegate.config.periodAfterDigitStaysASCII) {
-                    // "3" then "." is a decimal point: let the key through as typed
+                                               enabled: AppDelegate.config.punctuationAfterDigitStaysASCII) {
+                    // 3.14, 1,000, 12:30: part of the number, let the key through as typed
                     return false
                 }
                 if handlePunctuation(String(char), client: sender) {
@@ -1636,10 +1636,14 @@ enum PunctuationRules {
         return modifiers.isDisjoint(with: [.control, .option, .command])
     }
 
-    /// "." directly after a digit is a decimal point and stays ".": 3.14,
-    /// 1.5, 192.168.1.1. Without this it becomes "。" in Chinese punctuation
-    /// mode and the user has to switch to English for every number.
+    /// Punctuation that is part of a number when it directly follows a digit:
+    /// 3.14, 1,000, 12:30
+    static let numberPunctuation: Set<Character> = [".", ",", ":"]
+
+    /// ".", "," and ":" directly after a digit stay as typed. Without this
+    /// they become "。", "，" and "：" in Chinese punctuation mode and the
+    /// user has to switch to English for every number, amount and time.
     static func keepsASCII(_ char: Character, followsDigit: Bool, enabled: Bool) -> Bool {
-        enabled && followsDigit && char == "."
+        enabled && followsDigit && numberPunctuation.contains(char)
     }
 }
