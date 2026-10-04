@@ -21,7 +21,8 @@ enum BehaviorEventKind: String {
     case select
     /// Committed the typed letters as they are (Enter, or Shift to English)
     case raw
-    /// Gave up on a code: Escape, or Space with no candidates
+    /// Gave up on a code: Escape, Space with no candidates, Enter set to
+    /// clear, or deleting the whole code with Backspace
     case abandon
     /// Backspaces right after a commit: the commit was probably wrong
     case delete
@@ -43,7 +44,7 @@ struct BehaviorEvent: Equatable {
     /// 0-based position in the full candidate list
     var rank: Int?
     /// select: "space" / "number". raw: "enter" / "shift". abandon: "escape" /
-    /// "empty". break: "punct" / "app".
+    /// "empty" / "enter" / "backspace". break: "punct" / "app" / "dictation".
     var trigger: String?
     /// Page the candidate was picked from (0 = first page)
     var page: Int?

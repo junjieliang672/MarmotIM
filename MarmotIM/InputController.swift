@@ -75,6 +75,12 @@ class InputController: IMKInputController {
     /// Backspaces straight after a commit, for the behaviour log (整理词库)
     private var correctionTracker = CommitCorrectionTracker()
 
+    /// The longest code typed in this composition before the user started
+    /// deleting it, with how many candidates it had. If they then delete
+    /// everything, this is the code they gave up on; the buffer itself is
+    /// empty by then.
+    private var longestDeletedCode: (code: String, candidates: Int)?
+
     /// Chinese quote pairs: opening → closing
     /// Only quotes support open/close pairing, NOT brackets
     private let chineseQuotePairs: [String: String] = [
@@ -548,10 +554,22 @@ class InputController: IMKInputController {
         // Normal mode backspace
         guard !inputBuffer.isEmpty else { return false }
 
+        // The buffer only shrinks through here, so its longest state is
+        // whatever it was at the first backspace of a run
+        if inputBuffer.count > (longestDeletedCode?.code.count ?? 0) {
+            longestDeletedCode = (inputBuffer.lowercased(), allCandidates.count)
+        }
+
         // Remove last character
         inputBuffer.removeLast()
 
         if inputBuffer.isEmpty {
+            // Deleted the whole code: given up on, same as Escape
+            if let abandoned = longestDeletedCode {
+                logBehavior(BehaviorEvent(kind: .abandon, code: abandoned.code, trigger: "backspace",
+                                          count: abandoned.candidates),
+                            client: sender)
+            }
             reset()
             hideCandidateWindow()
             if let client = sender as? IMKTextInput {
@@ -1211,6 +1229,7 @@ class InputController: IMKInputController {
         currentCandidates = []
         currentPage = 0
         isComposing = false
+        longestDeletedCode = nil
         // Reset filter mode state
         filterMode = .none
         filterBuffer = ""
