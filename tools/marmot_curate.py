@@ -284,7 +284,9 @@ def looks_secret(text: str) -> bool:
     return False
 
 
-ENGLISH_WORD = re.compile(r'^[A-Za-z][A-Za-z0-9_.+#-]{1,30}$')
+# Letters only: an accepted English word is stored with its lowercased form as
+# its code, and a code can only be letters (digits pick candidates).
+ENGLISH_WORD = re.compile(r'^[A-Za-z]{2,30}$')
 
 
 def load_english_table() -> set:
@@ -705,7 +707,7 @@ def validate_decision(item: dict) -> Optional[str]:
         wubi, pinyin = item.get('wubi'), item.get('pinyin')
         if item.get('english'):
             if not ENGLISH_WORD.match(item['text']):
-                return 'english word has characters that cannot be typed as a code'
+                return 'an English word must be letters only, so that it can be typed as its own code'
         else:
             if not wubi and not pinyin:
                 return 'add_word needs a wubi or pinyin code'

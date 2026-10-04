@@ -53,6 +53,7 @@
 		SYNCERROR_SWIFT /* SyncError.swift in Sources */ = {isa = PBXBuildFile; fileRef = SYNCERROR_SWIFT_REF /* SyncError.swift */; };
 		SYNCMERGER_SWIFT /* SyncMerger.swift in Sources */ = {isa = PBXBuildFile; fileRef = SYNCMERGER_SWIFT_REF /* SyncMerger.swift */; };
 		BEHAVIORLOG_SWIFT /* BehaviorLog.swift in Sources */ = {isa = PBXBuildFile; fileRef = BEHAVIORLOG_SWIFT_REF /* BehaviorLog.swift */; };
+		PROPOSALAPPLIER_SWIFT /* ProposalApplier.swift in Sources */ = {isa = PBXBuildFile; fileRef = PROPOSALAPPLIER_SWIFT_REF /* ProposalApplier.swift */; };
 		SYNCDEVICESTATUS_SWIFT /* SyncDeviceStatus.swift in Sources */ = {isa = PBXBuildFile; fileRef = SYNCDEVICESTATUS_SWIFT_REF /* SyncDeviceStatus.swift */; };
 		SYNCCOUNTERS_SWIFT /* SyncCounters.swift in Sources */ = {isa = PBXBuildFile; fileRef = SYNCCOUNTERS_SWIFT_REF /* SyncCounters.swift */; };
 		SYNCMODELS_SWIFT /* SyncModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = SYNCMODELS_SWIFT_REF /* SyncModels.swift */; };
@@ -116,6 +117,7 @@
 		SYNCERROR_SWIFT_REF /* SyncError.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncError.swift; sourceTree = "<group>"; };
 		SYNCMERGER_SWIFT_REF /* SyncMerger.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncMerger.swift; sourceTree = "<group>"; };
 		BEHAVIORLOG_SWIFT_REF /* BehaviorLog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BehaviorLog.swift; sourceTree = "<group>"; };
+		PROPOSALAPPLIER_SWIFT_REF /* ProposalApplier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProposalApplier.swift; sourceTree = "<group>"; };
 		SYNCDEVICESTATUS_SWIFT_REF /* SyncDeviceStatus.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncDeviceStatus.swift; sourceTree = "<group>"; };
 		SYNCCOUNTERS_SWIFT_REF /* SyncCounters.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncCounters.swift; sourceTree = "<group>"; };
 		SYNCMODELS_SWIFT_REF /* SyncModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncModels.swift; sourceTree = "<group>"; };
@@ -281,6 +283,7 @@
 			isa = PBXGroup;
 			children = (
 				BEHAVIORLOG_SWIFT_REF /* BehaviorLog.swift */,
+				PROPOSALAPPLIER_SWIFT_REF /* ProposalApplier.swift */,
 			);
 			path = Behavior;
 			sourceTree = "<group>";
@@ -414,6 +417,7 @@
 				SYNCMODELS_SWIFT /* SyncModels.swift in Sources */,
 				SYNCMERGER_SWIFT /* SyncMerger.swift in Sources */,
 				BEHAVIORLOG_SWIFT /* BehaviorLog.swift in Sources */,
+				PROPOSALAPPLIER_SWIFT /* ProposalApplier.swift in Sources */,
 				SYNCDEVICESTATUS_SWIFT /* SyncDeviceStatus.swift in Sources */,
 				SYNCCOUNTERS_SWIFT /* SyncCounters.swift in Sources */,
 				ICLOUDSYNCMGR_SWIFT /* iCloudSyncManager.swift in Sources */,

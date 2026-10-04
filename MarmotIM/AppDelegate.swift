@@ -86,6 +86,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    /// Applies accepted 整理词库 decisions (see ProposalApplier)
+    private var proposalApplier: ProposalApplier?
+
+    private func startProposalApplier(engine: DictionaryEngine) {
+        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        let applier = ProposalApplier(path: appSupport.appendingPathComponent("MarmotIM/behavior.db"),
+                                      actions: .live(engine: engine))
+        proposalApplier = applier
+        applier.start()
+    }
+
     private func startPreloading() {
         guard let engine = dictionaryEngine else { return }
 
@@ -96,6 +107,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
             // Migrate legacy user dictionary if it exists
             engine.loadUserDictionary()
+
+            // 整理词库: apply decisions recorded by tools/marmot_curate.py.
+            // Only once the indexes are loaded — adding a word updates them.
+            DispatchQueue.main.async { [weak self] in
+                self?.startProposalApplier(engine: engine)
+            }
 
             // Note: ReverseLookupTable now queries database directly
             // No preloading needed
