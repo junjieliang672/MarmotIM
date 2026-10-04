@@ -72,9 +72,9 @@ class InputController: IMKInputController {
     /// Input buffer for filter mode (separate from normal inputBuffer)
     private var filterBuffer: String = ""
 
-    /// The previous key was a digit that went straight to the app (not a
-    /// candidate pick). A ".", "," or ":" right after it belongs to the number.
-    private var digitJustTyped: Bool = false
+    /// Whether the previous key was a digit that went straight to the app.
+    /// A ".", "," or ":" right after it belongs to the number.
+    private var numberPunctuation = NumberPunctuationTracker()
 
     /// Backspaces straight after a commit, for the behaviour log (整理词库)
     private var correctionTracker = CommitCorrectionTracker()
@@ -127,7 +127,7 @@ class InputController: IMKInputController {
         reset()
         resetPairedPunctuationState()
 
-        digitJustTyped = false
+        numberPunctuation.reset()
 
         // A different text field: whatever is committed next does not follow
         // what was committed before
@@ -205,10 +205,9 @@ class InputController: IMKInputController {
 
         // Was the key before this one a plain digit? Decided before this key
         // is handled, because handling a digit while composing picks a candidate.
-        let followsDigit = digitJustTyped
-        digitJustTyped = PunctuationRules.isPlainDigit(characters: characters,
-                                                       modifiers: modifiers,
-                                                       isComposing: isComposing || filterMode != .none)
+        let followsDigit = numberPunctuation.keyDown(characters: characters,
+                                                     modifiers: modifiers,
+                                                     isComposing: isComposing || filterMode != .none)
 
         // Behaviour log: a backspace while nothing is being composed, right after
         // a commit, counts against that commit. Any other key ends the count.
@@ -1623,6 +1622,32 @@ enum SyncStatusPresenter {
 }
 
 // MARK: - 标点规则
+
+/// Remembers, from one key to the next, whether the previous key was a plain
+/// digit. Only the key immediately before counts, which gives two behaviours
+/// the user relies on:
+///
+/// - `3` `.` gives "3." (the period follows a digit);
+/// - `3` `.` ⌫ `.` gives "3。": after deleting the ASCII mark, the same key
+///   gives the Chinese one, because the key before it is now Backspace. This
+///   is how to end a sentence with a number: 一共3。
+struct NumberPunctuationTracker {
+    private var previousKeyWasDigit = false
+
+    /// Call for every key down, before the key is handled. Returns whether
+    /// this key directly follows a plain digit.
+    mutating func keyDown(characters: String, modifiers: NSEvent.ModifierFlags, isComposing: Bool) -> Bool {
+        let followsDigit = previousKeyWasDigit
+        previousKeyWasDigit = PunctuationRules.isPlainDigit(characters: characters, modifiers: modifiers,
+                                                            isComposing: isComposing)
+        return followsDigit
+    }
+
+    /// The text field changed; the last key belongs to another one
+    mutating func reset() {
+        previousKeyWasDigit = false
+    }
+}
 
 /// Decisions about punctuation that don't need an input controller, so they
 /// can be tested (InputController itself cannot be created in a test).

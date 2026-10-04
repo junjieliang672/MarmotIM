@@ -58,4 +58,56 @@ final class PunctuationRulesTests: XCTestCase {
         XCTAssertEqual(decoded.candidateCount, 7)
         XCTAssertTrue(decoded.punctuationAfterDigitStaysASCII)
     }
+
+    // MARK: - Key sequences
+
+    /// Feeds keys in order and returns, for each punctuation key, whether it
+    /// would stay ASCII. "⌫" is Backspace.
+    private func asciiDecisions(for keys: [String]) -> [Bool] {
+        var tracker = NumberPunctuationTracker()
+        var decisions: [Bool] = []
+        for key in keys {
+            let characters = key == "⌫" ? "\u{7F}" : key
+            let followsDigit = tracker.keyDown(characters: characters, modifiers: [], isComposing: false)
+            if let char = key.first, PunctuationRules.numberPunctuation.contains(char) {
+                decisions.append(PunctuationRules.keepsASCII(char, followsDigit: followsDigit, enabled: true))
+            }
+        }
+        return decisions
+    }
+
+    func testDecimalNumberTimeAndThousands() {
+        XCTAssertEqual(asciiDecisions(for: ["3", ".", "1", "4"]), [true])
+        XCTAssertEqual(asciiDecisions(for: ["1", ",", "0", "0", "0"]), [true])
+        XCTAssertEqual(asciiDecisions(for: ["1", "2", ":", "3", "0"]), [true])
+        XCTAssertEqual(asciiDecisions(for: ["1", ".", "2", ".", "3"]), [true, true])
+    }
+
+    /// The user's rule: delete the mark and type it again, and it is Chinese,
+    /// whether or not a digit is in front of it.
+    func testRetypingAfterDeletingGivesChinesePunctuation() {
+        XCTAssertEqual(asciiDecisions(for: ["3", ".", "⌫", "."]), [true, false])
+        XCTAssertEqual(asciiDecisions(for: ["3", ",", "⌫", ","]), [true, false])
+        XCTAssertEqual(asciiDecisions(for: ["3", ":", "⌫", ":"]), [true, false])
+        // Deleting then typing a different one of the three is Chinese as well
+        XCTAssertEqual(asciiDecisions(for: ["3", ".", "⌫", ","]), [true, false])
+    }
+
+    func testAfterDeletingADigitThePunctuationIsChinese() {
+        // 13, delete the 3, then a period: the key before the period is Backspace
+        XCTAssertEqual(asciiDecisions(for: ["1", "3", "⌫", "."]), [false])
+    }
+
+    func testOnlyTheKeyImmediatelyBeforeCounts() {
+        XCTAssertEqual(asciiDecisions(for: ["3", ".", "."]), [true, false], "the second period follows a period")
+        XCTAssertEqual(asciiDecisions(for: ["3", "a", "."]), [false])
+        XCTAssertEqual(asciiDecisions(for: ["3", " ", "."]), [false])
+    }
+
+    func testChangingTextFieldForgetsTheDigit() {
+        var tracker = NumberPunctuationTracker()
+        _ = tracker.keyDown(characters: "3", modifiers: [], isComposing: false)
+        tracker.reset()
+        XCTAssertFalse(tracker.keyDown(characters: ".", modifiers: [], isComposing: false))
+    }
 }
