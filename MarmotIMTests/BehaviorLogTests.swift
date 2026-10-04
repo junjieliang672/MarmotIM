@@ -171,4 +171,26 @@ final class BehaviorLogTests: XCTestCase {
         XCTAssertEqual(correction?.text, "将领")
         XCTAssertEqual(correction?.backspaces, 2)
     }
+
+    // MARK: - Excluded apps shown by name
+
+    func testInstalledAppIsShownByItsName() {
+        let finder = AppIdentity(bundleId: "com.apple.finder")
+        XCTAssertTrue(finder.isInstalled)
+        XCTAssertNotEqual(finder.name, "com.apple.finder", "the user sees a name, not a bundle id")
+        XCTAssertFalse(finder.name.hasSuffix(".app"))
+        XCTAssertNotNil(finder.icon)
+    }
+
+    func testDefaultExclusionsHaveNamesEvenWhenNotInstalled() {
+        for bundleId in CuratorConfig.defaultExcludedApps {
+            XCTAssertNotEqual(AppIdentity(bundleId: bundleId).name, bundleId, bundleId)
+        }
+    }
+
+    func testUnknownMissingAppFallsBackToItsIdentifier() {
+        let app = AppIdentity(bundleId: "com.example.not-installed-anywhere")
+        XCTAssertFalse(app.isInstalled)
+        XCTAssertEqual(app.name, "com.example.not-installed-anywhere")
+    }
 }

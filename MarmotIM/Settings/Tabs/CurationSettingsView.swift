@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// 词库管理 → 整理: the behaviour log that 整理词库 works from. Recording
 /// switch, what has been recorded, excluded apps, and clearing the log.
@@ -7,7 +8,6 @@ import SwiftUI
 struct CurationSettingsView: View {
     @ObservedObject var viewModel: SettingsViewModel
     @State private var summary: BehaviorLog.Summary?
-    @State private var newApp: String = ""
     @State private var confirmClear = false
 
     var body: some View {
@@ -88,47 +88,86 @@ struct CurationSettingsView: View {
     private var excludedAppsSection: some View {
         GroupBox(label: Text("不记录的 App")) {
             VStack(alignment: .leading, spacing: 6) {
-                ForEach(viewModel.config.curator.excludedApps, id: \.self) { app in
-                    HStack {
-                        Text(app).font(.system(.callout, design: .monospaced))
+                ForEach(viewModel.config.curator.excludedApps, id: \.self) { bundleId in
+                    let app = AppIdentity(bundleId: bundleId)
+                    HStack(spacing: 8) {
+                        if let icon = app.icon {
+                            Image(nsImage: icon).resizable().frame(width: 20, height: 20)
+                        } else {
+                            Image(systemName: "app.dashed").frame(width: 20, height: 20).foregroundColor(.secondary)
+                        }
+                        Text(app.name)
+                        if !app.isInstalled {
+                            Text("未安装").font(.caption).foregroundColor(.secondary)
+                        }
                         Spacer()
-                        Button(action: { remove(app) }) {
+                        Button(action: { remove(bundleId) }) {
                             Image(systemName: "minus.circle")
                         }
                         .buttonStyle(.borderless)
                         .help("从列表中移除")
                     }
+                    .help(bundleId)
                 }
-                HStack {
-                    TextField("App 的 Bundle ID，如 com.example.app", text: $newApp)
-                        .textFieldStyle(.roundedBorder)
-                        .onSubmit(add)
-                    Button("添加", action: add)
-                        .disabled(trimmedNewApp.isEmpty)
+
+                Menu {
+                    let running = runningApps
+                    if !running.isEmpty {
+                        Section("正在运行") {
+                            ForEach(running, id: \.bundleId) { app in
+                                Button(app.name) { add(app.bundleId) }
+                            }
+                        }
+                    }
+                    Button("从「应用程序」里选择…", action: chooseFromDisk)
+                } label: {
+                    Label("添加 App", systemImage: "plus")
                 }
-                Text("Bundle ID 可以在终端用 osascript -e 'id of app \"App 名称\"' 查到。")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
+                .menuStyle(.borderlessButton)
+                .fixedSize()
+                .padding(.top, 2)
             }
             .padding(6)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 
-    private var trimmedNewApp: String {
-        newApp.trimmingCharacters(in: .whitespaces)
+    /// Apps with a window that are not excluded yet, by name
+    private var runningApps: [AppIdentity] {
+        let excluded = Set(viewModel.config.curator.excludedApps)
+        var seen = Set<String>()
+        return NSWorkspace.shared.runningApplications
+            .filter { $0.activationPolicy == .regular }
+            .compactMap { $0.bundleIdentifier }
+            .filter { !excluded.contains($0) && seen.insert($0).inserted }
+            .map { AppIdentity(bundleId: $0) }
+            .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
     }
 
-    private func add() {
-        let app = trimmedNewApp
-        guard !app.isEmpty, !viewModel.config.curator.excludedApps.contains(app) else { return }
-        viewModel.config.curator.excludedApps.append(app)
+    private func chooseFromDisk() {
+        let panel = NSOpenPanel()
+        panel.title = "选择不记录的 App"
+        panel.prompt = "添加"
+        panel.directoryURL = URL(fileURLWithPath: "/Applications")
+        panel.allowedContentTypes = [.application]
+        panel.allowsMultipleSelection = true
+        panel.canChooseDirectories = false
+        guard panel.runModal() == .OK else { return }
+        for url in panel.urls {
+            if let bundleId = Bundle(url: url)?.bundleIdentifier {
+                add(bundleId)
+            }
+        }
+    }
+
+    private func add(_ bundleId: String) {
+        guard !viewModel.config.curator.excludedApps.contains(bundleId) else { return }
+        viewModel.config.curator.excludedApps.append(bundleId)
         viewModel.save()
-        newApp = ""
     }
 
-    private func remove(_ app: String) {
-        viewModel.config.curator.excludedApps.removeAll { $0 == app }
+    private func remove(_ bundleId: String) {
+        viewModel.config.curator.excludedApps.removeAll { $0 == bundleId }
         viewModel.save()
     }
 
@@ -138,4 +177,36 @@ struct CurationSettingsView: View {
             DispatchQueue.main.async { summary = loaded }
         }
     }
+}
+
+/// An excluded app as the user knows it. The config stores the bundle
+/// identifier, which is what the input method sees and what stays the same
+/// when an app is renamed or moved; the name and icon are looked up for display.
+struct AppIdentity {
+    let bundleId: String
+    let name: String
+    let icon: NSImage?
+    let isInstalled: Bool
+
+    init(bundleId: String) {
+        self.bundleId = bundleId
+        if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleId) {
+            name = FileManager.default.displayName(atPath: url.path).replacingOccurrences(of: ".app", with: "")
+            icon = NSWorkspace.shared.icon(forFile: url.path)
+            isInstalled = true
+        } else {
+            name = Self.knownNames[bundleId] ?? bundleId
+            icon = nil
+            isInstalled = false
+        }
+    }
+
+    /// Names for the default exclusions when the app is not on this Mac
+    private static let knownNames = [
+        "com.1password.1password": "1Password",
+        "com.agilebits.onepassword7": "1Password 7",
+        "com.bitwarden.desktop": "Bitwarden",
+        "com.apple.keychainaccess": "钥匙串访问",
+        "com.apple.Passwords": "密码",
+    ]
 }
