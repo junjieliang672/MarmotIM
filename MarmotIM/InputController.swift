@@ -72,6 +72,10 @@ class InputController: IMKInputController {
     /// Input buffer for filter mode (separate from normal inputBuffer)
     private var filterBuffer: String = ""
 
+    /// The previous key was a digit that went straight to the app (not a
+    /// candidate pick). A "." right after it is a decimal point.
+    private var digitJustTyped: Bool = false
+
     /// Backspaces straight after a commit, for the behaviour log (整理词库)
     private var correctionTracker = CommitCorrectionTracker()
 
@@ -122,6 +126,8 @@ class InputController: IMKInputController {
         // Reset state
         reset()
         resetPairedPunctuationState()
+
+        digitJustTyped = false
 
         // A different text field: whatever is committed next does not follow
         // what was committed before
@@ -196,6 +202,13 @@ class InputController: IMKInputController {
 
         // Debug log for troubleshooting app-specific issues
         NSLog("MarmotIM: handle() - keyCode: \(keyCode), chars: '\(characters)', isEnglish: \(isEnglishMode), filterMode: \(filterMode), filterBuffer: '\(filterBuffer)', client: \(clientType)")
+
+        // Was the key before this one a plain digit? Decided before this key
+        // is handled, because handling a digit while composing picks a candidate.
+        let followsDigit = digitJustTyped
+        digitJustTyped = PunctuationRules.isPlainDigit(characters: characters,
+                                                       modifiers: modifiers,
+                                                       isComposing: isComposing || filterMode != .none)
 
         // Behaviour log: a backspace while nothing is being composed, right after
         // a commit, counts against that commit. Any other key ends the count.
@@ -301,6 +314,11 @@ class InputController: IMKInputController {
                 showCandidateWindow(client: sender)
                 return true
             } else {
+                if PunctuationRules.keepsASCII(char, followsDigit: followsDigit,
+                                               enabled: AppDelegate.config.periodAfterDigitStaysASCII) {
+                    // "3" then "." is a decimal point: let the key through as typed
+                    return false
+                }
                 if handlePunctuation(String(char), client: sender) {
                     return true
                 }
@@ -1601,5 +1619,27 @@ enum SyncStatusPresenter {
         default:
             return false
         }
+    }
+}
+
+// MARK: - 标点规则
+
+/// Decisions about punctuation that don't need an input controller, so they
+/// can be tested (InputController itself cannot be created in a test).
+enum PunctuationRules {
+
+    /// A digit key that reaches the app as a digit: not while composing (there
+    /// it picks a candidate), and not with Control or Option held.
+    static func isPlainDigit(characters: String, modifiers: NSEvent.ModifierFlags, isComposing: Bool) -> Bool {
+        guard !isComposing, characters.count == 1, let char = characters.first else { return false }
+        guard char.isASCII, char.isNumber else { return false }
+        return modifiers.isDisjoint(with: [.control, .option, .command])
+    }
+
+    /// "." directly after a digit is a decimal point and stays ".": 3.14,
+    /// 1.5, 192.168.1.1. Without this it becomes "。" in Chinese punctuation
+    /// mode and the user has to switch to English for every number.
+    static func keepsASCII(_ char: Character, followsDigit: Bool, enabled: Bool) -> Bool {
+        enabled && followsDigit && char == "."
     }
 }

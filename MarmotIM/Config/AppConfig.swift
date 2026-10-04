@@ -389,6 +389,10 @@ struct AppConfig: Codable {
     /// Auto-pair punctuation (e.g., typing ( outputs （）)
     var autoPairPunctuation: Bool
 
+    /// A "." typed straight after a digit stays "." instead of becoming "。",
+    /// so 3.14 and 192.168.1.1 can be typed without leaving Chinese mode
+    var periodAfterDigitStaysASCII: Bool = true
+
     // MARK: - Theme Settings (主题)
 
     /// Theme mode (system/light/dark)
@@ -434,6 +438,7 @@ struct AppConfig: Codable {
         punctuationMode: PunctuationMode,
         customPunctuation: [String: String],
         autoPairPunctuation: Bool,
+        periodAfterDigitStaysASCII: Bool = true,
         themeMode: ThemeMode,
         candidateWindowStyle: CandidateWindowStyle,
         rankingWeights: RankingWeights,
@@ -451,6 +456,7 @@ struct AppConfig: Codable {
         self.punctuationMode = punctuationMode
         self.customPunctuation = customPunctuation
         self.autoPairPunctuation = autoPairPunctuation
+        self.periodAfterDigitStaysASCII = periodAfterDigitStaysASCII
         self.themeMode = themeMode
         self.candidateWindowStyle = candidateWindowStyle
         self.rankingWeights = rankingWeights
@@ -514,6 +520,7 @@ struct AppConfig: Codable {
         punctuationMode = (try? container.decode(PunctuationMode.self, forKey: .punctuationMode)) ?? d.punctuationMode
         customPunctuation = (try? container.decode([String: String].self, forKey: .customPunctuation)) ?? d.customPunctuation
         autoPairPunctuation = (try? container.decode(Bool.self, forKey: .autoPairPunctuation)) ?? d.autoPairPunctuation
+        periodAfterDigitStaysASCII = (try? container.decode(Bool.self, forKey: .periodAfterDigitStaysASCII)) ?? d.periodAfterDigitStaysASCII
         themeMode = (try? container.decode(ThemeMode.self, forKey: .themeMode)) ?? d.themeMode
         candidateWindowStyle = (try? container.decode(CandidateWindowStyle.self, forKey: .candidateWindowStyle)) ?? d.candidateWindowStyle
         rankingWeights = (try? container.decode(RankingWeights.self, forKey: .rankingWeights)) ?? d.rankingWeights
@@ -642,6 +649,7 @@ extension AppConfig {
         case punctuationMode
         case customPunctuation
         case autoPairPunctuation
+        case periodAfterDigitStaysASCII
         case themeMode
         case candidateWindowStyle
         case rankingWeights

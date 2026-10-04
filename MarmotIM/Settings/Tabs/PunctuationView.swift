@@ -107,6 +107,19 @@ struct PunctuationView: View {
                         // Save immediately so changes take effect right away
                         viewModel.save()
                     }
+
+                    Toggle(isOn: $viewModel.config.periodAfterDigitStaysASCII) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("数字后的句号输出为小数点")
+                            Text("刚打完数字就按句号键时输出「.」而不是「。」，方便打 3.14、1.5 这样的数字。")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                    .onChange(of: viewModel.config.periodAfterDigitStaysASCII) { _ in
+                        viewModel.markDirty()
+                        viewModel.save()
+                    }
                 }
 
                 Spacer()
