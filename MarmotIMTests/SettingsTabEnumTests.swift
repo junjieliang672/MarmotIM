@@ -34,9 +34,10 @@ final class SettingsTabEnumTests: XCTestCase {
         XCTAssertEqual(SettingsTab.allCases.map { $0.rawValue }, expected)
     }
 
-    // The 词库管理 tab's three inner tabs are the expected set.
-    func testDictionaryManagementHasThreeInnerTabs() {
-        let labels = Set(DictionaryManagementView.InnerTab.allCases.map { $0.rawValue })
-        XCTAssertEqual(labels, ["用户词库", "降权词库", "相对排序"])
+    // The 词库管理 tab's inner tabs: the three stores, plus 整理 (the
+    // behaviour log those stores are curated from).
+    func testDictionaryManagementInnerTabs() {
+        let labels = DictionaryManagementView.InnerTab.allCases.map { $0.rawValue }
+        XCTAssertEqual(labels, ["用户词库", "降权词库", "相对排序", "整理"])
     }
 }

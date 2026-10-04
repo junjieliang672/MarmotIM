@@ -72,6 +72,9 @@ class InputController: IMKInputController {
     /// Input buffer for filter mode (separate from normal inputBuffer)
     private var filterBuffer: String = ""
 
+    /// Backspaces straight after a commit, for the behaviour log (整理词库)
+    private var correctionTracker = CommitCorrectionTracker()
+
     /// Chinese quote pairs: opening → closing
     /// Only quotes support open/close pairing, NOT brackets
     private let chineseQuotePairs: [String: String] = [
@@ -113,6 +116,11 @@ class InputController: IMKInputController {
         // Reset state
         reset()
         resetPairedPunctuationState()
+
+        // A different text field: whatever is committed next does not follow
+        // what was committed before
+        logCorrectionIfAny(correctionTracker.flush(), client: sender)
+        logBehavior(BehaviorEvent(kind: .boundary, trigger: "app"), client: sender)
 
         // Force Chinese mode on activation to prevent being stuck in English mode
         // This ensures the IME is ready to type Chinese when selected or app is switched
@@ -182,6 +190,15 @@ class InputController: IMKInputController {
 
         // Debug log for troubleshooting app-specific issues
         NSLog("MarmotIM: handle() - keyCode: \(keyCode), chars: '\(characters)', isEnglish: \(isEnglishMode), filterMode: \(filterMode), filterBuffer: '\(filterBuffer)', client: \(clientType)")
+
+        // Behaviour log: a backspace while nothing is being composed, right after
+        // a commit, counts against that commit. Any other key ends the count.
+        // Only the fact of the key is used here, never what was typed.
+        if keyCode == 51 && !isComposing {
+            correctionTracker.didBackspace(at: now.timeIntervalSince1970)
+        } else {
+            logCorrectionIfAny(correctionTracker.flush(), client: sender)
+        }
 
         // Handle Ctrl shortcuts (works in both Chinese and English mode)
         if modifiers.contains(.control) {
@@ -258,7 +275,7 @@ class InputController: IMKInputController {
             }
             let num = Int(String(char)) ?? 0
             if num >= 1 && num <= 9 {
-                return selectCandidate(at: num - 1, client: sender)
+                return selectCandidate(at: num - 1, trigger: "number", client: sender)
             }
         }
 
@@ -312,6 +329,7 @@ class InputController: IMKInputController {
             // Use default Chinese punctuation mapping
             if let mapped = defaultChinesePunctuation[char] {
                 let output = applyQuotePairing(input: char, mapped: mapped, config: config)
+                logBehavior(BehaviorEvent(kind: .boundary, trigger: "punct"), client: sender)
                 commitText(output, client: sender)
                 return true
             }
@@ -321,6 +339,7 @@ class InputController: IMKInputController {
             // Use custom mapping - strictly follow the explicit definition
             if let mapped = config.customPunctuation[char], mapped != char {
                 let output = applyQuotePairing(input: char, mapped: mapped, config: config)
+                logBehavior(BehaviorEvent(kind: .boundary, trigger: "punct"), client: sender)
                 commitText(output, client: sender)
                 return true
             }
@@ -434,10 +453,11 @@ class InputController: IMKInputController {
 
         // If we have candidates, select the first one
         if !currentCandidates.isEmpty {
-            return selectCandidate(at: 0, client: sender)
+            return selectCandidate(at: 0, trigger: "space", client: sender)
         }
 
         // No candidates - clear input without committing (unlike Enter which respects settings)
+        logAbandon(trigger: "empty", client: sender)
         reset()
         hideCandidateWindow()
         if let client = sender as? IMKTextInput {
@@ -463,6 +483,7 @@ class InputController: IMKInputController {
         case .clearCode:
             // Clear the input code without outputting
             NSLog("MarmotIM: handleReturn - clearing code")
+            logAbandon(trigger: "enter", client: sender)
             reset()
             hideCandidateWindow()
             if let client = sender as? IMKTextInput {
@@ -471,6 +492,7 @@ class InputController: IMKInputController {
         case .outputCode:
             // Commit the raw input buffer (preserving original case)
             NSLog("MarmotIM: handleReturn - outputting code: '%@'", inputBuffer)
+            logRawCommit(trigger: "enter", client: sender)
             commitText(inputBuffer, client: sender)
             reset()
         }
@@ -486,6 +508,7 @@ class InputController: IMKInputController {
 
         guard isComposing else { return false }
 
+        logAbandon(trigger: "escape", client: sender)
         reset()
         hideCandidateWindow()
 
@@ -856,6 +879,7 @@ class InputController: IMKInputController {
         if isEnglishMode && isComposing {
             // Output the typed pinyin as English text instead of discarding it
             if !inputBuffer.isEmpty {
+                logRawCommit(trigger: "shift", client: sender)
                 commitText(inputBuffer, client: sender)
             }
             reset()
@@ -920,11 +944,27 @@ class InputController: IMKInputController {
 
     // MARK: - Candidate Selection
 
-    private func selectCandidate(at index: Int, client sender: Any!) -> Bool {
+    private func selectCandidate(at index: Int, trigger: String, client sender: Any!) -> Bool {
         // Index is relative to current page
         guard index >= 0 && index < currentCandidates.count else { return false }
 
         let candidate = currentCandidates[index]
+
+        // Behaviour log. Filter modes (emoji, symbols, fuzzy pinyin) are not
+        // dictionary lookups and are left out.
+        if filterMode == .none {
+            let shown = allCandidates.prefix((currentPage + 1) * pageSize)
+            logBehavior(BehaviorEvent(
+                kind: .select,
+                code: inputBuffer.lowercased(),
+                codeType: candidate.codeType.behaviorLabel,
+                text: candidate.text,
+                rank: currentPage * pageSize + index,
+                trigger: trigger,
+                page: currentPage,
+                candidates: shown.map { BehaviorCandidate(t: $0.text, b: $0.isBoosted, j: $0.isJianma) }
+            ), client: sender)
+        }
         NSLog("MarmotIM: selectCandidate - text='%@', entryId=%u, baseFreq=%u, inputCode='%@'",
               candidate.text, candidate.entryId, candidate.baseFrequency, inputBuffer)
 
@@ -973,7 +1013,37 @@ class InputController: IMKInputController {
             NSLog("MarmotIM: commitText() - FAILED: client is not IMKTextInput, type: \(sender == nil ? "nil" : String(describing: type(of: sender!)))")
         }
         lastCommittedText = text
+        logCorrectionIfAny(correctionTracker.didCommit(text, at: Date().timeIntervalSince1970), client: sender)
         hideCandidateWindow()
+    }
+
+    // MARK: - Behaviour Log (整理词库)
+
+    private func logBehavior(_ event: BehaviorEvent, client sender: Any!) {
+        var event = event
+        event.app = (sender as? IMKTextInput)?.bundleIdentifier()
+        BehaviorLog.shared.record(event)
+    }
+
+    private func logCorrectionIfAny(_ correction: (text: String, backspaces: Int)?, client sender: Any!) {
+        guard let correction = correction else { return }
+        logBehavior(BehaviorEvent(kind: .delete, text: correction.text, count: correction.backspaces), client: sender)
+    }
+
+    /// The typed letters are committed as they are (Enter with 输出编码, or
+    /// Shift to English mid-composition). Call before `reset()`.
+    private func logRawCommit(trigger: String, client sender: Any!) {
+        guard filterMode == .none, !inputBuffer.isEmpty else { return }
+        logBehavior(BehaviorEvent(kind: .raw, text: inputBuffer, trigger: trigger, count: allCandidates.count),
+                    client: sender)
+    }
+
+    /// The code is thrown away without committing anything. Call before `reset()`.
+    private func logAbandon(trigger: String, client sender: Any!) {
+        guard filterMode == .none, !inputBuffer.isEmpty else { return }
+        logBehavior(BehaviorEvent(kind: .abandon, code: inputBuffer.lowercased(), trigger: trigger,
+                                  count: allCandidates.count),
+                    client: sender)
     }
 
     // MARK: - Marked Text
@@ -1360,7 +1430,11 @@ class InputController: IMKInputController {
                                  replacementRange: NSRange(location: NSNotFound, length: 0))
         }
 
+        // 行为记录不记听写的内容：只记一个断点，并且不让随后的退格把这段文字
+        // 记成「上屏后删除」。
+        logBehavior(BehaviorEvent(kind: .boundary, trigger: "dictation"), client: target)
         commitText(text, client: target)
+        _ = correctionTracker.flush()
         return true
     }
 

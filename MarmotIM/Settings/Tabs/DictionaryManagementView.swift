@@ -16,6 +16,7 @@ struct DictionaryManagementView: View {
         case userDict      = "用户词库"
         case suppressed    = "降权词库"
         case relativeOrder = "相对排序"
+        case curation      = "整理"
 
         var id: String { rawValue }
     }
@@ -45,6 +46,8 @@ struct DictionaryManagementView: View {
                     SuppressedWordsView(viewModel: viewModel)
                 case .relativeOrder:
                     RelativeOrderingView(viewModel: viewModel)
+                case .curation:
+                    CurationSettingsView(viewModel: viewModel)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)

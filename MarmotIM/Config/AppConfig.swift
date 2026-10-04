@@ -286,6 +286,47 @@ struct TranscribeConfig: Codable, Equatable {
     }
 }
 
+// MARK: - Curator Config (整理词库的行为记录)
+
+/// Settings for the behaviour log that 整理词库 (`tools/marmot_curate.py` and
+/// the marmot-curate Claude skill) works from. Stored in config.json, which is
+/// local to each Mac and never synced: recording is switched on per machine.
+struct CuratorConfig: Codable, Equatable {
+    /// Off by default. Nothing is recorded until the user turns it on.
+    var recordingEnabled: Bool = false
+
+    /// Bundle identifiers of apps in which nothing is recorded
+    var excludedApps: [String] = CuratorConfig.defaultExcludedApps
+
+    /// Raw events older than this are deleted
+    var retentionDays: Int = 60
+
+    static let `default` = CuratorConfig()
+
+    /// Password managers and the keychain: what is typed there is never a
+    /// dictionary word worth learning.
+    static let defaultExcludedApps = [
+        "com.1password.1password",
+        "com.agilebits.onepassword7",
+        "com.bitwarden.desktop",
+        "com.apple.keychainaccess",
+        "com.apple.Passwords",
+    ]
+
+    init() {}
+
+    /// Field-by-field, like TranscribeConfig: a synthesized decoder throws on a
+    /// missing key, which would reset the whole block when a field is added.
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let d = CuratorConfig()
+
+        recordingEnabled = (try? container.decode(Bool.self, forKey: .recordingEnabled)) ?? d.recordingEnabled
+        excludedApps = (try? container.decode([String].self, forKey: .excludedApps)) ?? d.excludedApps
+        retentionDays = (try? container.decode(Int.self, forKey: .retentionDays)) ?? d.retentionDays
+    }
+}
+
 // MARK: - Default Punctuation Mapping
 
 /// Default Chinese punctuation mapping
@@ -371,6 +412,11 @@ struct AppConfig: Codable {
     /// Speech-to-text configuration
     var transcribe: TranscribeConfig = .default
 
+    // MARK: - Curator Settings (整理词库)
+
+    /// Behaviour log configuration
+    var curator: CuratorConfig = .default
+
     // MARK: - Legacy Settings (现有设置)
 
     /// Show code type hint (pinyin/wubi) in candidate window
@@ -393,6 +439,7 @@ struct AppConfig: Codable {
         rankingWeights: RankingWeights,
         fuzzyPinyin: FuzzyPinyinConfig = .default,
         transcribe: TranscribeConfig = .default,
+        curator: CuratorConfig = .default,
         showCodeHint: Bool
     ) {
         self.enterKeyBehavior = enterKeyBehavior
@@ -409,6 +456,7 @@ struct AppConfig: Codable {
         self.rankingWeights = rankingWeights
         self.fuzzyPinyin = fuzzyPinyin
         self.transcribe = transcribe
+        self.curator = curator
         self.showCodeHint = showCodeHint
     }
 
@@ -471,6 +519,7 @@ struct AppConfig: Codable {
         rankingWeights = (try? container.decode(RankingWeights.self, forKey: .rankingWeights)) ?? d.rankingWeights
         fuzzyPinyin = (try? container.decode(FuzzyPinyinConfig.self, forKey: .fuzzyPinyin)) ?? d.fuzzyPinyin
         transcribe = (try? container.decode(TranscribeConfig.self, forKey: .transcribe)) ?? d.transcribe
+        curator = (try? container.decode(CuratorConfig.self, forKey: .curator)) ?? d.curator
         showCodeHint = (try? container.decode(Bool.self, forKey: .showCodeHint)) ?? d.showCodeHint
     }
 
@@ -572,6 +621,8 @@ struct AppConfig: Codable {
         }
 
         // A blank host would silently break every request
+        curator.retentionDays = min(365, max(7, curator.retentionDays))
+
         if transcribe.host.trimmingCharacters(in: .whitespaces).isEmpty {
             transcribe.host = TranscribeConfig.default.host
         }
@@ -596,6 +647,7 @@ extension AppConfig {
         case rankingWeights
         case fuzzyPinyin
         case transcribe
+        case curator
         case showCodeHint
     }
 }
