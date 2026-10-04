@@ -8,6 +8,11 @@ var server: IMKServer?
 var appDelegate: AppDelegate?
 
 // MARK: - Application Entry Point
+#if DEBUG
+if CommandLine.arguments.contains("--ui-preview") {
+    CandidatePreviewHarness.run()
+}
+#endif
 autoreleasepool {
     // Create and store the application delegate globally
     let delegate = AppDelegate()

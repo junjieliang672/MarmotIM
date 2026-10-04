@@ -6,19 +6,24 @@ import AppKit
 struct VisualEffectView: NSViewRepresentable {
     let material: NSVisualEffectView.Material
     let blendingMode: NSVisualEffectView.BlendingMode
+    /// Forces light/dark for the material. nil follows the window.
+    let appearance: NSAppearance?
 
     init(
         material: NSVisualEffectView.Material = .hudWindow,
-        blendingMode: NSVisualEffectView.BlendingMode = .behindWindow
+        blendingMode: NSVisualEffectView.BlendingMode = .behindWindow,
+        appearance: NSAppearance? = nil
     ) {
         self.material = material
         self.blendingMode = blendingMode
+        self.appearance = appearance
     }
 
     func makeNSView(context: Context) -> NSVisualEffectView {
         let view = NSVisualEffectView()
         view.material = material
         view.blendingMode = blendingMode
+        view.appearance = appearance
         view.state = .active
         view.isEmphasized = true
         return view
@@ -27,6 +32,7 @@ struct VisualEffectView: NSViewRepresentable {
     func updateNSView(_ nsView: NSVisualEffectView, context: Context) {
         nsView.material = material
         nsView.blendingMode = blendingMode
+        nsView.appearance = appearance
     }
 }
 

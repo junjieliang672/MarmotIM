@@ -109,3 +109,63 @@ struct MarmotLogoView_Previews: PreviewProvider {
     }
 }
 #endif
+
+/// Line-art marmot standing upright on watch, for the candidate bar.
+/// Drawn on a 24x24 grid; uses foregroundColor like MarmotLogoView.
+struct MarmotSentinelLogoView: View {
+    var body: some View {
+        Canvas { context, size in
+            let scale = min(size.width, size.height) / 24.0
+
+            func point(_ x: CGFloat, _ y: CGFloat) -> CGPoint {
+                return CGPoint(x: x * scale, y: y * scale)
+            }
+
+            var lines = Path()
+
+            // Body, from the left foot up over the head and down to the right foot
+            lines.move(to: point(9, 21))
+            lines.addCurve(to: point(7.5, 13), control1: point(7.5, 19), control2: point(7, 16))
+            lines.addCurve(to: point(7.8, 8.5), control1: point(7.8, 11), control2: point(7.7, 9.8))
+            lines.addCurve(to: point(12, 3.5), control1: point(8, 5.5), control2: point(9.8, 3.5))
+            lines.addCurve(to: point(16.2, 8.5), control1: point(14.2, 3.5), control2: point(16, 5.5))
+            lines.addCurve(to: point(16.5, 13), control1: point(16.3, 9.8), control2: point(16.2, 11))
+            lines.addCurve(to: point(15, 21), control1: point(17, 16), control2: point(16.5, 19))
+
+            // Ears
+            lines.move(to: point(9.2, 4.7))
+            lines.addCurve(to: point(7.3, 5.3), control1: point(8.4, 3.8), control2: point(7.2, 4.2))
+            lines.move(to: point(14.8, 4.7))
+            lines.addCurve(to: point(16.7, 5.3), control1: point(15.6, 3.8), control2: point(16.8, 4.2))
+
+            // Nose
+            lines.move(to: point(11.3, 9.5))
+            lines.addLine(to: point(12.7, 9.5))
+
+            // Paws folded on the chest
+            lines.move(to: point(9.9, 13.6))
+            lines.addCurve(to: point(11.6, 13.6), control1: point(10.4, 14.5), control2: point(11.2, 14.5))
+            lines.move(to: point(12.4, 13.6))
+            lines.addCurve(to: point(14.1, 13.6), control1: point(12.8, 14.5), control2: point(13.6, 14.5))
+
+            // Ground
+            lines.move(to: point(6.5, 21))
+            lines.addLine(to: point(17.5, 21))
+
+            // Tail
+            lines.move(to: point(15.6, 19.8))
+            lines.addCurve(to: point(18.9, 18.1), control1: point(17.4, 20.1), control2: point(18.7, 19.4))
+
+            context.stroke(lines, with: .foreground,
+                           style: StrokeStyle(lineWidth: 1.5 * scale, lineCap: .round, lineJoin: .round))
+
+            // Eyes
+            var eyes = Path()
+            for x in [10.4, 13.6] {
+                eyes.addEllipse(in: CGRect(x: (x - 0.75) * scale, y: (7.6 - 0.75) * scale,
+                                           width: 1.5 * scale, height: 1.5 * scale))
+            }
+            context.fill(eyes, with: .foreground)
+        }
+    }
+}

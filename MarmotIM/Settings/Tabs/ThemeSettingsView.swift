@@ -16,7 +16,9 @@ struct ThemeSettingsView: View {
                                 isSelected: viewModel.config.themeMode == mode,
                                 action: {
                                     viewModel.config.themeMode = mode
-                                    viewModel.markDirty()
+                                    // Save right away: the window's onDisappear save is not
+                                    // reliable, and the choice should show on the next keystroke
+                                    viewModel.save()
                                 }
                             )
                         }
@@ -26,14 +28,18 @@ struct ThemeSettingsView: View {
                 // Candidate window style (Terminal Hybrid theme)
                 SettingsSection(title: "候选窗口样式") {
                     // Preview
-                    CandidateWindowPreview(style: viewModel.config.candidateWindowStyle)
-                        .padding(.bottom, 12)
-
-                    // Theme description
-                    Text("Terminal Hybrid 主题：简约等宽字体 + 毛玻璃背景")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                        .padding(.bottom, 8)
+                    // The same view the input method shows, fed the unsaved settings
+                    CandidateView(
+                        candidates: Candidate.previewSamples,
+                        selectedIndex: 0,
+                        inputCode: "wo",
+                        currentPage: 0,
+                        totalPages: 3,
+                        styleOverride: viewModel.config.candidateWindowStyle,
+                        themeModeOverride: viewModel.config.themeMode
+                    )
+                    .shadow(color: .black.opacity(0.15), radius: 6, x: 0, y: 2)
+                    .padding(.bottom, 12)
 
                     // Font size
                     HStack {
@@ -46,7 +52,7 @@ struct ThemeSettingsView: View {
                         )
                         .frame(width: 150)
                         .onChange(of: viewModel.config.candidateWindowStyle.fontSize) { _ in
-                            viewModel.markDirty()
+                            viewModel.save()
                         }
                         Text("\(Int(viewModel.config.candidateWindowStyle.fontSize))pt")
                             .frame(width: 40)
@@ -124,119 +130,6 @@ struct ThemeModeButton: View {
             Image(systemName: "moon.fill")
                 .foregroundColor(.yellow)
         }
-    }
-}
-
-// MARK: - Candidate Window Preview (Terminal Hybrid Theme)
-
-struct CandidateWindowPreview: View {
-    let style: CandidateWindowStyle
-    @Environment(\.colorScheme) var colorScheme
-
-    private var isDark: Bool { colorScheme == .dark }
-
-    private var backgroundColor: Color {
-        isDark ? Color(white: 0.1) : Color(white: 0.96)
-    }
-
-    private var primaryTextColor: Color {
-        isDark ? Color(white: 0.9) : Color(white: 0.1)
-    }
-
-    private var secondaryTextColor: Color {
-        isDark ? Color(white: 0.53) : Color(white: 0.4)
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            // Top bar with code, logo, page info
-            HStack {
-                Text("wo")
-                    .font(.system(size: CGFloat(style.fontSize - 2), design: .monospaced))
-                    .foregroundColor(secondaryTextColor)
-
-                Spacer()
-
-                MarmotLogoView()
-                    .frame(width: 14, height: 14)
-                    .foregroundColor(secondaryTextColor)
-
-                Spacer()
-
-                Text("1/3")
-                    .font(.system(size: CGFloat(style.fontSize - 3), design: .monospaced))
-                    .foregroundColor(secondaryTextColor)
-                Text("[,/.]")
-                    .font(.system(size: CGFloat(style.fontSize - 4), design: .monospaced))
-                    .foregroundColor(secondaryTextColor.opacity(0.6))
-            }
-            .padding(.horizontal, 10)
-            .padding(.top, 6)
-
-            // Candidates
-            HStack(spacing: 12) {
-                PreviewCandidateItem(index: 1, text: "我", isSelected: true, fontSize: style.fontSize, isDark: isDark)
-                PreviewCandidateItem(index: 2, text: "我们", isSelected: false, fontSize: style.fontSize, isDark: isDark)
-                PreviewCandidateItem(index: 3, text: "我的", isSelected: false, fontSize: style.fontSize, isDark: isDark)
-            }
-            .padding(.horizontal, 10)
-            .padding(.bottom, 8)
-        }
-        .background(
-            ZStack {
-                // Simulated vibrancy effect
-                VisualEffectView(material: .hudWindow, blendingMode: .behindWindow)
-                backgroundColor.opacity(0.85)
-            }
-            .clipShape(RoundedRectangle(cornerRadius: 4))
-        )
-        .shadow(color: .black.opacity(isDark ? 0.4 : 0.15), radius: 8, x: 0, y: 4)
-    }
-}
-
-struct PreviewCandidateItem: View {
-    let index: Int
-    let text: String
-    let isSelected: Bool
-    let fontSize: Double
-    let isDark: Bool
-
-    private var primaryTextColor: Color {
-        isDark ? Color(white: 0.9) : Color(white: 0.1)
-    }
-
-    private var secondaryTextColor: Color {
-        isDark ? Color(white: 0.53) : Color(white: 0.4)
-    }
-
-    private var selectionColor: Color {
-        isDark ? Color.white.opacity(0.1) : Color.black.opacity(0.08)
-    }
-
-    var body: some View {
-        HStack(spacing: 3) {
-            Text("\(index).")
-                .font(.system(size: CGFloat(fontSize - 2), design: .monospaced))
-                .foregroundColor(secondaryTextColor)
-
-            Text(text)
-                .font(.system(size: CGFloat(fontSize + 2), design: .monospaced))
-                .foregroundColor(primaryTextColor)
-
-            Text("py")
-                .font(.system(size: CGFloat(fontSize - 5), design: .monospaced))
-                .foregroundColor(secondaryTextColor.opacity(0.7))
-                .padding(.horizontal, 3)
-                .padding(.vertical, 1)
-                .background(selectionColor)
-                .cornerRadius(2)
-        }
-        .padding(.horizontal, 6)
-        .padding(.vertical, 4)
-        .background(
-            RoundedRectangle(cornerRadius: 3)
-                .fill(isSelected ? selectionColor : Color.clear)
-        )
     }
 }
 
