@@ -15,6 +15,21 @@ enum EnterKeyBehavior: String, Codable, CaseIterable {
     }
 }
 
+/// Key that commits the first English candidate on the current page
+enum EnglishCandidateKey: String, Codable, CaseIterable {
+    case tab = "tab"
+    case grave = "grave"   // the ` key
+    case off = "off"
+
+    var displayName: String {
+        switch self {
+        case .tab: return "Tab"
+        case .grave: return "` (反引号)"
+        case .off: return "关闭"
+        }
+    }
+}
+
 /// Punctuation handling mode
 enum PunctuationMode: String, Codable, CaseIterable {
     case chinese = "chinese"   // Always use Chinese punctuation
@@ -367,8 +382,16 @@ struct AppConfig: Codable {
     /// Number of candidates to show (3-9)
     var candidateCount: Int
 
-    /// Add a space after selecting an English candidate
+    /// Add a space after committing an English candidate, whichever key
+    /// committed it (Space, the select-English-candidate key, a digit)
     var addSpaceAfterEnglish: Bool
+
+    /// Offer English prefix completions ("kuber" -> "Kubernetes")
+    var englishCompletion: Bool
+
+    /// Key that commits the first English candidate on the current page.
+    /// Does nothing when the page has none.
+    var selectEnglishCandidateKey: EnglishCandidateKey
 
     // MARK: - Icon Settings (图标)
 
@@ -434,6 +457,8 @@ struct AppConfig: Codable {
         numberAsInputWhenCapital: Bool,
         candidateCount: Int,
         addSpaceAfterEnglish: Bool,
+        englishCompletion: Bool,
+        selectEnglishCandidateKey: EnglishCandidateKey,
         showStatusBarIcon: Bool,
         showModeIndicator: Bool,
         punctuationMode: PunctuationMode,
@@ -452,6 +477,8 @@ struct AppConfig: Codable {
         self.numberAsInputWhenCapital = numberAsInputWhenCapital
         self.candidateCount = candidateCount
         self.addSpaceAfterEnglish = addSpaceAfterEnglish
+        self.englishCompletion = englishCompletion
+        self.selectEnglishCandidateKey = selectEnglishCandidateKey
         self.showStatusBarIcon = showStatusBarIcon
         self.showModeIndicator = showModeIndicator
         self.punctuationMode = punctuationMode
@@ -477,6 +504,8 @@ struct AppConfig: Codable {
         // Candidate Settings
         candidateCount: 9,
         addSpaceAfterEnglish: false,
+        englishCompletion: true,
+        selectEnglishCandidateKey: .tab,
 
         // Icon Settings
         showStatusBarIcon: false,
@@ -516,6 +545,8 @@ struct AppConfig: Codable {
         numberAsInputWhenCapital = (try? container.decode(Bool.self, forKey: .numberAsInputWhenCapital)) ?? d.numberAsInputWhenCapital
         candidateCount = (try? container.decode(Int.self, forKey: .candidateCount)) ?? d.candidateCount
         addSpaceAfterEnglish = (try? container.decode(Bool.self, forKey: .addSpaceAfterEnglish)) ?? d.addSpaceAfterEnglish
+        englishCompletion = (try? container.decode(Bool.self, forKey: .englishCompletion)) ?? d.englishCompletion
+        selectEnglishCandidateKey = (try? container.decode(EnglishCandidateKey.self, forKey: .selectEnglishCandidateKey)) ?? d.selectEnglishCandidateKey
         showStatusBarIcon = (try? container.decode(Bool.self, forKey: .showStatusBarIcon)) ?? d.showStatusBarIcon
         showModeIndicator = (try? container.decode(Bool.self, forKey: .showModeIndicator)) ?? d.showModeIndicator
         punctuationMode = (try? container.decode(PunctuationMode.self, forKey: .punctuationMode)) ?? d.punctuationMode
@@ -645,6 +676,8 @@ extension AppConfig {
         case numberAsInputWhenCapital
         case candidateCount
         case addSpaceAfterEnglish
+        case englishCompletion
+        case selectEnglishCandidateKey
         case showStatusBarIcon
         case showModeIndicator
         case punctuationMode

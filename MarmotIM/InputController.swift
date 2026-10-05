@@ -37,7 +37,9 @@ class InputController: IMKInputController {
     private var currentPage: Int = 0
 
     /// Candidates per page
-    private let pageSize: Int = 9
+    /// Candidates per page. Follows the configured count, which is also how
+    /// many the candidate bar draws.
+    private var pageSize: Int { max(1, AppDelegate.config.candidateCount) }
 
     /// Candidate window controller
     private var candidateWindowController: CandidateWindowController?
@@ -242,6 +244,10 @@ class InputController: IMKInputController {
             return handleSpace(client: sender)
         case 48: // Tab
             return handleTab(client: sender)
+        case 50: // ` key
+            if AppDelegate.config.selectEnglishCandidateKey == .grave, isComposing {
+                return selectEnglishCandidate(trigger: "grave", client: sender)
+            }
         case 125, 126: // Down/Up arrow
             return handleArrowKey(isDown: keyCode == 125, client: sender)
         case 33: // [ key - page up
@@ -601,11 +607,27 @@ class InputController: IMKInputController {
         return true
     }
 
-    /// Handle Tab key - no longer triggers filter mode
+    /// Handle Tab key: commits the first English candidate on the current
+    /// page when that is the configured key. Outside composition Tab passes
+    /// through.
     private func handleTab(client sender: Any!) -> Bool {
-        // Tab no longer triggers filter mode (use ; instead)
-        // Return false to let Tab pass through
-        return false
+        guard AppDelegate.config.selectEnglishCandidateKey == .tab, isComposing else { return false }
+        return selectEnglishCandidate(trigger: "tab", client: sender)
+    }
+
+    /// Commits the first English candidate on the current page. In short code
+    /// mode that is the exact match in the last slot
+    /// (CandidateRanker.pinShortEnglish); with completions showing, the most
+    /// common one.
+    ///
+    /// Only called while composing, and always consumes the key: with no
+    /// English candidate on the page nothing happens, rather than a tab
+    /// character landing in the middle of a composition.
+    private func selectEnglishCandidate(trigger: String, client sender: Any!) -> Bool {
+        if let index = currentCandidates.firstIndex(where: { $0.codeType == .english }) {
+            _ = selectCandidate(at: index, trigger: trigger, client: sender)
+        }
+        return true
     }
 
     private func handleArrowKey(isDown: Bool, client sender: Any!) -> Bool {
@@ -953,9 +975,12 @@ class InputController: IMKInputController {
             return
         }
 
-        // Search using lowercased input (codes in database are lowercase)
-        let searchCode = inputBuffer.lowercased()
-        let matches = engine.search(code: searchCode, limit: 100)
+        // The buffer goes in as typed. Wubi and pinyin are looked up
+        // lowercased; English reads the case (an uppercase letter means the
+        // user is typing English).
+        let searchCode = inputBuffer
+        let matches = engine.search(code: searchCode, limit: 100,
+                                    englishCompletion: AppDelegate.config.englishCompletion)
 
         // Rank candidates using Frecency (new API with engine for user learning data)
         let ranked = CandidateRanker.rank(
@@ -967,9 +992,17 @@ class InputController: IMKInputController {
         // Apply relative-ordering rules (spec-003). Sibling pass: does NOT
         // touch rank()'s score math. Rules come from the engine-resident
         // cache, rebuilt on preload + .relativeOrderingDidChange.
-        allCandidates = CandidateRanker.applyRelativeOrdering(
+        let ordered = CandidateRanker.applyRelativeOrdering(
             candidates: ranked,
             rules: engine.getRelativeOrderingRules()
+        )
+
+        // An exact English match on a possible wubi code goes to the last
+        // slot of the first page, out of the wubi candidates' way.
+        allCandidates = CandidateRanker.pinShortEnglish(
+            candidates: ordered,
+            inputCode: searchCode,
+            pageSize: pageSize
         )
 
         // Reset to first page

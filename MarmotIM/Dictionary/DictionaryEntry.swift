@@ -59,7 +59,9 @@ struct DictionaryEntry: Codable, Identifiable {
         case .pinyin:
             return pinyinBaseFrequency
         case .english:
-            return 50000  // 英文默认词频
+            // English entries are built from en_table.txt on the fly and carry
+            // their rank-derived frequency in this field
+            return pinyinBaseFrequency
         }
     }
 }
@@ -128,7 +130,7 @@ struct Candidate: Identifiable {
         case .pinyin:
             return pinyinBaseFrequency
         case .english:
-            return 50000  // 英文默认词频
+            return pinyinBaseFrequency
         }
     }
 

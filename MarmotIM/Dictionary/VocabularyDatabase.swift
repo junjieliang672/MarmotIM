@@ -1000,6 +1000,12 @@ final class VocabularyDatabase {
 
         var results: [UInt32: (UInt32, UInt32, Double)] = [:]
 
+        // Every English word used to be recorded under entry id 0, so one
+        // row stood for all of them and picking any English word boosted
+        // every other. English words have their own ids now
+        // (EnglishWordIndex.wordId); the shared row means nothing and goes.
+        sqlite3_exec(db, "DELETE FROM user_learning WHERE entry_id = 0", nil, nil, nil)
+
         let sql = "SELECT entry_id, access_count, last_access_timestamp, total_score FROM user_learning"
         var statement: OpaquePointer?
 

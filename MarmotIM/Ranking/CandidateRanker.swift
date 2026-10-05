@@ -14,10 +14,17 @@ import Foundation
 /// - Tier 2: Full Pinyin match (+10B)
 /// - Tier 3: Prefix Wubi match (+1B)
 /// - Tier 4: Prefix Pinyin match (0)
+/// A full English match is then moved to the last slot of the first page by
+/// `pinShortEnglish`, so it never takes a wubi candidate's place.
 ///
 /// When input length > 4 (Pinyin-priority mode):
 /// - Tier 1: Full match (+100B)
+/// - English prefix match (+1B) - completions, ahead of pinyin prefixes
 /// - Tier 2: Prefix match (0)
+///
+/// When the input contains an uppercase letter (the user is typing English):
+/// - Full English match (+200B), English prefix match (+150B) - above every
+///   regular tier, below the protected ones
 ///
 /// ## Within-Tier Ranking (Frecency)
 ///
@@ -30,7 +37,7 @@ import Foundation
 ///    - Half-life: 1 day
 ///
 /// 3. **Frequency Score**: Permanent accumulating score
-///    - 10,000 points per selection
+///    - 5,000,000 points per selection
 ///
 /// 4. **Base Score**: Dictionary frequency (0-65535)
 ///
@@ -66,6 +73,21 @@ struct CandidateRanker {
     static let tier3Bonus: Double = 1_000_000_000
 
     // Tier 4 is 0 (baseline)
+
+    /// English full match while the input contains an uppercase letter.
+    /// Above tier 1 so the English word comes first; with the tier override
+    /// boost (500B) still below jianmaLevel2Bonus (1T).
+    static let englishIntentFullBonus: Double = 200_000_000_000
+
+    /// English prefix match (completion) while the input contains an uppercase letter
+    static let englishIntentPrefixBonus: Double = 150_000_000_000
+
+    /// English prefix match (completion) for lowercase input: above pinyin
+    /// prefix matches (0), below every full match
+    static let englishPrefixBonus: Double = tier3Bonus
+
+    /// Longest input that can be a wubi code
+    static let wubiMaxCodeLength = 4
 
     /// Short word bonus per character under 5
     static let shortWordBonusPerChar: Double = 10_000
@@ -155,8 +177,9 @@ struct CandidateRanker {
             tierOverrideBoosts[match.entry.id] = tierOverrideBoost
         }
 
-        // Sort by score descending
-        candidates.sort { $0.score > $1.score }
+        // Sort by score descending; equal scores fall back to the text so the
+        // order does not depend on dictionary iteration order
+        candidates.sort { $0.score != $1.score ? $0.score > $1.score : $0.text < $1.text }
 
         // STEP 3: Detect if #1 is boosted
         // A candidate is "boosted" if:
@@ -274,6 +297,39 @@ struct CandidateRanker {
         return result
     }
 
+    // MARK: - Short-Code English Pinning
+
+    /// Moves full English matches to the last slot of the first page when the
+    /// input could be a wubi code (all lowercase, at most 4 letters).
+    ///
+    /// A wubi typist reads the first slots as wubi candidates. An English word
+    /// that happens to share the letters ("the", "java") would otherwise land
+    /// among them, at a position that shifts with scores. A fixed slot keeps
+    /// the wubi candidates where they were and gives the English word one
+    /// predictable place, which the select-English-candidate key (Tab) commits.
+    ///
+    /// Left alone when the list holds no wubi candidate: then the letters are
+    /// not a wubi code and nothing needs protecting.
+    ///
+    /// Called by the caller after `applyRelativeOrdering`, like that pass.
+    static func pinShortEnglish(
+        candidates: [Candidate],
+        inputCode: String,
+        pageSize: Int
+    ) -> [Candidate] {
+        guard inputCode.count <= wubiMaxCodeLength, inputCode == inputCode.lowercased(), pageSize > 0 else {
+            return candidates
+        }
+        guard candidates.contains(where: { $0.codeType == .wubi }) else { return candidates }
+
+        let english = candidates.filter { $0.codeType == .english && $0.isFullMatch }
+        guard !english.isEmpty else { return candidates }
+
+        var result = candidates.filter { !($0.codeType == .english && $0.isFullMatch) }
+        result.insert(contentsOf: english, at: min(pageSize - 1, result.count))
+        return result
+    }
+
     // MARK: - Tier Calculation
 
     /// Determine tier bonus based on match type, code type, and jianma table
@@ -292,12 +348,14 @@ struct CandidateRanker {
         let isWubiCode = match.codeType == .wubi
         let isEnglishCode = match.codeType == .english
         let inputLength = inputCode.count
+        let lowercasedCode = inputCode.lowercased()
+        let hasUppercase = inputCode != lowercasedCode
 
         // Check for Protected Tier (jianma) using jianma table
         // Only full wubi matches with 1-2 char codes can be jianma
         if isFullMatch && isWubiCode && inputLength <= 2 {
             let text = match.entry.text
-            if engine.isOfficialJianma(code: inputCode, text: text) {
+            if engine.isOfficialJianma(code: lowercasedCode, text: text) {
                 // This is an official jianma from jianma.txt
                 if inputLength == 1 {
                     return jianmaLevel1Bonus  // P0: 一级简码
@@ -307,9 +365,15 @@ struct CandidateRanker {
             }
         }
 
-        // English full match -> Tier 1 (same as Wubi full match)
-        if isFullMatch && isEnglishCode {
-            return tier1Bonus
+        if isEnglishCode {
+            // An uppercase letter says the user is typing English: put it first
+            if hasUppercase {
+                return isFullMatch ? englishIntentFullBonus : englishIntentPrefixBonus
+            }
+            // Full match -> Tier 1 (same as Wubi full match; in short code
+            // mode pinShortEnglish then fixes its position). Completions sit
+            // just above pinyin prefix matches.
+            return isFullMatch ? tier1Bonus : englishPrefixBonus
         }
 
         if inputLength <= 4 {
@@ -330,8 +394,8 @@ struct CandidateRanker {
 
     /// Tier override boost after applying ranking exclusions.
     ///
-    /// Returns 0 for suppressed words, and for Wubi prefix matches in short
-    /// code mode (Tier 3). The boost is keyed by entry id, not by the code it
+    /// Returns 0 for suppressed words, for Wubi prefix matches in short
+    /// code mode (Tier 3), and for English prefix matches. The boost is keyed by entry id, not by the code it
     /// was picked with, so without this exclusion picking 交集 at `uqwy` would
     /// push it above the exact 3-key match 次 at `uqw` for ~2 hours.
     private static func effectiveTierOverrideBoost(
@@ -343,6 +407,9 @@ struct CandidateRanker {
         if isSuppressed { return 0 }
         let isWubiPrefix = match.matchType == .prefix && match.codeType == .wubi
         if isWubiPrefix && inputCode.count <= 4 { return 0 }
+        // Same reasoning for English completions: picking "kubernetes" must
+        // not lift it over everything else at every shorter prefix.
+        if match.matchType == .prefix && match.codeType == .english { return 0 }
         return FrecencyScore.calculateTierOverrideBoost(lastAccessTimestamp: lastAccessTimestamp)
     }
 
@@ -381,8 +448,9 @@ struct CandidateRanker {
         if isFullMatch && isWubiCode && inputLength == 4 && textLength == 2 {
             // Wubi 4-char full match: 2-char words get higher bonus than 1-char words
             shortWordBonus = 50_000
-        } else if textLength < 5 {
-            // Default: shorter words get higher bonus
+        } else if textLength < 5 && match.codeType != .english {
+            // Default: shorter words get higher bonus. Not for English, where
+            // length counts letters and the frequency rank already orders words.
             shortWordBonus = Double(5 - textLength) * shortWordBonusPerChar
         }
 
@@ -453,7 +521,7 @@ extension CandidateRanker {
         let textLength = match.entry.textLength
         if isFullMatch && isWubiCode && inputLength == 4 && textLength == 2 {
             shortWordBonus = 50_000
-        } else if textLength < 5 {
+        } else if textLength < 5 && match.codeType != .english {
             shortWordBonus = Double(5 - textLength) * shortWordBonusPerChar
         }
 

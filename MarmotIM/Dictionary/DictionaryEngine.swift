@@ -235,6 +235,11 @@ class DictionaryEngine {
         }
     }
 
+    /// 用于测试：直接设置英文词表（显示形式 + 词频名次）
+    func setEnglishWordsForTesting(_ ranked: [(display: String, rank: Int)]) {
+        englishWordIndex.setTestWords(ranked)
+    }
+
     // MARK: - Suppressed Words Cache
 
     /// Load suppressed words into cache from database
@@ -313,31 +318,45 @@ class DictionaryEngine {
         loadRelativeOrderingCache()
     }
 
-    /// 英文完全匹配搜索
-    func searchEnglishExact(code: String) -> DictionaryMatch? {
-        guard englishWordIndex.isLoaded else { return nil }
-        guard let matchedWord = englishWordIndex.exactMatch(code) else {
-            return nil
+    /// How many English prefix completions a search may add
+    static let englishCompletionLimit = 3
+
+    /// 英文搜索：完全匹配，以及（allowCompletion 时）按词频取的前缀补全
+    ///
+    /// English entries are not in the database. Each is built here from
+    /// en_table.txt, with an id derived from the word itself so that learning
+    /// is recorded per word.
+    func searchEnglish(code: String, allowCompletion: Bool) -> [DictionaryMatch] {
+        guard englishWordIndex.isLoaded else { return [] }
+
+        var matches: [DictionaryMatch] = []
+        var seenTexts = Set<String>()
+
+        func add(_ word: EnglishWord, _ matchType: DictionaryMatch.MatchType) {
+            let text = EnglishWordIndex.display(word, typedAs: code)
+            guard seenTexts.insert(text).inserted else { return }
+            let entry = DictionaryEntry(
+                id: word.id,
+                text: text,
+                pinyin: word.key,
+                wubi: nil,
+                wubiBaseFrequency: 0,
+                pinyinBaseFrequency: EnglishWordIndex.baseFrequency(rank: word.rank),
+                source: nil,
+                length: text.count
+            )
+            matches.append(DictionaryMatch(entry: entry, matchedCode: word.key, matchType: matchType, codeType: .english))
         }
 
-        // 创建一个虚拟的 DictionaryEntry 用于英文匹配
-        let entry = DictionaryEntry(
-            id: 0,  // 英文词条使用特殊 ID
-            text: matchedWord,
-            pinyin: code.lowercased(),
-            wubi: nil,
-            wubiBaseFrequency: 0,
-            pinyinBaseFrequency: 50000,
-            source: nil,
-            length: matchedWord.count
-        )
-
-        return DictionaryMatch(
-            entry: entry,
-            matchedCode: code,
-            matchType: .full,
-            codeType: .english
-        )
+        for word in englishWordIndex.exactMatches(code) {
+            add(word, .full)
+        }
+        if allowCompletion {
+            for word in englishWordIndex.completions(prefix: code, limit: Self.englishCompletionLimit) {
+                add(word, .prefix)
+            }
+        }
+        return matches
     }
 
     /// Cleanup deleted user favorites at startup
@@ -467,8 +486,14 @@ class DictionaryEngine {
     /// The limit is distributed with two priorities:
     /// 1. Full matches before prefix matches
     /// 2. Even distribution between wubi and pinyin within each match type
-    func search(code: String, limit: Int = 50) -> [DictionaryMatch] {
-        guard !code.isEmpty else { return [] }
+    ///
+    /// `rawCode` keeps the case the user typed. Wubi and pinyin are looked up
+    /// lowercased; English uses the case to decide how words are shown and
+    /// whether completions are offered (see `searchEnglish`).
+    func search(code rawCode: String, limit: Int = 50, englishCompletion: Bool = true) -> [DictionaryMatch] {
+        guard !rawCode.isEmpty else { return [] }
+        let code = rawCode.lowercased()
+        let hasUppercase = rawCode != code
 
         // Don't search if not preloaded yet - prevents race conditions
         guard isPreloaded else {
@@ -581,17 +606,18 @@ class DictionaryEngine {
             results.append(contentsOf: prefixPinyinMatches.prefix(pinyinSlots))
         }
 
-        // 添加英文完全匹配
-        // 如果已存在相同文本的候选词（可能是历史数据中错误存储为pinyin的英文词），
-        // 用正确的 English match 替换，确保显示正确的 "en" 指示器
-        if let englishMatch = searchEnglishExact(code: code) {
-            let englishText = englishMatch.entry.text
-            if let existingIndex = results.firstIndex(where: { $0.entry.text == englishText }) {
-                // 替换已存在的条目（优先使用正确的 codeType=.english）
-                results[existingIndex] = englishMatch
-            } else {
-                results.append(englishMatch)
-            }
+        // 英文。完全匹配总是加入；前缀补全只在不会干扰五笔的时候给：
+        // 输入含大写（明确要打英文）、超过 4 个字母（不可能是五笔码）、
+        // 或者五笔和拼音都没有候选。
+        let allowCompletion = englishCompletion && (hasUppercase || code.count > 4 || results.isEmpty)
+        let englishMatches = searchEnglish(code: rawCode, allowCompletion: allowCompletion)
+        if !englishMatches.isEmpty {
+            // An English word may also exist as a database entry (words added
+            // through curate are stored under their letters as pinyin). The
+            // English match wins, so the candidate is labelled and spaced as English.
+            let englishTexts = Set(englishMatches.map { $0.entry.text })
+            results.removeAll { englishTexts.contains($0.entry.text) }
+            results.append(contentsOf: englishMatches)
         }
 
         return results

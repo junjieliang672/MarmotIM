@@ -874,4 +874,241 @@ final class CandidateRankerTests: XCTestCase {
 
         XCTAssertEqual(tierBonus, CandidateRanker.tier1Bonus, "English full match in long code mode should still get tier1Bonus")
     }
+
+    // MARK: - Part 9: English Zones
+    //
+    // Lowercase, <= 4 letters: could be a wubi code. A full English match is
+    //   pinned to the last slot of the first page; no completions.
+    // Lowercase, >= 5 letters: cannot be wubi. Completions rank above pinyin
+    //   prefixes, below full matches.
+    // Any uppercase letter: the user is typing English. English ranks first,
+    //   still below the protected jianma tiers.
+
+    private func english(_ id: UInt32, _ text: String, _ matchType: DictionaryMatch.MatchType,
+                         frequency: UInt16 = 50000) -> DictionaryMatch {
+        let entry = makeEntry(id: id, text: text, pinyin: text.lowercased(), pinyinBaseFrequency: frequency)
+        return makeMatch(entry: entry, matchedCode: text.lowercased(), matchType: matchType, codeType: .english)
+    }
+
+    /// Test 9.1: uppercase input puts the English word above a wubi full match
+    func testEnglishZone_Uppercase_EnglishAboveWubiFull() {
+        let wubi = makeEntry(id: 1, text: "符", wubi: "twf", wubiBaseFrequency: 60000)
+        let matches = [
+            makeMatch(entry: wubi, matchedCode: "twf", matchType: .full, codeType: .wubi),
+            english(2, "The", .full),
+            english(3, "Their", .prefix),
+        ]
+
+        let candidates = rankMatches(matches, inputCode: "The")
+        XCTAssertEqual(candidates.map { $0.text }, ["The", "Their", "符"])
+    }
+
+    /// Test 9.2: uppercase input does not get past the protected tiers
+    func testEnglishZone_Uppercase_JianmaStillFirst() {
+        engine.addJianmaEntry(code: "a", text: "工")
+        engine.addJianmaEntry(code: "we", text: "从")
+        let gong = makeEntry(id: 1, text: "工", wubi: "a", wubiBaseFrequency: 65000)
+        let cong = makeEntry(id: 2, text: "从", wubi: "we", wubiBaseFrequency: 65000)
+
+        // Even with the English word picked a moment ago
+        engine.setUserLearning(entryId: 3, accessCount: 50, lastAccessTimestamp: UInt32(Date().timeIntervalSince1970))
+        engine.setUserLearning(entryId: 4, accessCount: 50, lastAccessTimestamp: UInt32(Date().timeIntervalSince1970))
+
+        let one = rankMatches([
+            makeMatch(entry: gong, matchedCode: "a", matchType: .full, codeType: .wubi),
+            english(3, "A", .full),
+        ], inputCode: "A")
+        XCTAssertEqual(one[0].text, "工")
+
+        let two = rankMatches([
+            makeMatch(entry: cong, matchedCode: "we", matchType: .full, codeType: .wubi),
+            english(4, "We", .full),
+        ], inputCode: "We")
+        XCTAssertEqual(two[0].text, "从")
+    }
+
+    /// Test 9.3: long lowercase input orders full matches, then English
+    /// completions, then pinyin prefixes
+    func testEnglishZone_LongLowercase_CompletionsBetweenFullAndPinyinPrefix() {
+        let pinyinFull = makeEntry(id: 1, text: "库贝尔", pinyin: "kuber", pinyinBaseFrequency: 20000)
+        let pinyinPrefix = makeEntry(id: 2, text: "库贝尔特", pinyin: "kuberte", pinyinBaseFrequency: 65000)
+        let matches = [
+            makeMatch(entry: pinyinPrefix, matchedCode: "kuberte", matchType: .prefix, codeType: .pinyin),
+            english(3, "Kubernetes", .prefix, frequency: 25000),
+            makeMatch(entry: pinyinFull, matchedCode: "kuber", matchType: .full, codeType: .pinyin),
+        ]
+
+        let candidates = rankMatches(matches, inputCode: "kuber")
+        XCTAssertEqual(candidates.map { $0.text }, ["库贝尔", "Kubernetes", "库贝尔特"])
+    }
+
+    /// Test 9.4: completions among themselves follow the word frequency
+    func testEnglishZone_CompletionsOrderedByFrequency() {
+        let matches = [
+            english(1, "worry", .prefix, frequency: 30000),
+            english(2, "work", .prefix, frequency: 59000),
+            english(3, "world", .prefix, frequency: 58000),
+        ]
+
+        let candidates = rankMatches(matches, inputCode: "Wor")
+        XCTAssertEqual(candidates.map { $0.text }, ["work", "world", "worry"])
+    }
+
+    /// Test 9.5: picking a completion does not lift it at shorter prefixes
+    func testEnglishZone_Completion_DoesNotGetTierOverrideBoost() {
+        let pinyinFull = makeEntry(id: 1, text: "库贝", pinyin: "kubei", pinyinBaseFrequency: 20000)
+        engine.setUserLearning(entryId: 2, accessCount: 1, lastAccessTimestamp: UInt32(Date().timeIntervalSince1970))
+
+        let candidates = rankMatches([
+            makeMatch(entry: pinyinFull, matchedCode: "kubei", matchType: .full, codeType: .pinyin),
+            english(2, "kubeinformer", .prefix),
+        ], inputCode: "kubei")
+
+        XCTAssertEqual(candidates[0].text, "库贝", "a full match stays above a just-picked completion")
+        XCTAssertFalse(candidates.contains { $0.isBoosted })
+    }
+
+    /// Test 9.6: learning is per word. A just-picked English word is boosted;
+    /// another English word is not.
+    func testEnglishZone_LearningIsPerWord() {
+        let now = UInt32(Date().timeIntervalSince1970)
+        let picked = EnglishWordIndex.wordId(key: "test", display: "test")
+        let other = EnglishWordIndex.wordId(key: "best", display: "best")
+        XCTAssertNotEqual(picked, other)
+        engine.setUserLearning(entryId: picked, accessCount: 1, lastAccessTimestamp: now)
+
+        let hao = makeEntry(id: 1, text: "好", wubi: "best", wubiBaseFrequency: 60000)
+        let candidates = rankMatches([
+            makeMatch(entry: hao, matchedCode: "best", matchType: .full, codeType: .wubi),
+            english(other, "best", .full),
+        ], inputCode: "best")
+
+        XCTAssertEqual(candidates[0].text, "好", "picking 'test' must not boost 'best'")
+    }
+
+    /// Test 9.7: English does not get the short-word bonus (it would rank by letter count)
+    func testEnglishZone_NoShortWordBonus() {
+        let shortWord = english(1, "go", .full, frequency: 40000)
+        let longWord = english(2, "government", .full, frequency: 40000)
+
+        let shortScore = rankMatches([shortWord], inputCode: "Go")[0].score
+        let longScore = rankMatches([longWord], inputCode: "Government")[0].score
+        XCTAssertEqual(shortScore, longScore)
+    }
+
+    // MARK: - Part 10: Short-Code English Pinning
+
+    private func candidate(_ id: UInt32, _ text: String, _ codeType: InputCodeType, full: Bool = true) -> Candidate {
+        return Candidate(entryId: id, text: text, code: "", codeType: codeType, isFullMatch: full,
+                         wubiBaseFrequency: 0, pinyinBaseFrequency: 0, score: 0)
+    }
+
+    private func wubiPage(_ count: Int) -> [Candidate] {
+        return (0..<count).map { candidate(UInt32(100 + $0), "字\($0)", .wubi) }
+    }
+
+    /// Test 10.1: the English match goes to the last slot of the first page
+    func testPin_MovesEnglishToLastSlotOfFirstPage() {
+        var list = wubiPage(12)
+        list.insert(candidate(1, "the", .english), at: 1)
+
+        let pinned = CandidateRanker.pinShortEnglish(candidates: list, inputCode: "the", pageSize: 7)
+
+        XCTAssertEqual(pinned[6].text, "the")
+        XCTAssertEqual(pinned.prefix(6).map { $0.text }, ["字0", "字1", "字2", "字3", "字4", "字5"])
+        XCTAssertEqual(pinned.count, 13)
+    }
+
+    /// Test 10.2: with less than a page of candidates it goes last
+    func testPin_ShortList_EnglishGoesLast() {
+        var list = wubiPage(3)
+        list.insert(candidate(1, "the", .english), at: 0)
+
+        let pinned = CandidateRanker.pinShortEnglish(candidates: list, inputCode: "the", pageSize: 7)
+        XCTAssertEqual(pinned.map { $0.text }, ["字0", "字1", "字2", "the"])
+    }
+
+    /// Test 10.3: nothing moves when the input cannot be a wubi code
+    func testPin_NotAppliedOutsideShortLowercase() {
+        var list = wubiPage(12)
+        list.insert(candidate(1, "the", .english), at: 0)
+
+        XCTAssertEqual(CandidateRanker.pinShortEnglish(candidates: list, inputCode: "The", pageSize: 7)[0].text, "the",
+                       "uppercase input asks for English")
+        XCTAssertEqual(CandidateRanker.pinShortEnglish(candidates: list, inputCode: "there", pageSize: 7)[0].text, "the",
+                       "five letters is not a wubi code")
+    }
+
+    /// Test 10.4: nothing moves when there is no wubi candidate to protect
+    func testPin_NoWubiCandidates_LeavesOrder() {
+        let list = [candidate(1, "java", .english), candidate(2, "加瓦", .pinyin), candidate(3, "家蛙", .pinyin)]
+
+        let pinned = CandidateRanker.pinShortEnglish(candidates: list, inputCode: "java", pageSize: 7)
+        XCTAssertEqual(pinned.map { $0.text }, ["java", "加瓦", "家蛙"])
+    }
+
+    /// Test 10.5: English completions are not pinned, only the exact match
+    func testPin_OnlyFullMatchesMove() {
+        var list = wubiPage(8)
+        list.insert(candidate(1, "then", .english, full: false), at: 0)
+
+        let pinned = CandidateRanker.pinShortEnglish(candidates: list, inputCode: "the", pageSize: 7)
+        XCTAssertEqual(pinned[0].text, "then")
+    }
+
+    // MARK: - Part 11: English Search
+
+    /// Test 11.1: exact match always; completions only when allowed
+    func testSearchEnglish_ExactAlways_CompletionsWhenAllowed() {
+        engine.setEnglishWordsForTesting([("the", 1), ("then", 80), ("their", 40), ("there", 50), ("theory", 900)])
+
+        let withoutCompletion = engine.searchEnglish(code: "the", allowCompletion: false)
+        XCTAssertEqual(withoutCompletion.map { $0.entry.text }, ["the"])
+        XCTAssertEqual(withoutCompletion[0].matchType, .full)
+
+        let withCompletion = engine.searchEnglish(code: "the", allowCompletion: true)
+        XCTAssertEqual(withCompletion.map { $0.entry.text }, ["the", "their", "there", "then"],
+                       "at most \(DictionaryEngine.englishCompletionLimit) completions, most common first")
+        XCTAssertEqual(withCompletion.dropFirst().map { $0.matchType }, [.prefix, .prefix, .prefix])
+    }
+
+    /// Test 11.2: words follow the case typed and carry their own id and frequency
+    func testSearchEnglish_CaseIdAndFrequency() {
+        engine.setEnglishWordsForTesting([("world", 300), ("GitHub", 22985)])
+
+        let world = engine.searchEnglish(code: "Wor", allowCompletion: true)
+        XCTAssertEqual(world.map { $0.entry.text }, ["World"])
+        XCTAssertEqual(world[0].entry.id, EnglishWordIndex.wordId(key: "world", display: "world"))
+        XCTAssertEqual(world[0].entry.baseFrequency(for: .english), EnglishWordIndex.baseFrequency(rank: 300))
+        XCTAssertEqual(world[0].matchedCode, "world")
+
+        XCTAssertEqual(engine.searchEnglish(code: "GITHUB", allowCompletion: false).map { $0.entry.text }, ["GitHub"])
+    }
+
+    /// Test 11.3: `search` offers completions only where they cannot disturb wubi
+    func testSearch_EnglishCompletionZones() throws {
+        let ta = makeEntry(id: 1, text: "牠", wubi: "the", wubiBaseFrequency: 30000)
+        let engine = try DictionaryEngine(entries: [ta])
+        engine.setEnglishWordsForTesting([("the", 1), ("their", 40), ("there", 50), ("then", 80), ("therefore", 700)])
+
+        func texts(_ code: String, completion: Bool = true) -> [String] {
+            return engine.search(code: code, limit: 100, englishCompletion: completion).map { $0.entry.text }
+        }
+
+        // Lowercase, a wubi code: the wubi candidate and the exact English word, nothing else
+        XCTAssertEqual(Set(texts("the")), ["牠", "the"])
+
+        // Uppercase: completions, in the case typed
+        XCTAssertEqual(Set(texts("The")), ["牠", "The", "Their", "There", "Then"])
+
+        // Five letters: completions
+        XCTAssertEqual(Set(texts("there")), ["there", "therefore"])
+
+        // Short, but neither wubi nor pinyin has anything: completions
+        XCTAssertEqual(Set(texts("ther")), ["there", "therefore"])
+
+        // Switched off in settings: exact matches only
+        XCTAssertEqual(Set(texts("The", completion: false)), ["牠", "The"])
+        XCTAssertEqual(texts("ther", completion: false), [])
+    }
 }
