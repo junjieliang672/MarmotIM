@@ -318,6 +318,23 @@ class DictionaryEngine {
         loadRelativeOrderingCache()
     }
 
+    /// The input itself as an English candidate, for uppercase input.
+    /// Base frequency 0 and a prefix match, so it ranks below every real word.
+    private func rawInputMatch(_ rawCode: String) -> DictionaryMatch {
+        let key = rawCode.lowercased()
+        let entry = DictionaryEntry(
+            id: EnglishWordIndex.wordId(key: key, display: rawCode),
+            text: rawCode,
+            pinyin: key,
+            wubi: nil,
+            wubiBaseFrequency: 0,
+            pinyinBaseFrequency: 0,
+            source: nil,
+            length: rawCode.count
+        )
+        return DictionaryMatch(entry: entry, matchedCode: key, matchType: .prefix, codeType: .english)
+    }
+
     /// How many English prefix completions a search may add
     static let englishCompletionLimit = 3
 
@@ -487,9 +504,9 @@ class DictionaryEngine {
     /// 1. Full matches before prefix matches
     /// 2. Even distribution between wubi and pinyin within each match type
     ///
-    /// `rawCode` keeps the case the user typed. Wubi and pinyin are looked up
-    /// lowercased; English uses the case to decide how words are shown and
-    /// whether completions are offered (see `searchEnglish`).
+    /// `rawCode` keeps the case the user typed. All-lowercase input searches
+    /// wubi, pinyin and English. Input with an uppercase letter returns
+    /// English only, shown in the case typed, plus the input itself.
     func search(code rawCode: String, limit: Int = 50, englishCompletion: Bool = true) -> [DictionaryMatch] {
         guard !rawCode.isEmpty else { return [] }
         let code = rawCode.lowercased()
@@ -606,6 +623,17 @@ class DictionaryEngine {
             results.append(contentsOf: prefixPinyinMatches.prefix(pinyinSlots))
         }
 
+        // An uppercase letter means the user is typing English: wubi and
+        // pinyin candidates are dropped. What stays from the database are
+        // entries whose text is plain ASCII, i.e. English words the user added
+        // (curate stores those under their letters as pinyin); they are
+        // relabelled as English so they are listed and spaced as such.
+        if hasUppercase {
+            results = results
+                .filter { $0.entry.text.allSatisfy { $0.isASCII } }
+                .map { DictionaryMatch(entry: $0.entry, matchedCode: $0.matchedCode, matchType: $0.matchType, codeType: .english) }
+        }
+
         // 英文。完全匹配总是加入；前缀补全只在不会干扰五笔的时候给：
         // 输入含大写（明确要打英文）、超过 4 个字母（不可能是五笔码）、
         // 或者五笔和拼音都没有候选。
@@ -618,6 +646,13 @@ class DictionaryEngine {
             let englishTexts = Set(englishMatches.map { $0.entry.text })
             results.removeAll { englishTexts.contains($0.entry.text) }
             results.append(contentsOf: englishMatches)
+        }
+
+        // With the Chinese candidates gone, a word that is in no table would
+        // leave the list empty, and Space on an empty list discards the input.
+        // The input itself is always offered, last, so it can be committed as typed.
+        if hasUppercase && !results.contains(where: { $0.entry.text == rawCode }) {
+            results.append(rawInputMatch(rawCode))
         }
 
         return results

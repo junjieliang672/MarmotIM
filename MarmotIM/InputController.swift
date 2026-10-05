@@ -615,10 +615,10 @@ class InputController: IMKInputController {
         return selectEnglishCandidate(trigger: "tab", client: sender)
     }
 
-    /// Commits the first English candidate on the current page. In short code
-    /// mode that is the exact match in the last slot
-    /// (CandidateRanker.pinShortEnglish); with completions showing, the most
-    /// common one.
+    /// Commits the first English candidate on the current page. Beside
+    /// Chinese candidates that is the one in the last slot
+    /// (CandidateRanker.placeEnglishAtPageEnds); in an English-only list,
+    /// the first.
     ///
     /// Only called while composing, and always consumes the key: with no
     /// English candidate on the page nothing happens, rather than a tab
@@ -975,9 +975,8 @@ class InputController: IMKInputController {
             return
         }
 
-        // The buffer goes in as typed. Wubi and pinyin are looked up
-        // lowercased; English reads the case (an uppercase letter means the
-        // user is typing English).
+        // The buffer goes in as typed: an uppercase letter means the user is
+        // typing English, and the search then returns English only.
         let searchCode = inputBuffer
         let matches = engine.search(code: searchCode, limit: 100,
                                     englishCompletion: AppDelegate.config.englishCompletion)
@@ -997,11 +996,10 @@ class InputController: IMKInputController {
             rules: engine.getRelativeOrderingRules()
         )
 
-        // An exact English match on a possible wubi code goes to the last
-        // slot of the first page, out of the wubi candidates' way.
-        allCandidates = CandidateRanker.pinShortEnglish(
+        // Beside wubi or pinyin candidates, English ones take only the
+        // last slot of each page.
+        allCandidates = CandidateRanker.placeEnglishAtPageEnds(
             candidates: ordered,
-            inputCode: searchCode,
             pageSize: pageSize
         )
 

@@ -66,7 +66,7 @@ struct BasicSettingsView: View {
                     }
 
                     Toggle(isOn: $viewModel.config.englishCompletion) {
-                        Text("英文单词补全（输入 5 个字母以上或含大写字母时）")
+                        Text("英文单词补全（输入 5 个字母以上或含大写字母时）。含大写字母时只显示英文候选")
                     }
                     .onChange(of: viewModel.config.englishCompletion) { _ in
                         viewModel.save()
@@ -86,7 +86,7 @@ struct BasicSettingsView: View {
                         }
                         Spacer()
                     }
-                    Text("输入 4 个字母以内时，与之完全相同的英文单词固定排在第一页最后一位。当前页没有英文候选时，这个键不起作用。")
+                    Text("有五笔或拼音候选时，英文候选只排在每页最后一位。当前页没有英文候选时，这个键不起作用。")
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }

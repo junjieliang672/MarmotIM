@@ -24,7 +24,7 @@
 - **五笔拼音混拼** - 五笔码和拼音码共存，无需切换模式。短码优先五笔，长码优先拼音
 - **智能排序自适应** - 基于 Frecency 算法，结合使用频率和最近使用时间动态调整排序，使用越久越顺手
 - **前缀快速匹配** - 支持最短前缀快速输入
-- **中英混输不干扰五笔** - 约 7 万英文单词。输入 5 个字母以上或带大写字母时给出英文补全；4 个字母以内与五笔撞码的英文单词固定排在第一页最后一位。按 Tab 上屏当前页的第一个英文候选
+- **中英混输不干扰五笔** - 约 7 万英文单词，支持补全。有五笔或拼音候选时，英文候选只排在每页最后一位：空格上屏中文，Tab 上屏英文。输入带大写字母时只显示英文候选
 - **过滤模式** - 支持 Emoji、模糊拼音、符号的专用搜索模式，可通过特定触发符快速进入
 - **iCloud 同步** - 多设备间自动同步用户学习数据、收藏词条，无缝切换
 - **划词入库** - Control+= 快速添加选中文字到用户词库
@@ -291,7 +291,7 @@ GPL-3.0 License
 
 ### 词库来源
 
-- [雾凇拼音](https://github.com/iDvel/rime-ice) - 长期维护的简体拼音词库，以及最初的英文词库。「撞码英文词放在固定位置」的做法也借鉴自它的 `reduce_english_filter`
+- [雾凇拼音](https://github.com/iDvel/rime-ice) - 长期维护的简体拼音词库，以及最初的英文词库。「英文候选放在固定位置」的做法也借鉴自它的 `reduce_english_filter`
 - [CustomPinyinDictionary](https://github.com/wuhgit/CustomPinyinDictionary) - 自定义拼音词库
 - [wordfreq](https://github.com/rspeer/wordfreq)（Robyn Speer）- 英文词频。数据以 CC BY-SA 4.0 发布，汇总自 Google Books Ngrams、Wikipedia、OpenSubtitles、SUBTLEX（Marc Brysbaert 等）、Leeds Internet Corpus、ParaCrawl 等
 - Webster's Second International Dictionary（公有领域，macOS 自带）- 用于校验短英文单词和恢复专有名词大小写

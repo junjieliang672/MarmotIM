@@ -14,17 +14,15 @@ import Foundation
 /// - Tier 2: Full Pinyin match (+10B)
 /// - Tier 3: Prefix Wubi match (+1B)
 /// - Tier 4: Prefix Pinyin match (0)
-/// A full English match is then moved to the last slot of the first page by
-/// `pinShortEnglish`, so it never takes a wubi candidate's place.
 ///
 /// When input length > 4 (Pinyin-priority mode):
 /// - Tier 1: Full match (+100B)
-/// - English prefix match (+1B) - completions, ahead of pinyin prefixes
+/// - English prefix match (+1B) - completions
 /// - Tier 2: Prefix match (0)
 ///
-/// When the input contains an uppercase letter (the user is typing English):
-/// - Full English match (+200B), English prefix match (+150B) - above every
-///   regular tier, below the protected ones
+/// English scores only order English candidates among themselves. Whenever
+/// the list also holds wubi or pinyin candidates, `placeEnglishAtPageEnds`
+/// moves the English ones to the last slot of each page after ranking.
 ///
 /// ## Within-Tier Ranking (Frecency)
 ///
@@ -74,20 +72,9 @@ struct CandidateRanker {
 
     // Tier 4 is 0 (baseline)
 
-    /// English full match while the input contains an uppercase letter.
-    /// Above tier 1 so the English word comes first; with the tier override
-    /// boost (500B) still below jianmaLevel2Bonus (1T).
-    static let englishIntentFullBonus: Double = 200_000_000_000
-
-    /// English prefix match (completion) while the input contains an uppercase letter
-    static let englishIntentPrefixBonus: Double = 150_000_000_000
-
-    /// English prefix match (completion) for lowercase input: above pinyin
-    /// prefix matches (0), below every full match
+    /// English prefix match (completion): above pinyin prefix matches (0),
+    /// below every full match
     static let englishPrefixBonus: Double = tier3Bonus
-
-    /// Longest input that can be a wubi code
-    static let wubiMaxCodeLength = 4
 
     /// Short word bonus per character under 5
     static let shortWordBonusPerChar: Double = 10_000
@@ -297,36 +284,52 @@ struct CandidateRanker {
         return result
     }
 
-    // MARK: - Short-Code English Pinning
+    // MARK: - English at Page Ends
 
-    /// Moves full English matches to the last slot of the first page when the
-    /// input could be a wubi code (all lowercase, at most 4 letters).
+    /// Moves English candidates to the last slot of each page when the list
+    /// also holds wubi or pinyin candidates.
     ///
-    /// A wubi typist reads the first slots as wubi candidates. An English word
-    /// that happens to share the letters ("the", "java") would otherwise land
-    /// among them, at a position that shifts with scores. A fixed slot keeps
-    /// the wubi candidates where they were and gives the English word one
-    /// predictable place, which the select-English-candidate key (Tab) commits.
+    /// The first `pageSize - 1` slots of every page then always read as
+    /// Chinese, in their ranked order, and Space commits Chinese. English has
+    /// one predictable place per page, which the select-English-candidate key
+    /// (Tab) commits. Scores, including the boost from a recent pick, still
+    /// decide which English word gets the earlier page; they cannot move it
+    /// out of the last slot.
     ///
-    /// Left alone when the list holds no wubi candidate: then the letters are
-    /// not a wubi code and nothing needs protecting.
+    /// Once the Chinese candidates run out, the remaining English ones follow
+    /// in order: two Chinese and three English give 中 中 英 英 英.
+    ///
+    /// A list of only English, or with no English, is returned as it is.
+    /// Uppercase input produces an English-only list (DictionaryEngine.search),
+    /// so it is ordered by score alone.
     ///
     /// Called by the caller after `applyRelativeOrdering`, like that pass.
-    static func pinShortEnglish(
+    static func placeEnglishAtPageEnds(
         candidates: [Candidate],
-        inputCode: String,
         pageSize: Int
     ) -> [Candidate] {
-        guard inputCode.count <= wubiMaxCodeLength, inputCode == inputCode.lowercased(), pageSize > 0 else {
-            return candidates
+        guard pageSize >= 2 else { return candidates }
+
+        let english = candidates.filter { $0.codeType == .english }
+        let chinese = candidates.filter { $0.codeType != .english }
+        guard !english.isEmpty, !chinese.isEmpty else { return candidates }
+
+        var result: [Candidate] = []
+        result.reserveCapacity(candidates.count)
+        var nextEnglish = 0
+        var nextChinese = 0
+
+        while nextChinese < chinese.count {
+            let pageEnd = min(nextChinese + pageSize - 1, chinese.count)
+            result.append(contentsOf: chinese[nextChinese..<pageEnd])
+            nextChinese = pageEnd
+
+            if nextEnglish < english.count {
+                result.append(english[nextEnglish])
+                nextEnglish += 1
+            }
         }
-        guard candidates.contains(where: { $0.codeType == .wubi }) else { return candidates }
-
-        let english = candidates.filter { $0.codeType == .english && $0.isFullMatch }
-        guard !english.isEmpty else { return candidates }
-
-        var result = candidates.filter { !($0.codeType == .english && $0.isFullMatch) }
-        result.insert(contentsOf: english, at: min(pageSize - 1, result.count))
+        result.append(contentsOf: english[nextEnglish...])
         return result
     }
 
@@ -349,7 +352,6 @@ struct CandidateRanker {
         let isEnglishCode = match.codeType == .english
         let inputLength = inputCode.count
         let lowercasedCode = inputCode.lowercased()
-        let hasUppercase = inputCode != lowercasedCode
 
         // Check for Protected Tier (jianma) using jianma table
         // Only full wubi matches with 1-2 char codes can be jianma
@@ -366,13 +368,9 @@ struct CandidateRanker {
         }
 
         if isEnglishCode {
-            // An uppercase letter says the user is typing English: put it first
-            if hasUppercase {
-                return isFullMatch ? englishIntentFullBonus : englishIntentPrefixBonus
-            }
-            // Full match -> Tier 1 (same as Wubi full match; in short code
-            // mode pinShortEnglish then fixes its position). Completions sit
-            // just above pinyin prefix matches.
+            // These only order English candidates among themselves: exact
+            // word first, then completions. Position relative to Chinese
+            // candidates is decided by placeEnglishAtPageEnds.
             return isFullMatch ? tier1Bonus : englishPrefixBonus
         }
 
