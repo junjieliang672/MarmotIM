@@ -250,21 +250,23 @@ class InputController: IMKInputController {
             }
         case 125, 126: // Down/Up arrow
             return handleArrowKey(isDown: keyCode == 125, client: sender)
-        case 33: // [ key - page up
-            if isComposing {
+        case 33, 43: // [ and , - page up, only when there is a page before this one
+            if isComposing, canTurnPage(forward: false) {
                 return handlePageUp(client: sender)
             }
-        case 30: // ] key - page down
-            if isComposing {
+            // No page on that side: the key is not a page turn, so it falls
+            // through to ordinary punctuation and joins the buffer. In filter
+            // mode the buffer is not the one punctuation writes to, so there
+            // the key is swallowed as before.
+            if isComposing, filterMode != .none {
+                return true
+            }
+        case 30, 47: // ] and . - page down, only when there is a page after this one
+            if isComposing, canTurnPage(forward: true) {
                 return handlePageDown(client: sender)
             }
-        case 43: // , key - page up
-            if isComposing {
-                return handlePageUp(client: sender)
-            }
-        case 47: // . key - page down
-            if isComposing {
-                return handlePageDown(client: sender)
+            if isComposing, filterMode != .none {
+                return true
             }
         case 41: // ; key
             if isComposing && filterMode == .none && inputBuffer.count == 1 {
@@ -637,25 +639,27 @@ class InputController: IMKInputController {
         return true
     }
 
-    private func handlePageUp(client sender: Any!) -> Bool {
-        guard isComposing, !allCandidates.isEmpty else { return false }
+    /// Whether the candidate list has a page on that side of the current one.
+    /// A page turn key with no page to turn to is left to ordinary input.
+    private func canTurnPage(forward: Bool) -> Bool {
+        PagingRules.canTurnPage(forward: forward, currentPage: currentPage, totalPages: totalPages)
+    }
 
-        if currentPage > 0 {
-            currentPage -= 1
-            updateCurrentPageCandidates()
-            showCandidateWindow(client: sender)
-        }
+    private func handlePageUp(client sender: Any!) -> Bool {
+        guard canTurnPage(forward: false) else { return false }
+
+        currentPage -= 1
+        updateCurrentPageCandidates()
+        showCandidateWindow(client: sender)
         return true
     }
 
     private func handlePageDown(client sender: Any!) -> Bool {
-        guard isComposing, !allCandidates.isEmpty else { return false }
+        guard canTurnPage(forward: true) else { return false }
 
-        if currentPage < totalPages - 1 {
-            currentPage += 1
-            updateCurrentPageCandidates()
-            showCandidateWindow(client: sender)
-        }
+        currentPage += 1
+        updateCurrentPageCandidates()
+        showCandidateWindow(client: sender)
         return true
     }
 
@@ -1701,5 +1705,23 @@ enum PunctuationRules {
     /// user has to switch to English for every number, amount and time.
     static func keepsASCII(_ char: Character, followsDigit: Bool, enabled: Bool) -> Bool {
         enabled && followsDigit && numberPunctuation.contains(char)
+    }
+}
+
+// MARK: - 翻页规则
+
+/// Decisions about the page turn keys. Like `PunctuationRules` these are free
+/// of the input controller so they can be tested.
+enum PagingRules {
+
+    /// Whether the page turn key has a page to turn to: `,` and `[` go back,
+    /// `.` and `]` go forward.
+    ///
+    /// When the page on that side does not exist the key is not a page turn at
+    /// all, and the caller lets it fall through to ordinary input: with letters
+    /// already in the buffer, "," and "." join the buffer instead of reaching
+    /// the app behind the composition.
+    static func canTurnPage(forward: Bool, currentPage: Int, totalPages: Int) -> Bool {
+        forward ? currentPage < totalPages - 1 : currentPage > 0
     }
 }
