@@ -64,6 +64,10 @@ struct CandidateRanker {
     /// Tier 1: Full Wubi (short) or Full (long) - highest regular priority
     static let tier1Bonus: Double = 100_000_000_000
 
+    /// Full Wubi on a secondary code (DictionaryEngine.isSecondaryWubiCode):
+    /// below every other full Wubi match, above full Pinyin
+    static let secondaryWubiBonus: Double = 50_000_000_000
+
     /// Tier 2: Full Pinyin (short only)
     static let tier2Bonus: Double = 10_000_000_000
 
@@ -137,7 +141,10 @@ struct CandidateRanker {
         for (_, (match, userData)) in textToMatch {
             // Calculate score components
             let tierBonus = getTierBonus(match: match, inputCode: inputCode, engine: engine)
+            // Learning data is keyed by entry, not by code: picks of 次 at
+            // `uqw` must not lift it over the phrases at `uqwy`
             let isSuppressed = suppressedSet.contains(match.entry.text)
+                || isSecondaryWubi(match: match, inputCode: inputCode, engine: engine)
             let timestamp = userData?.lastAccessTimestamp ?? 0
             let tierOverrideBoost = effectiveTierOverrideBoost(
                 match: match,
@@ -374,6 +381,10 @@ struct CandidateRanker {
             return isFullMatch ? tier1Bonus : englishPrefixBonus
         }
 
+        if isSecondaryWubi(match: match, inputCode: inputCode, engine: engine) {
+            return secondaryWubiBonus
+        }
+
         if inputLength <= 4 {
             // Short code mode: Wubi priority
             switch (isFullMatch, isWubiCode) {
@@ -386,6 +397,17 @@ struct CandidateRanker {
             // Long code mode: Full match priority only
             return isFullMatch ? tier1Bonus : 0
         }
+    }
+
+    /// A short-coded character matched at a full code it shares with phrases,
+    /// e.g. 次 at `uqwy`. It stays typeable there but goes after the phrases.
+    private static func isSecondaryWubi(
+        match: DictionaryMatch,
+        inputCode: String,
+        engine: DictionaryEngine
+    ) -> Bool {
+        guard match.matchType == .full && match.codeType == .wubi else { return false }
+        return engine.isSecondaryWubiCode(code: inputCode.lowercased(), text: match.entry.text)
     }
 
     // MARK: - Score Calculation

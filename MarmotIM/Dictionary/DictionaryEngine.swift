@@ -65,6 +65,11 @@ class DictionaryEngine {
     /// Maps code -> Set of texts that are official jianma for that code
     private var jianmaTable: [String: Set<String>] = [:]
 
+    /// Full codes where a short-coded character ranks after the phrases
+    /// sharing the code, e.g. `uqwy` -> 次 (its short code is `uqw`)
+    /// Maps code -> Set of such characters
+    private var secondaryWubiCodes: [String: Set<String>] = [:]
+
     /// 英文单词索引
     private var englishWordIndex = EnglishWordIndex()
 
@@ -217,6 +222,24 @@ class DictionaryEngine {
     /// - Returns: true if this is an official jianma entry
     func isOfficialJianma(code: String, text: String) -> Bool {
         return jianmaTable[code]?.contains(text) ?? false
+    }
+
+    // MARK: - Secondary Wubi Codes
+
+    /// Load secondary wubi codes from the database
+    /// Called during preloading
+    func loadSecondaryWubiCodes() {
+        var table: [String: Set<String>] = [:]
+        for (code, text) in db.loadSecondaryWubiCodes() {
+            table[code, default: []].insert(text)
+        }
+        secondaryWubiCodes = table
+        NSLog("MarmotIM: Loaded secondary wubi codes for \(table.count) codes")
+    }
+
+    /// Check if a character at this code should rank after the other words there
+    func isSecondaryWubiCode(code: String, text: String) -> Bool {
+        return secondaryWubiCodes[code]?.contains(text) ?? false
     }
 
     // MARK: - English Words
@@ -1411,6 +1434,11 @@ extension DictionaryEngine {
             jianmaTable[code] = Set<String>()
         }
         jianmaTable[code]?.insert(text)
+    }
+
+    /// Add a single secondary wubi code for testing
+    func addSecondaryWubiCode(code: String, text: String) {
+        secondaryWubiCodes[code, default: []].insert(text)
     }
 
     /// Set user learning data for testing

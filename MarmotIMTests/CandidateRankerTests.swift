@@ -278,6 +278,64 @@ final class CandidateRankerTests: XCTestCase {
         XCTAssertEqual(fourKey[0].text, "交集", "四码 uqwy 下刚选过的交集应排第一")
     }
 
+    /// Test 2.3c: 有简码的字在与词组共用的全码上排在词组之后、前缀匹配之前
+    func testSecondaryWubiCode_CharRanksAfterPhrasesBeforePrefix() {
+        engine.addSecondaryWubiCode(code: "uqwy", text: "次")
+        // 次 carries the base frequency of its short code, higher than the phrases
+        let ci = makeEntry(id: 1, text: "次", wubi: "uqw", wubiBaseFrequency: 44300)
+        let xiaofang = makeEntry(id: 2, text: "效仿", wubi: "uqwy", wubiBaseFrequency: 33800)
+        let jiaoji = makeEntry(id: 3, text: "交集", wubi: "uqwy", wubiBaseFrequency: 32800)
+        let longer = makeEntry(id: 4, text: "更长", wubi: "uqwyy", wubiBaseFrequency: 65000)
+
+        let candidates = rankMatches([
+            makeMatch(entry: ci, matchedCode: "uqwy", matchType: .full, codeType: .wubi),
+            makeMatch(entry: xiaofang, matchedCode: "uqwy", matchType: .full, codeType: .wubi),
+            makeMatch(entry: jiaoji, matchedCode: "uqwy", matchType: .full, codeType: .wubi),
+            makeMatch(entry: longer, matchedCode: "uqwyy", matchType: .prefix, codeType: .wubi),
+        ], inputCode: "uqwy")
+
+        XCTAssertEqual(candidates.map { $0.text }, ["效仿", "交集", "次", "更长"])
+    }
+
+    /// Test 2.3d: 在简码上选「次」积累的学习数据，不能让它在全码上越过词组
+    func testSecondaryWubiCode_IgnoresLearningData() {
+        engine.addSecondaryWubiCode(code: "uqwy", text: "次")
+        let ci = makeEntry(id: 1, text: "次", wubi: "uqw", wubiBaseFrequency: 44300)
+        let jiaoji = makeEntry(id: 2, text: "交集", wubi: "uqwy", wubiBaseFrequency: 32800)
+
+        let now = UInt32(Date().timeIntervalSince1970)
+        engine.setUserLearning(entryId: 1, accessCount: 100_000, lastAccessTimestamp: now)
+
+        let fourKey = rankMatches([
+            makeMatch(entry: ci, matchedCode: "uqwy", matchType: .full, codeType: .wubi),
+            makeMatch(entry: jiaoji, matchedCode: "uqwy", matchType: .full, codeType: .wubi),
+        ], inputCode: "uqwy")
+
+        XCTAssertEqual(fourKey.map { $0.text }, ["交集", "次"])
+        XCTAssertFalse(fourKey.contains { $0.isBoosted })
+
+        let threeKey = rankMatches([
+            makeMatch(entry: ci, matchedCode: "uqw", matchType: .full, codeType: .wubi),
+            makeMatch(entry: jiaoji, matchedCode: "uqwy", matchType: .prefix, codeType: .wubi),
+        ], inputCode: "uqw")
+
+        XCTAssertEqual(threeKey[0].text, "次", "三码 uqw 不受全码标记影响")
+    }
+
+    /// Test 2.3e: 独占全码的字（会 wfc）不在标记里，照常排第一并保留学习数据
+    func testSecondaryWubiCode_UnmarkedFullCodeRanksNormally() {
+        engine.addSecondaryWubiCode(code: "uqwy", text: "次")
+        let hui = makeEntry(id: 1, text: "会", wubi: "wf", wubiBaseFrequency: 54300)
+        let longer = makeEntry(id: 2, text: "会计", wubi: "wfcy", wubiBaseFrequency: 65000)
+
+        let candidates = rankMatches([
+            makeMatch(entry: hui, matchedCode: "wfc", matchType: .full, codeType: .wubi),
+            makeMatch(entry: longer, matchedCode: "wfcy", matchType: .prefix, codeType: .wubi),
+        ], inputCode: "wfc")
+
+        XCTAssertEqual(candidates.map { $0.text }, ["会", "会计"])
+    }
+
     /// Test 2.4: 长码模式只区分完全/前缀匹配
     func testRegularTier_LongCodeMode_OnlyMatchTypeMa() {
         let fullPinyin = makeEntry(id: 1, text: "我们", pinyin: "women", pinyinBaseFrequency: 50000)

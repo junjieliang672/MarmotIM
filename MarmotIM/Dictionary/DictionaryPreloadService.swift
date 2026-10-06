@@ -163,6 +163,7 @@ final class DictionaryPreloadService {
         updateProgress(0.05)
         NSLog("MarmotIM: Loading jianma table...")
         engine.loadJianmaTable()
+        engine.loadSecondaryWubiCodes()
 
         // Load English words
         NSLog("MarmotIM: Loading English words...")

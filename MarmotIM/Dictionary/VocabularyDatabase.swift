@@ -890,6 +890,33 @@ final class VocabularyDatabase {
         return loadAllIndexes(tableName: "wubi_index")
     }
 
+    /// Load the (code, char) pairs where a short-coded character ranks after
+    /// the phrases sharing its full code. Empty when the dictionary was built
+    /// before the table existed.
+    func loadSecondaryWubiCodes() -> [(code: String, text: String)] {
+        lock.lock()
+        defer { lock.unlock() }
+
+        var results: [(code: String, text: String)] = []
+
+        let sql = "SELECT code, text FROM wubi_secondary_codes"
+        var statement: OpaquePointer?
+
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
+            return []
+        }
+        defer { sqlite3_finalize(statement) }
+
+        while sqlite3_step(statement) == SQLITE_ROW {
+            if let codePtr = sqlite3_column_text(statement, 0),
+               let textPtr = sqlite3_column_text(statement, 1) {
+                results.append((String(cString: codePtr), String(cString: textPtr)))
+            }
+        }
+
+        return results
+    }
+
     private func loadAllIndexes(tableName: String) -> [(code: String, entryId: UInt32)] {
         lock.lock()
         defer { lock.unlock() }

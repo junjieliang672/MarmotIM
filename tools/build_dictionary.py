@@ -307,22 +307,33 @@ def load_extra_pinyin_dict(filepath: str, char_table: Dict[str, str], name: str)
     return entries
 
 
-def find_redundant_wubi_codes(wubi_entries: List[dict]) -> Dict[str, Set[str]]:
+def find_secondary_wubi_codes(
+    wubi_entries: List[dict],
+    entries: List[dict],
+    wubi_index: Dict[str, List[int]]
+) -> List[Tuple[str, str]]:
     """
-    Find wubi codes a single character doesn't need (出简不出全).
+    Find (code, char) pairs where the character should rank after the
+    other words at that code.
 
-    A code C of character w is redundant when w also has a shorter code S
-    that is a prefix of C, and w ranks first at S (highest baseFrequency).
-    Typing S already yields w with no selection, so keeping w at C only
-    pushes the phrases sharing C down. e.g. 次 is first at `uqw`, so its
-    full code `uqwy` is dropped and 交集/效仿 at `uqwy` are no longer
-    shadowed.
+    A code C of character w is secondary when w also has a shorter code S
+    that is a prefix of C, w ranks first at S (highest baseFrequency), and
+    other words share C. Typing S already yields w with no selection, and
+    the merged per-text wubi frequency comes from w's best (short) code, so
+    without the mark w would sit on top of every phrase at C. e.g. 次 is
+    first at `uqw`, so at its full code `uqwy` it goes after 交集/效仿.
 
-    Characters that are NOT first at their short code keep the full code,
-    since it is the only unambiguous way to type them, e.g. 木 at `ssss`
-    (`s` -> 要).
+    Not marked, and ranked like any other entry:
+    - A code the character has to itself, e.g. 会 at `wfc`: nothing there
+      for it to shadow.
+    - Characters that are NOT first at their short code, since the full
+      code is the only unambiguous way to type them, e.g. 木 at `ssss`
+      (`s` -> 要).
 
-    Returns: dict mapping character -> set of codes to drop
+    Sharing is judged on the merged index because pinyin entries add wubi
+    codes of their own via get_wubi_code.
+
+    Returns: sorted list of (code, char)
     """
     char_codes: Dict[str, Set[str]] = defaultdict(set)
     top_at_code: Dict[str, Tuple[int, str]] = {}  # code -> (baseFrequency, text)
@@ -336,25 +347,27 @@ def find_redundant_wubi_codes(wubi_entries: List[dict]) -> Dict[str, Set[str]]:
         if code not in top_at_code or entry['baseFrequency'] > top_at_code[code][0]:
             top_at_code[code] = (entry['baseFrequency'], text)
 
-    redundant: Dict[str, Set[str]] = defaultdict(set)
+    secondary: List[Tuple[str, str]] = []
     for text, codes in char_codes.items():
         for code in codes:
+            if len(wubi_index.get(code, [])) < 2:
+                continue
             for k in range(1, len(code)):
                 short = code[:k]
                 if short in codes and top_at_code[short][1] == text:
-                    redundant[text].add(code)
+                    secondary.append((code, text))
                     break
 
-    total = sum(len(c) for c in redundant.values())
-    print(f"  Dropping {total} redundant wubi codes from {len(redundant)} characters")
-    return dict(redundant)
+    secondary.sort()
+    print(f"  Marked {len(secondary)} secondary wubi codes "
+          f"across {len({t for _, t in secondary})} characters")
+    return secondary
 
 
 def merge_dictionaries(
     wubi_entries: List[dict],
     pinyin_entries: List[dict],
-    extra_entries: List[dict],
-    drop_wubi_codes: Optional[Dict[str, Set[str]]] = None
+    extra_entries: List[dict]
 ) -> List[dict]:
     """
     Merge wubi, pinyin, and extra pinyin entries into unified dictionary.
@@ -372,10 +385,6 @@ def merge_dictionaries(
     - Selecting "鬼" via wubi "rqc" updates the same entry as pinyin "gui"
     - Frecency scores are shared across input methods
     - Each input mode uses its own base frequency for ranking
-
-    drop_wubi_codes (from find_redundant_wubi_codes) is subtracted after all
-    sources are merged, because pinyin entries regenerate a character's
-    longest wubi code via get_wubi_code and would otherwise add it back.
     """
     # Key by text only - each text has ONE entry with all its codes
     merged: Dict[str, dict] = {}
@@ -481,8 +490,6 @@ def merge_dictionaries(
     # Attach all codes to each entry
     for text, entry in merged.items():
         entry['wubi_codes'] = text_wubi_codes.get(text, set())
-        if drop_wubi_codes and text in drop_wubi_codes:
-            entry['wubi_codes'] = entry['wubi_codes'] - drop_wubi_codes[text]
         entry['pinyin_codes'] = text_pinyin_codes.get(text, set())
 
     # Convert to list and assign IDs
@@ -886,7 +893,13 @@ def install_to_marmotim(output_dir: str):
     print(f"  Installation complete: {marmotim_dict_dir}")
 
 
-def save_sqlite(entries: List[dict], pinyin_index: Dict, wubi_index: Dict, filepath: str):
+def save_sqlite(
+    entries: List[dict],
+    pinyin_index: Dict,
+    wubi_index: Dict,
+    filepath: str,
+    secondary_wubi_codes: Optional[List[Tuple[str, str]]] = None
+):
     """
     Save dictionary in SQLite format for the new Trie-based architecture.
 
@@ -894,6 +907,7 @@ def save_sqlite(entries: List[dict], pinyin_index: Dict, wubi_index: Dict, filep
     - entries: Main dictionary entries
     - pinyin_index: Pinyin code to entry ID mapping
     - wubi_index: Wubi code to entry ID mapping
+    - wubi_secondary_codes: (code, char) pairs from find_secondary_wubi_codes
     - user_learning: User frecency data (empty, to be populated at runtime)
     """
     # Remove existing file
@@ -933,6 +947,13 @@ def save_sqlite(entries: List[dict], pinyin_index: Dict, wubi_index: Dict, filep
             entry_id INTEGER NOT NULL,
             PRIMARY KEY (code, entry_id),
             FOREIGN KEY (entry_id) REFERENCES entries(id) ON DELETE CASCADE
+        );
+
+        -- Full codes where a short-coded character ranks after the phrases
+        CREATE TABLE wubi_secondary_codes (
+            code TEXT NOT NULL,
+            text TEXT NOT NULL,
+            PRIMARY KEY (code, text)
         );
 
         -- User learning table (empty - populated at runtime)
@@ -1088,6 +1109,12 @@ def save_sqlite(entries: List[dict], pinyin_index: Dict, wubi_index: Dict, filep
         wubi_data
     )
     print(f"    Inserted {len(wubi_data)} wubi index entries")
+
+    cursor.executemany(
+        "INSERT INTO wubi_secondary_codes (code, text) VALUES (?, ?)",
+        secondary_wubi_codes or []
+    )
+    print(f"    Inserted {len(secondary_wubi_codes or [])} secondary wubi codes")
 
     conn.commit()
 
@@ -1537,8 +1564,7 @@ def main():
     print(f"  Total extra pinyin entries: {len(extra_entries)}")
 
     print("\nStep 5: Merging dictionaries...")
-    drop_wubi_codes = find_redundant_wubi_codes(wubi_entries)
-    entries = merge_dictionaries(wubi_entries, pinyin_entries, extra_entries, drop_wubi_codes)
+    entries = merge_dictionaries(wubi_entries, pinyin_entries, extra_entries)
 
     # Apply corpus frequencies if provided
     if args.corpus:
@@ -1552,10 +1578,12 @@ def main():
     pinyin_index, wubi_index = build_indexes(entries)
     print(f"  Pinyin codes: {len(pinyin_index)}")
     print(f"  Wubi codes: {len(wubi_index)}")
+    secondary_wubi_codes = find_secondary_wubi_codes(wubi_entries, entries, wubi_index)
 
     # Save SQLite (primary format for new architecture)
     print("\nStep 7: Saving SQLite format (primary)...")
-    save_sqlite(entries, pinyin_index, wubi_index, os.path.join(args.output, 'dictionary.db'))
+    save_sqlite(entries, pinyin_index, wubi_index, os.path.join(args.output, 'dictionary.db'),
+                secondary_wubi_codes)
 
     # Build filter dictionaries if requested
     if args.build_emoji or args.build_fuzzy or args.build_symbol:

@@ -22,7 +22,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from build_dictionary import (
     merge_dictionaries,
     build_indexes,
-    find_redundant_wubi_codes,
+    find_secondary_wubi_codes,
     build_reverse_lookup_tables,
     backup_user_data,
     restore_user_data,
@@ -351,8 +351,8 @@ def _wubi(text, code, freq):
             'source': SOURCE_WUBI, 'length': len(text)}
 
 
-class TestRedundantWubiCodes(unittest.TestCase):
-    """出简不出全: drop a char's full code only when its short code is unambiguous."""
+class TestSecondaryWubiCodes(unittest.TestCase):
+    """A short-coded char keeps its full code, marked secondary where phrases share it."""
 
     def setUp(self):
         self.wubi_entries = [
@@ -360,39 +360,57 @@ class TestRedundantWubiCodes(unittest.TestCase):
             _wubi('次', 'uqwy', 34300),
             _wubi('效仿', 'uqwy', 33800),
             _wubi('交集', 'uqwy', 32800),
+            _wubi('会', 'wf', 54300),
+            _wubi('会', 'wfc', 44300),
+            _wubi('会', 'wfcu', 34300),
             _wubi('要', 's', 65000),
             _wubi('木', 'ssss', 34000),
             _wubi('森林', 'ssss', 33500),
         ]
-        # Pinyin regenerates 次's longest wubi code; it must not come back
         self.pinyin_entries = [
             {'text': '次', 'wubi': 'uqwy', 'pinyin': 'ci', 'baseFrequency': 65000,
              'source': SOURCE_PINYIN, 'length': 1},
         ]
 
-    def test_full_code_dropped_when_char_first_at_short_code(self):
-        drop = find_redundant_wubi_codes(self.wubi_entries)
-        self.assertEqual(drop, {'次': {'uqwy'}})
-
-        entries = merge_dictionaries(self.wubi_entries, self.pinyin_entries, [], drop)
-        by_text = {e['text']: e for e in entries}
-        self.assertEqual(by_text['次']['wubi_codes'], {'uqw'})
-
+    def _secondary(self, wubi_entries, pinyin_entries=None):
+        entries = merge_dictionaries(wubi_entries, pinyin_entries or [], [])
         _, wubi_index = build_indexes(entries)
-        uqwy_texts = {entries[i]['text'] for i in wubi_index['uqwy']}
-        self.assertEqual(uqwy_texts, {'效仿', '交集'})
+        return entries, wubi_index, find_secondary_wubi_codes(wubi_entries, entries, wubi_index)
 
-    def test_full_code_kept_when_char_not_first_at_short_code(self):
+    def test_shared_full_code_kept_and_marked(self):
+        entries, wubi_index, secondary = self._secondary(self.wubi_entries, self.pinyin_entries)
+        by_text = {e['text']: e for e in entries}
+        self.assertEqual(by_text['次']['wubi_codes'], {'uqw', 'uqwy'})
+
+        uqwy_texts = {entries[i]['text'] for i in wubi_index['uqwy']}
+        self.assertEqual(uqwy_texts, {'次', '效仿', '交集'})
+        self.assertIn(('uqwy', '次'), secondary)
+
+    def test_full_code_alone_at_code_kept_and_not_marked(self):
+        entries, wubi_index, secondary = self._secondary(self.wubi_entries)
+        by_text = {e['text']: e for e in entries}
+        self.assertEqual(by_text['会']['wubi_codes'], {'wf', 'wfc', 'wfcu'})
+        self.assertEqual({entries[i]['text'] for i in wubi_index['wfc']}, {'会'})
+        self.assertEqual([pair for pair in secondary if pair[1] == '会'], [])
+
+    def test_code_shared_only_through_pinyin_entry_is_marked(self):
+        # 汇 is a wubi word elsewhere and reaches wfc only through a pinyin
+        # entry's generated wubi code
+        wubi_entries = self.wubi_entries + [_wubi('汇', 'ian', 44000)]
+        pinyin_entries = [
+            {'text': '汇', 'wubi': 'wfc', 'pinyin': 'hui', 'baseFrequency': 60000,
+             'source': SOURCE_PINYIN, 'length': 1},
+        ]
+        _, _, secondary = self._secondary(wubi_entries, pinyin_entries)
+        self.assertIn(('wfc', '会'), secondary)
+        self.assertNotIn(('wfcu', '会'), secondary)
+
+    def test_not_marked_when_char_not_first_at_short_code(self):
         # 木 also sits at 's', but 要 is first there, so ssss is the only
         # unambiguous way to type it
         entries_with_short = self.wubi_entries + [_wubi('木', 's', 64500)]
-        drop = find_redundant_wubi_codes(entries_with_short)
-        self.assertNotIn('木', drop)
-
-    def test_no_drop_set_keeps_previous_behavior(self):
-        entries = merge_dictionaries(self.wubi_entries, self.pinyin_entries, [])
-        by_text = {e['text']: e for e in entries}
-        self.assertEqual(by_text['次']['wubi_codes'], {'uqw', 'uqwy'})
+        _, _, secondary = self._secondary(entries_with_short)
+        self.assertEqual([pair for pair in secondary if pair[1] == '木'], [])
 
 
 class TestUserDataBackupRestore(unittest.TestCase):
