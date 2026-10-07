@@ -136,31 +136,50 @@ final class ReverseLookupTable {
         chars: [Character],
         index: Int
     ) -> String {
-        let charCount = chars.count
-
         // 策略1: 查找包含该字的已知词组（2-4字窗口）
-        for windowSize in 2...min(4, charCount) {
-            for startIdx in max(0, index - windowSize + 1)...(min(index, charCount - windowSize)) {
-                let endIdx = startIdx + windowSize
-                if endIdx <= charCount {
-                    let subWord = String(chars[startIdx..<endIdx])
-                    if let wordPinyin = database.getWordPinyin(for: subWord) {
-                        // 从词组拼音中提取该字位置的拼音
-                        let charPosInSubword = index - startIdx
-                        if let extractedPinyin = extractPinyinAtPosition(
-                            wordPinyin: wordPinyin,
-                            subWord: subWord,
-                            position: charPosInSubword
-                        ) {
-                            return extractedPinyin
-                        }
-                    }
-                }
+        for window in Self.contextWindows(charCount: chars.count, index: index) {
+            let subWord = String(chars[window])
+            guard let wordPinyin = database.getWordPinyin(for: subWord) else { continue }
+            // 从词组拼音中提取该字位置的拼音
+            if let extractedPinyin = extractPinyinAtPosition(
+                wordPinyin: wordPinyin,
+                subWord: subWord,
+                position: index - window.lowerBound
+            ) {
+                return extractedPinyin
             }
         }
 
         // 策略2: 使用最常用读音（第一个）
         return pinyins[0]
+    }
+
+    /// 包含 `index` 那个字的所有 2–4 字窗口，按窗口从短到长、起点从左到右。
+    ///
+    /// **这里原来是两个会让进程当场 trap 的区间。** Swift 的 `a...b` 在 `a > b` 时
+    /// 不是空区间，而是 `Range requires lowerBound <= upperBound` 崩溃：
+    ///
+    /// - `2...min(4, charCount)` 在单字时就是 `2...1`。用户词库里点「+」新建条目，
+    ///   敲下第一个字（且它是多音字）就会走到这里 —— 输入法整个退出。
+    /// - `max(0, index - windowSize + 1)...min(index, charCount - windowSize)` 的上界
+    ///   可以小于下界。
+    ///
+    /// 抽成不碰数据库的静态函数，是为了这两种边界能被测试直接钉住：触发它要有一条
+    /// 多音字记录和一次真实按键，靠手点是碰运气。
+    static func contextWindows(charCount: Int, index: Int) -> [Range<Int>] {
+        // 单字无所谓上下文，没有窗口可言。
+        guard charCount >= 2, index >= 0, index < charCount else { return [] }
+
+        var windows: [Range<Int>] = []
+        for windowSize in 2...min(4, charCount) {
+            let firstStart = max(0, index - windowSize + 1)
+            let lastStart = min(index, charCount - windowSize)
+            guard firstStart <= lastStart else { continue }
+            for startIdx in firstStart...lastStart {
+                windows.append(startIdx..<(startIdx + windowSize))
+            }
+        }
+        return windows
     }
 
     /// 从词组拼音中提取指定位置字符的拼音
