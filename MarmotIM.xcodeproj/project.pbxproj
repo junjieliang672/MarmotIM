@@ -59,6 +59,8 @@
 		SYNCMODELS_SWIFT /* SyncModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = SYNCMODELS_SWIFT_REF /* SyncModels.swift */; };
 		THEMESETTINGS_SWIFT /* ThemeSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = THEMESETTINGS_SWIFT_REF /* ThemeSettingsView.swift */; };
 		TRANSCRIBECOORD_SWIFT /* TranscribeCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = TRANSCRIBECOORD_SWIFT_REF /* TranscribeCoordinator.swift */; };
+		ASCIIHOLDMONITOR_SWIFT /* ASCIIHoldMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = ASCIIHOLDMONITOR_SWIFT_REF /* ASCIIHoldMonitor.swift */; };
+		APPLISTEDITOR_SWIFT /* AppListEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = APPLISTEDITOR_SWIFT_REF /* AppListEditor.swift */; };
 		TRANSCRIBEHOTKEY_SWIFT /* TranscribeHotKey.swift in Sources */ = {isa = PBXBuildFile; fileRef = TRANSCRIBEHOTKEY_SWIFT_REF /* TranscribeHotKey.swift */; };
 		TRANSCRIBESETTINGS_SWIFT /* TranscribeSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = TRANSCRIBESETTINGS_SWIFT_REF /* TranscribeSettingsView.swift */; };
 		TRANSCRIBETYPES_SWIFT /* TranscribeTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = TRANSCRIBETYPES_SWIFT_REF /* TranscribeTypes.swift */; };
@@ -123,6 +125,8 @@
 		SYNCMODELS_SWIFT_REF /* SyncModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncModels.swift; sourceTree = "<group>"; };
 		THEMESETTINGS_SWIFT_REF /* ThemeSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThemeSettingsView.swift; sourceTree = "<group>"; };
 		TRANSCRIBECOORD_SWIFT_REF /* TranscribeCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscribeCoordinator.swift; sourceTree = "<group>"; };
+		ASCIIHOLDMONITOR_SWIFT_REF /* ASCIIHoldMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ASCIIHoldMonitor.swift; sourceTree = "<group>"; };
+		APPLISTEDITOR_SWIFT_REF /* AppListEditor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppListEditor.swift; sourceTree = "<group>"; };
 		TRANSCRIBEHOTKEY_SWIFT_REF /* TranscribeHotKey.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscribeHotKey.swift; sourceTree = "<group>"; };
 		TRANSCRIBESETTINGS_SWIFT_REF /* TranscribeSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscribeSettingsView.swift; sourceTree = "<group>"; };
 		TRANSCRIBETYPES_SWIFT_REF /* TranscribeTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscribeTypes.swift; sourceTree = "<group>"; };
@@ -225,6 +229,7 @@
 				ASRAGENTSTATUS_SWIFT_REF /* ASRAgentStatus.swift */,
 				ASRHEALTHMONITOR_SWIFT_REF /* ASRHealthMonitor.swift */,
 				TRANSCRIBECOORD_SWIFT_REF /* TranscribeCoordinator.swift */,
+				ASCIIHOLDMONITOR_SWIFT_REF /* ASCIIHoldMonitor.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -233,6 +238,7 @@
 			isa = PBXGroup;
 			children = (
 				SETTINGSWINDOW_SWIFT_REF /* SettingsWindowController.swift */,
+				APPLISTEDITOR_SWIFT_REF /* AppListEditor.swift */,
 				SETTINGS_TABS_GROUP /* Tabs */,
 			);
 			path = Settings;
@@ -436,6 +442,8 @@
 				ASRAGENTSTATUS_SWIFT /* ASRAgentStatus.swift in Sources */,
 				ASRHEALTHMONITOR_SWIFT /* ASRHealthMonitor.swift in Sources */,
 				TRANSCRIBECOORD_SWIFT /* TranscribeCoordinator.swift in Sources */,
+				ASCIIHOLDMONITOR_SWIFT /* ASCIIHoldMonitor.swift in Sources */,
+				APPLISTEDITOR_SWIFT /* AppListEditor.swift in Sources */,
 				TRANSCRIBESETTINGS_SWIFT /* TranscribeSettingsView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

@@ -46,6 +46,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Start iCloud sync service
         iCloudSyncManager.shared.start()
 
+        // 外部 ASCII 直通请求：建目录、读一遍现状、装上监视器。
+        //
+        // 放在这里而不是像 startProposalApplier 那样挂在词库预加载完成之后：
+        // 模式开关必须在第一次按键之前就是活的。纯同步，只碰文件系统，不开线程。
+        //
+        // 不按 config.asciiHold.enabled 来决定要不要 start()：那样一来在设置里
+        // 打开这个开关就得重启输入法。isHolding() 自己会短路，start() 的代价
+        // 就是一次 mkdir 加一次 open(O_EVTONLY)。
+        ASCIIHoldMonitor.shared.start()
+
         // 语音转写：排到下一轮 runloop 再装配，本方法内一行都不跑。
         // 功能没开就连协调器都不构造 —— 没有监听、没有麦克风、没有网络。
         DispatchQueue.main.async { [weak self] in
@@ -64,6 +74,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // 转写：拆掉全局 NSEvent 监听、停掉可能还在录的 AVAudioEngine、撤回在飞的请求。
         // 不能指望 deinit —— 进程退出时 AppDelegate 未必被释放。
         transcribe?.stop()
+
+        ASCIIHoldMonitor.shared.stop()
 
         // Save configuration
         try? Self.config.save()

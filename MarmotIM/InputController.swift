@@ -53,6 +53,16 @@ class InputController: IMKInputController {
     /// Whether input is in English mode (pass-through)
     private var isEnglishMode: Bool = false
 
+    /// 用户用 shift 轻敲把外部 ASCII 直通请求顶掉了。
+    ///
+    /// 没有这个开关，shift 在请求生效期间既没用**又说谎**：敲一下 `isEnglishMode`
+    /// 翻成 true（英文，HUD 显示「英」），再敲一下翻回 false —— 但请求还按着，
+    /// 实际仍然是英文，HUD 却显示「中」。一个显示「中」却在打 ASCII 的提示，
+    /// 和输入法坏了完全分不出来。
+    ///
+    /// 每次焦点切换（`activateServer`）和每次请求状态变化都清掉。
+    private var asciiHoldOverridden: Bool = false
+
     /// Track when Shift was pressed (for quick-tap detection)
     private var shiftPressedTime: Date?
 
@@ -139,6 +149,8 @@ class InputController: IMKInputController {
         // Force Chinese mode on activation to prevent being stuck in English mode
         // This ensures the IME is ready to type Chinese when selected or app is switched
         isEnglishMode = false
+        // 新的焦点 = 重新开始：上一个 app 里按 shift 顶掉的外部请求不该跟过来。
+        asciiHoldOverridden = false
         ModeIndicator.shared.hide() // Hide any lingering indicators
 
         // 听写接缝：记一笔"当前是哪个控制器"。见文件末尾的 MARK: 转写上屏接缝。
@@ -225,6 +237,25 @@ class InputController: IMKInputController {
             if handleControlShortcut(keyCode: keyCode, client: sender) {
                 return true
             }
+        }
+
+        // 外部程序（superfile 之类）正在请求英文直通：这一下按英文走。
+        //
+        // 位置：在 `.command` 透传（上面）和 Ctrl 快捷键之后 —— Cmd+C/V 和
+        // 划词入库的 Ctrl+= / Ctrl+- 不是打字，不该被请求挡住。
+        //
+        // 顺手在这里收掉在途的组字，于是「请求在组字中途生效」这件事在**这一次**
+        // 按键就处理完了，即便 DispatchSource 一个事件都没送到。
+        //
+        // 先问监视器再看 `asciiHoldOverridden`，顺序不能反。`if a, b` 和 `&&` 一样是
+        // 短路的，一旦覆盖标志排在前面，覆盖期间就再也不会读监视器 —— 而清掉这个标志的
+        // 两条路之一，正是监视器发现请求变化时回调过来。那样一来，如果 DispatchSource
+        // 恰好没装上（目录被删掉重建过），覆盖就会一直挂到用户切走再切回来为止。
+        let holdApplies = ASCIIHoldMonitor.shared.isHolding(
+            bundleID: (sender as? IMKTextInput)?.bundleIdentifier())
+        if !isEnglishMode, !asciiHoldOverridden, holdApplies {
+            endComposition(commitCode: false, trigger: "ascii-hold", client: sender)
+            return false
         }
 
         // English mode: pass through all input
@@ -933,40 +964,120 @@ class InputController: IMKInputController {
         return false // Don't consume the event
     }
 
-    private func toggleInputMode(client sender: Any!) {
-        isEnglishMode = !isEnglishMode
+    // MARK: - 中英文模式
 
-        // If switching to English mode while composing, commit the input buffer as English text
-        if isEnglishMode && isComposing {
-            // Output the typed pinyin as English text instead of discarding it
-            if !inputBuffer.isEmpty {
-                logRawCommit(trigger: "shift", client: sender)
-                commitText(inputBuffer, client: sender)
-            }
-            reset()
-            hideCandidateWindow()
-            // Clear marked text
-            if let client = sender as? IMKTextInput {
-                client.setMarkedText("", selectionRange: NSRange(location: 0, length: 0), replacementRange: NSRange(location: NSNotFound, length: 0))
+    /// 组字收尾。`commitCode` 决定没打完的编码是上屏还是丢掉。
+    ///
+    /// **上屏（shift 轻敲 / 菜单）**：用户自己切的模式，他打的 `wo` 就该变成 `wo`。
+    ///
+    /// **丢掉（外部 ASCII 直通请求）**：对面是终端里的文件管理器，`commitText("wo")`
+    /// 会被它当成 `w` 和 `o` 两个快捷键执行掉 —— 替用户跑了两条他没按过的命令。
+    /// 丢掉几个可以重敲的字母便宜得多，和 `insertTranscribedText` 那段注释
+    /// （「丢掉的是几个可以重敲的字母，留下的是要重启输入法才能清掉的错乱」）
+    /// 是同一笔账，而且这里还多一层：上屏本身是破坏性的。
+    private func endComposition(commitCode: Bool, trigger: String, client sender: Any!) {
+        guard isComposing || !inputBuffer.isEmpty || filterMode != .none else { return }
+
+        if commitCode, !inputBuffer.isEmpty {
+            logRawCommit(trigger: trigger, client: sender)
+            commitText(inputBuffer, client: sender)
+        }
+        reset()
+        hideCandidateWindow()
+        // 不清的话，客户端那边会留着一截我们这边已经不认的预编辑。
+        (sender as? IMKTextInput)?.setMarkedText(
+            "",
+            selectionRange: NSRange(location: 0, length: 0),
+            replacementRange: NSRange(location: NSNotFound, length: 0))
+    }
+
+    /// 中英文切换的唯一入口：shift 轻敲和菜单两项都走这里。
+    ///
+    /// 菜单那两项以前直接改 `isEnglishMode` 就完事：在组字途中从菜单切到「英文」，
+    /// marked text 留在客户端里，而这边 `isComposing` 还是 true —— 之后每一次退格、
+    /// 每一次选词都基于一个客户端已经不认的状态，且不会自愈。顺手一起修掉。
+    private func applyMode(english: Bool, trigger: String, showHUD: Bool, client sender: Any!) {
+        // 用户显式切模式 = 他比外部请求更有发言权。见 `asciiHoldOverridden`。
+        if ASCIIHoldMonitor.shared.isHolding(bundleID: (sender as? IMKTextInput)?.bundleIdentifier()) {
+            asciiHoldOverridden = true
+            NSLog("MarmotIM: 用户用 %@ 顶掉了外部 ASCII 直通请求", trigger)
+        }
+
+        guard english != isEnglishMode else {
+            if showHUD { showModeIndicator(english: english, client: sender) }
+            return
+        }
+
+        isEnglishMode = english
+        if english {
+            endComposition(commitCode: true, trigger: trigger, client: sender)
+        }
+        if showHUD { showModeIndicator(english: english, client: sender) }
+        NSLog("MarmotIM: 模式 -> %@ (%@)", english ? "英文" : "中文", trigger)
+    }
+
+    /// 在光标处弹一下中英文提示。拿不到光标就退回鼠标位置。
+    private func showModeIndicator(english: Bool, client sender: Any!) {
+        guard AppDelegate.config.showModeIndicator else { return }
+
+        // Try multiple methods to get cursor position
+        var position = NSEvent.mouseLocation  // Default fallback
+
+        if let client = sender as? IMKTextInput {
+            var cursorRect = NSRect.zero
+            client.attributes(forCharacterIndex: 0, lineHeightRectangle: &cursorRect)
+
+            // Check if we got a valid cursor position (not at origin and reasonable values)
+            if cursorRect.origin.x > 10 || cursorRect.origin.y > 50 {
+                position = cursorRect.origin
             }
         }
 
-        // Show mode indicator if enabled
-        if AppDelegate.config.showModeIndicator {
-            // Try multiple methods to get cursor position
-            var position = NSEvent.mouseLocation  // Default fallback
+        ModeIndicator.shared.show(isEnglishMode: english, at: position)
+    }
 
-            if let client = sender as? IMKTextInput {
-                var cursorRect = NSRect.zero
-                client.attributes(forCharacterIndex: 0, lineHeightRectangle: &cursorRect)
+    private func toggleInputMode(client sender: Any!) {
+        applyMode(english: !isEnglishMode, trigger: "shift", showHUD: true, client: sender)
+    }
 
-                // Check if we got a valid cursor position (not at origin and reasonable values)
-                if cursorRect.origin.x > 10 || cursorRect.origin.y > 50 {
-                    position = cursorRect.origin
-                }
-            }
+    /// 实际会发生什么 —— 用户自己选的模式，加上外部请求那一层。
+    /// 菜单的勾必须跟着这个走，不然勾在「中文」上而打出来的是 ASCII。
+    private var effectiveEnglishMode: Bool {
+        if isEnglishMode { return true }
+        if asciiHoldOverridden { return false }
+        return ASCIIHoldMonitor.shared.isHolding(bundleID: self.client()?.bundleIdentifier())
+    }
 
-            ModeIndicator.shared.show(isEnglishMode: isEnglishMode, at: position)
+    // MARK: - 外部 ASCII 直通请求接缝
+
+    /// `ASCIIHoldMonitor` 在请求生效/撤销时调一次。**只在主线程。**
+    ///
+    /// 不碰 `isEnglishMode`：请求是盖在模式之上的一层，不是模式本身。混进去会出现
+    /// 「请求撤销之后输入法莫名其妙留在英文」—— 和用户自己切的英文完全分不出来。
+    static func externalASCIIHoldDidChange(active: Bool) {
+        dispatchPrecondition(condition: .onQueue(.main))
+        guard let controller = ActiveInputControllerRegistry.shared.current else {
+            // 没有任何控制器处于活动状态：没有在途的组字要收，也没有光标可以定位
+            // 提示。门禁本来就是每次按键现读的，所以这里什么都不做是正确的，
+            // 不是兜底。
+            NSLog("MarmotIM: ascii-hold %@ —— 当前没有活动控制器", active ? "生效" : "撤销")
+            return
+        }
+        controller.externalASCIIHoldDidChange(active: active)
+    }
+
+    private func externalASCIIHoldDidChange(active: Bool) {
+        // 任何一次状态变化都把用户的 shift 覆盖清掉：重新生效的请求应当重新算数。
+        // 文件管理器每次回到快捷键模式都会重新请求，所以这就是用户期望的语义。
+        asciiHoldOverridden = false
+
+        guard active, !isEnglishMode else { return }
+
+        // 丢掉在途的编码 —— 上屏会把 `wo` 送进终端里的程序当成两个快捷键执行。
+        endComposition(commitCode: false, trigger: "ascii-hold", client: self.client())
+
+        if AppDelegate.config.asciiHold.showIndicator {
+            showModeIndicator(english: true, client: self.client())
         }
     }
 
@@ -1371,7 +1482,7 @@ class InputController: IMKInputController {
             keyEquivalent: ""
         )
         chineseModeItem.target = self
-        chineseModeItem.state = isEnglishMode ? .off : .on
+        chineseModeItem.state = effectiveEnglishMode ? .off : .on
         menu.addItem(chineseModeItem)
 
         // English mode
@@ -1381,8 +1492,18 @@ class InputController: IMKInputController {
             keyEquivalent: ""
         )
         englishModeItem.target = self
-        englishModeItem.state = isEnglishMode ? .on : .off
+        englishModeItem.state = effectiveEnglishMode ? .on : .off
         menu.addItem(englishModeItem)
+
+        // 外部请求生效时说一声。菜单是用户发现「中文怎么打不出来」之后第一个
+        // 会点开的地方，而这是产品里唯一能告诉他原因的位置。
+        if ASCIIHoldMonitor.shared.isActiveAnywhere, !asciiHoldOverridden {
+            let holdItem = NSMenuItem(title: "英文直通（外部程序请求中）",
+                                      action: nil,
+                                      keyEquivalent: "")
+            holdItem.isEnabled = false
+            menu.addItem(holdItem)
+        }
 
         return menu
     }
@@ -1405,18 +1526,15 @@ class InputController: IMKInputController {
         }
     }
 
+    // 这两项以前直接改 `isEnglishMode`：组字途中从菜单切模式会把 marked text
+    // 留在客户端，而这边还以为在组字。走 applyMode 之后和 shift 轻敲同一条路。
+    // showHUD: false —— 菜单项自己有勾，而且提示会被菜单盖住。
     @objc private func switchToChineseMode(_ sender: Any?) {
-        if isEnglishMode {
-            isEnglishMode = false
-            NSLog("MarmotIM: Switched to Chinese mode via menu")
-        }
+        applyMode(english: false, trigger: "menu", showHUD: false, client: self.client())
     }
 
     @objc private func switchToEnglishMode(_ sender: Any?) {
-        if !isEnglishMode {
-            isEnglishMode = true
-            NSLog("MarmotIM: Switched to English mode via menu")
-        }
+        applyMode(english: true, trigger: "menu", showHUD: false, client: self.client())
     }
 
     // MARK: - iCloud Sync Status

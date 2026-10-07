@@ -86,89 +86,11 @@ struct CurationSettingsView: View {
     // MARK: - Excluded apps
 
     private var excludedAppsSection: some View {
-        GroupBox(label: Text("不记录的 App")) {
-            VStack(alignment: .leading, spacing: 6) {
-                ForEach(viewModel.config.curator.excludedApps, id: \.self) { bundleId in
-                    let app = AppIdentity(bundleId: bundleId)
-                    HStack(spacing: 8) {
-                        if let icon = app.icon {
-                            Image(nsImage: icon).resizable().frame(width: 20, height: 20)
-                        } else {
-                            Image(systemName: "app.dashed").frame(width: 20, height: 20).foregroundColor(.secondary)
-                        }
-                        Text(app.name)
-                        if !app.isInstalled {
-                            Text("未安装").font(.caption).foregroundColor(.secondary)
-                        }
-                        Spacer()
-                        Button(action: { remove(bundleId) }) {
-                            Image(systemName: "minus.circle")
-                        }
-                        .buttonStyle(.borderless)
-                        .help("从列表中移除")
-                    }
-                    .help(bundleId)
-                }
-
-                Menu {
-                    let running = runningApps
-                    if !running.isEmpty {
-                        Section("正在运行") {
-                            ForEach(running, id: \.bundleId) { app in
-                                Button(app.name) { add(app.bundleId) }
-                            }
-                        }
-                    }
-                    Button("从「应用程序」里选择…", action: chooseFromDisk)
-                } label: {
-                    Label("添加 App", systemImage: "plus")
-                }
-                .menuStyle(.borderlessButton)
-                .fixedSize()
-                .padding(.top, 2)
-            }
-            .padding(6)
-            .frame(maxWidth: .infinity, alignment: .leading)
-        }
-    }
-
-    /// Apps with a window that are not excluded yet, by name
-    private var runningApps: [AppIdentity] {
-        let excluded = Set(viewModel.config.curator.excludedApps)
-        var seen = Set<String>()
-        return NSWorkspace.shared.runningApplications
-            .filter { $0.activationPolicy == .regular }
-            .compactMap { $0.bundleIdentifier }
-            .filter { !excluded.contains($0) && seen.insert($0).inserted }
-            .map { AppIdentity(bundleId: $0) }
-            .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
-    }
-
-    private func chooseFromDisk() {
-        let panel = NSOpenPanel()
-        panel.title = "选择不记录的 App"
-        panel.prompt = "添加"
-        panel.directoryURL = URL(fileURLWithPath: "/Applications")
-        panel.allowedContentTypes = [.application]
-        panel.allowsMultipleSelection = true
-        panel.canChooseDirectories = false
-        guard panel.runModal() == .OK else { return }
-        for url in panel.urls {
-            if let bundleId = Bundle(url: url)?.bundleIdentifier {
-                add(bundleId)
-            }
-        }
-    }
-
-    private func add(_ bundleId: String) {
-        guard !viewModel.config.curator.excludedApps.contains(bundleId) else { return }
-        viewModel.config.curator.excludedApps.append(bundleId)
-        viewModel.save()
-    }
-
-    private func remove(_ bundleId: String) {
-        viewModel.config.curator.excludedApps.removeAll { $0 == bundleId }
-        viewModel.save()
+        AppListEditor(
+            title: "不记录的 App",
+            choosePanelTitle: "选择不记录的 App",
+            bundleIds: $viewModel.config.curator.excludedApps,
+            onChange: { viewModel.save() })
     }
 
     private func reloadSummary() {

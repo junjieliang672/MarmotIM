@@ -108,6 +108,9 @@ struct BasicSettingsView: View {
                     }
                 }
 
+                // 外部程序请求英文直通（ascii-hold）。见 ASCIIHoldMonitor。
+                asciiHoldSection
+
                 // Fuzzy Pinyin section
                 SettingsSection(title: "模糊拼音") {
                     Toggle(isOn: $viewModel.config.fuzzyPinyin.enabled) {
@@ -189,6 +192,75 @@ struct BasicSettingsView: View {
             .padding()
         }
     }
+
+    // MARK: - 外部控制
+
+    @State private var holdStatus = ASCIIHoldMonitor.Status(holders: [], secondsSinceActive: nil)
+
+    /// 一个开关加一行状态。
+    ///
+    /// 这里本来有五个控件（白名单、严格模式、提示开关……）。砍掉了：用户看着那一排
+    /// 没法判断该不该勾，而「不确定就别动」对一个默认就该工作的功能来说是最差的结果。
+    /// 剩下的那几个旋钮仍然在 config.json 里，默认值就是对的，真需要再手改。
+    private var asciiHoldSection: some View {
+        SettingsSection(title: "外部控制") {
+            Toggle(isOn: $viewModel.config.asciiHold.enabled) {
+                Text("终端程序等快捷键时，自动按英文输入")
+            }
+            .onChange(of: viewModel.config.asciiHold.enabled) { _ in
+                viewModel.save()
+                refreshHoldStatus()
+            }
+
+            Text("终端里的文件管理器（如 superfile）用单个字母当快捷键，中文模式下这些键会被输入法吃掉。"
+                 + "开着这一项，它们在等快捷键时输入法自动走英文，光标进到搜索框、重命名框时自动放开，"
+                 + "不用手动切。只有主动支持的程序才会用到，其它程序完全不受影响。")
+                .font(.caption)
+                .foregroundColor(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            if viewModel.config.asciiHold.enabled {
+                HStack(spacing: 8) {
+                    Circle()
+                        .fill(holdStatus.isActive ? Color.orange : Color.secondary.opacity(0.4))
+                        .frame(width: 8, height: 8)
+                    Text(holdStatusText)
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                    Spacer()
+                    // 只在真的有程序挂着时才出现。正常情况下，程序一离开终端就自己
+                    // 撤销了 —— 所以能在这个窗口里看到它，基本就意味着它卡住了。
+                    if holdStatus.isActive {
+                        Button("强制解除") {
+                            ASCIIHoldMonitor.shared.clearAllHolds()
+                            refreshHoldStatus()
+                        }
+                    }
+                }
+            }
+        }
+        .onAppear(perform: refreshHoldStatus)
+        .onReceive(Timer.publish(every: 1, on: .main, in: .common).autoconnect()) { _ in
+            refreshHoldStatus()
+        }
+    }
+
+    private var holdStatusText: String {
+        if holdStatus.isActive {
+            return "正在生效：" + holdStatus.holders.joined(separator: "、")
+        }
+        // 程序在终端失去焦点时就撤销了请求，而你为了看这个窗口必须离开终端，
+        // 所以这里几乎总是「没有正在生效」。说一句「刚刚用过」才是有用的信息。
+        if let seconds = holdStatus.secondsSinceActive, seconds < 120 {
+            return "当前没有生效（\(Int(seconds)) 秒前用过，正常）"
+        }
+        return "当前没有程序在用"
+    }
+
+    private func refreshHoldStatus() {
+        holdStatus = ASCIIHoldMonitor.shared.status
+    }
+
 }
 
 // MARK: - Radio Button Component

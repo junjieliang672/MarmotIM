@@ -342,6 +342,62 @@ struct CuratorConfig: Codable, Equatable {
     }
 }
 
+// MARK: - ASCII Hold Config (外部程序请求英文直通)
+
+/// Settings for the ascii-hold protocol: a running program can ask the input
+/// method to pass keys through as plain ASCII while it is in a hotkey mode.
+///
+/// **What this is for.** A terminal file manager like superfile reads single
+/// letters as commands. With Chinese mode on, `j` never reaches it — the input
+/// method takes it into the composition buffer first. So the program leaves a
+/// request file named after its pid in
+/// `~/Library/Application Support/MarmotIM/ascii-hold/`, and removes it the
+/// moment a text field (rename, search) takes focus. See `ASCIIHoldMonitor`.
+///
+/// Stored in config.json, which is local to each Mac and never synced: which
+/// programs are installed is a per-machine fact.
+struct ASCIIHoldConfig: Codable, Equatable {
+    /// On by default. When off, `ASCIIHoldMonitor` does not even stat the
+    /// directory, and no request from any program has any effect.
+    var enabled: Bool = true
+
+    /// Bundle identifiers of the apps whose requests are honoured.
+    /// **Empty means every app**, which is the default: a request that cannot
+    /// name its own app is still better than no feature at all, and the far
+    /// more common mistake is a list that silently excludes the one terminal
+    /// the user actually uses.
+    var allowedApps: [String] = []
+
+    /// Ignore requests that do not say which app they are for.
+    ///
+    /// Off by default so that a `touch`-ed empty file works, which is how
+    /// anyone first tries this out. Turn it on if a program that stays in
+    /// hotkey mode in a background tab starts eating Chinese input elsewhere.
+    var requireAppScope: Bool = false
+
+    /// Flash the 中/英 indicator at the caret when a request takes effect.
+    ///
+    /// Off by default: a file manager toggles between hotkey and text mode
+    /// several times a minute, and each indicator is a real window.
+    var showIndicator: Bool = false
+
+    static let `default` = ASCIIHoldConfig()
+
+    init() {}
+
+    /// Field-by-field, like CuratorConfig: a synthesized decoder throws on a
+    /// missing key, which would reset the whole block when a field is added.
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let d = ASCIIHoldConfig()
+
+        enabled = (try? container.decode(Bool.self, forKey: .enabled)) ?? d.enabled
+        allowedApps = (try? container.decode([String].self, forKey: .allowedApps)) ?? d.allowedApps
+        requireAppScope = (try? container.decode(Bool.self, forKey: .requireAppScope)) ?? d.requireAppScope
+        showIndicator = (try? container.decode(Bool.self, forKey: .showIndicator)) ?? d.showIndicator
+    }
+}
+
 // MARK: - Default Punctuation Mapping
 
 /// Default Chinese punctuation mapping
@@ -445,6 +501,9 @@ struct AppConfig: Codable {
     /// Behaviour log configuration
     var curator: CuratorConfig = .default
 
+    /// 外部程序请求英文直通（见 ASCIIHoldMonitor）
+    var asciiHold: ASCIIHoldConfig = .default
+
     // MARK: - Legacy Settings (现有设置)
 
     /// Show code type hint (pinyin/wubi) in candidate window
@@ -471,6 +530,7 @@ struct AppConfig: Codable {
         fuzzyPinyin: FuzzyPinyinConfig = .default,
         transcribe: TranscribeConfig = .default,
         curator: CuratorConfig = .default,
+        asciiHold: ASCIIHoldConfig = .default,
         showCodeHint: Bool
     ) {
         self.enterKeyBehavior = enterKeyBehavior
@@ -491,6 +551,7 @@ struct AppConfig: Codable {
         self.fuzzyPinyin = fuzzyPinyin
         self.transcribe = transcribe
         self.curator = curator
+        self.asciiHold = asciiHold
         self.showCodeHint = showCodeHint
     }
 
@@ -559,6 +620,7 @@ struct AppConfig: Codable {
         fuzzyPinyin = (try? container.decode(FuzzyPinyinConfig.self, forKey: .fuzzyPinyin)) ?? d.fuzzyPinyin
         transcribe = (try? container.decode(TranscribeConfig.self, forKey: .transcribe)) ?? d.transcribe
         curator = (try? container.decode(CuratorConfig.self, forKey: .curator)) ?? d.curator
+        asciiHold = (try? container.decode(ASCIIHoldConfig.self, forKey: .asciiHold)) ?? d.asciiHold
         showCodeHint = (try? container.decode(Bool.self, forKey: .showCodeHint)) ?? d.showCodeHint
     }
 
@@ -690,6 +752,7 @@ extension AppConfig {
         case fuzzyPinyin
         case transcribe
         case curator
+        case asciiHold
         case showCodeHint
     }
 }
