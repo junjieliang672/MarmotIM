@@ -77,7 +77,8 @@ done
 # Step 1: Rebuild dictionary from vocab sources.
 # This regenerates dict/dictionary.db which gets bundled into the .app in step 4.
 # User data at ~/Library/Application Support/MarmotIM/dictionary.db is NOT modified.
-echo "Building dictionary..."
+mkdir -p build
+printf "Building dictionary... "
 # --no-build-fuzzy: the fuzzy pinyin index is no longer built as part of the
 # install pipeline. It cost ~6.7M rows / ~382MB of a 1.2GB database, and the
 # 模糊拼音 filter mode is rarely used.
@@ -88,15 +89,23 @@ echo "Building dictionary..."
 # its schema still exist, so nothing that queries it breaks.
 #
 # To restore: drop the flag below (the tool still builds the index by default).
-python3 tools/build_dictionary.py --no-build-fuzzy
-echo ""
+#
+# Its progress output (dozens of lines) goes to build/build_dictionary.log; the
+# tail is printed only when the build fails.
+if ! python3 tools/build_dictionary.py --no-build-fuzzy > build/build_dictionary.log 2>&1; then
+    echo "FAILED"
+    tail -n 30 build/build_dictionary.log >&2
+    echo "ERROR: tools/build_dictionary.py failed. Full log: build/build_dictionary.log" >&2
+    exit 1
+fi
+echo "done (log: build/build_dictionary.log)"
 
 # Hard-fail if the Python build didn't produce the expected artifact. On a fresh
 # clone this is the difference between "new IME has a working dictionary" and
 # "user has no words." (spec-004 install-script hardening)
 if [ ! -f "dict/dictionary.db" ]; then
     echo "ERROR: dict/dictionary.db was not produced by tools/build_dictionary.py." >&2
-    echo "       Check the Python output above for errors. Cannot proceed." >&2
+    echo "       Check build/build_dictionary.log for errors. Cannot proceed." >&2
     exit 1
 fi
 
@@ -115,6 +124,10 @@ fi
 # visible; tee keeps the unfiltered log for when the filtered view is not enough.
 # ClangStatCache is in the filter deliberately — it is the task that stalls, so it
 # is the one line that explains a multi-minute pause while it is happening.
+#
+# Progress is one dot per build step on a single line, instead of one line per
+# compiled file, which filled the screen. Errors and the BUILD result are printed
+# in full. awk's fflush() keeps it streaming, for the reason above.
 echo "Building app... (full log: build/xcodebuild.log)"
 # -allowProvisioningUpdates: the target is CODE_SIGN_STYLE=Automatic with iCloud
 # entitlements, so signing needs a provisioning profile for
@@ -130,10 +143,22 @@ echo "Building app... (full log: build/xcodebuild.log)"
 # least able to explain itself. Note it needs an Xcode signed in to the Apple ID that
 # owns DEVELOPMENT_TEAM; with no account at all, use scripts/build.sh --no-icloud,
 # which drops the entitlements that require a profile in the first place.
-mkdir -p build
 xcodebuild -allowProvisioningUpdates -project MarmotIM.xcodeproj -scheme MarmotIM -configuration Release build CONFIGURATION_BUILD_DIR="$(pwd)/build" 2>&1 \
     | tee build/xcodebuild.log \
-    | grep --line-buffered -E "error:|^\*\* BUILD|^(ClangStatCache|CompileSwift|SwiftCompile|SwiftDriver|Ld|CodeSign|ProcessProductPackaging|CreateUniversalBinary)"
+    | awk '
+        function endline() { if (dots) { printf "\n"; dots = 0 } }
+        /error:/       { endline(); print; fflush(); next }
+        /^\*\* BUILD/  { endline(); print "  " $0; fflush(); next }
+        /^ClangStatCache/ && !stat {
+            endline(); print "  indexing SDK headers (can take minutes after an Xcode update)"
+            stat = 1; fflush(); next
+        }
+        /^(CompileSwift|SwiftCompile|SwiftDriver|Ld|CodeSign|ProcessProductPackaging|CreateUniversalBinary)/ {
+            if (!dots) printf "  "
+            printf "."; dots++; fflush()
+        }
+        END { endline() }'
+
 
 if [ ! -d "build/MarmotIM.app" ]; then
     echo "ERROR: xcodebuild did not produce build/MarmotIM.app. Check build output above." >&2
@@ -152,7 +177,6 @@ fi
 # Resolved from build settings rather than hardcoded: the DerivedData directory name is a
 # hash, and `-derivedDataPath` can move the whole tree. TARGET_TEMP_DIR + FULL_PRODUCT_NAME
 # is where ProcessProductPackaging always writes it.
-echo "Locating Xcode's generated entitlements..."
 BUILD_SETTINGS=$(xcodebuild -project MarmotIM.xcodeproj -scheme MarmotIM \
     -configuration Release -showBuildSettings 2>/dev/null)
 _setting() { printf '%s\n' "$BUILD_SETTINGS" | awk -F' = ' -v k="$1" '$1 ~ "^ *"k"$" {print $2; exit}'; }
@@ -178,10 +202,8 @@ if ! plutil -extract 'com\.apple\.application-identifier' raw -o - "$XCENT" > /d
     echo "       than relaxing this check." >&2
     exit 1
 fi
-echo "  $XCENT"
 
 # Step 3: Stop old process
-echo "Stopping old process..."
 # Graceful shutdown: send SIGTERM first to allow proper cleanup (WAL checkpoint, etc.)
 if pgrep -f MarmotIM > /dev/null 2>&1; then
     killall -TERM MarmotIM 2>/dev/null || true
@@ -205,7 +227,6 @@ fi
 # phase. VocabularyDatabase.installFromBundle() at first launch copies this
 # into ~/Library/Application Support/ only if no user DB exists yet — for
 # existing users, their data is preserved and the bundled DB is unused at runtime.
-echo "Injecting dictionary.db into App Bundle..."
 # step 1 already hard-failed if dict/dictionary.db was missing, so this exists.
 mkdir -p "build/MarmotIM.app/Contents/Resources"
 cp -f "dict/dictionary.db" "build/MarmotIM.app/Contents/Resources/"
@@ -283,19 +304,19 @@ if [ -z "$SIGN_IDENTITY" ]; then
     echo "       use scripts/build.sh --no-icloud instead of this script." >&2
     exit 1
 fi
-echo "Re-sealing the bundle as: $SIGN_IDENTITY"
+echo "Signing and installing (sudo may ask for your password)..."
 codesign --force --sign "$SIGN_IDENTITY" \
     --entitlements "$XCENT" \
     -o runtime \
-    build/MarmotIM.app || {
-    echo "ERROR: re-signing build/MarmotIM.app failed — see the output above." >&2
+    build/MarmotIM.app > build/codesign.log 2>&1 || {
+    cat build/codesign.log >&2
+    echo "ERROR: re-signing build/MarmotIM.app as $SIGN_IDENTITY failed — see above." >&2
     echo "       If this is 'errSecInternalComponent', something re-introduced sudo on" >&2
     echo "       this call: the signing key is in your login keychain, not root's." >&2
     exit 1
 }
 
 # Step 5: Install app to /Library/Input Methods
-echo "Installing..."
 sudo rm -rf /Library/Input\ Methods/MarmotIM.app
 sudo cp -r build/MarmotIM.app /Library/Input\ Methods/MarmotIM.app
 
@@ -356,7 +377,7 @@ if [ -z "$INSTALLED_TEAM" ] || [ "$INSTALLED_TEAM" = "not set" ]; then
     echo "         Accessibility and microphone grants will NOT survive the next install:" >&2
     echo "         TCC can only pin them to this build's cdhash. See the comment above." >&2
 else
-    echo "OK: signed by team $INSTALLED_TEAM (permissions survive reinstalls)."
+    VERIFIED="team $INSTALLED_TEAM"
 fi
 
 # ENTITLEMENTS: two checks, on purpose.
@@ -395,10 +416,9 @@ if [ "$XCENT_CANON" != "$INSTALLED_CANON" ]; then
     diff <(printf '%s\n' "$XCENT_CANON") <(printf '%s\n' "$INSTALLED_CANON") >&2 || true
     exit 1
 fi
-echo "OK: entitlements match Xcode's .xcent exactly (application-identifier = $INSTALLED_APPID)."
+VERIFIED="${VERIFIED:+$VERIFIED, }entitlements match Xcode's"
 
 # Step 6: Start
-echo "Starting..."
 # macOS relaunches an active input method on its own within a second or two of step 3
 # killing it — i.e. BEFORE step 5 has copied the new bundle. That process keeps the old
 # binary mapped (the `rm -rf` only unlinks it), and `open` on an already-running app does
@@ -424,57 +444,57 @@ BUILT_MTIME=$(stat -f %m "build/MarmotIM.app/Contents/MacOS/MarmotIM" 2>/dev/nul
 if [ "$INSTALLED_MTIME" -lt "$BUILT_MTIME" ]; then
     echo "WARNING: installed binary appears older than the build output — install may not have taken effect." >&2
 else
-    # Print the PASS too, not just the FAIL. This line is what an operator reads to
-    # decide whether the install worked, so silence-means-success is the wrong shape.
-    echo "OK: installed binary is the one just built (mtime check passed)."
+    # The PASS is reported too, in the summary line below: it is what an operator
+    # reads to decide whether the install worked, so silence-means-success is the
+    # wrong shape.
+    VERIFIED="${VERIFIED:+$VERIFIED, }installed binary is the new build"
 fi
 
-echo "Done! Input method updated."
-echo ""
-# This step used to tell the operator to re-grant the microphone after every
-# install, on the theory that the ad-hoc re-sign changes the cdhash and TCC keys
-# permissions to the code signature. That was measured and it is FALSE for this
-# capability: spike Q4 reinstalled a granted bundle, got a fresh cdhash, and
-# AVCaptureDevice.authorizationStatus still read `.authorized` before any request
-# (docs/transcribe-spike-findings.md §5). Sending an operator to toggle a
-# permission that provably did not change is worse than saying nothing.
+# Notes that used to be printed after every install (kept here, not on screen):
 #
-# What IS worth stating is the one-way door §5 does document: a *denied* grant
-# never re-prompts, so it can only be undone by hand.
-echo "Microphone: an existing grant survives this reinstall (measured — spike Q4)."
-echo "  Only if it was previously DENIED will no prompt ever appear again; that"
-echo "  case is fixed in 系统设置 → 隐私与安全性 → 麦克风, not by reinstalling."
-echo ""
-echo "Schema migrations (v7 / v8) run automatically on first launch; no action needed."
-echo "iCloud sync state markers auto-create on first sync after install."
-echo ""
-echo "To verify what actually landed in /Library/Input Methods:"
-echo "  codesign -dv --entitlements - '/Library/Input Methods/MarmotIM.app'"
-echo "  # expect: TeamIdentifier=6R7CZ58K47, flags=0x10000(runtime), and SIX entitlements:"
-echo "  #   com.apple.application-identifier        <- no iCloud Drive without it"
-echo "  #   com.apple.developer.team-identifier"
-echo "  #   com.apple.developer.icloud-container-identifiers"
-echo "  #   com.apple.developer.ubiquity-container-identifiers"
-echo "  #   com.apple.security.device.audio-input   <- microphone under hardened runtime"
-echo "  #   com.apple.security.get-task-allow       <- dev build only; never notarize this"
-echo "  # A 'not set' team identifier means the ad-hoc re-sign came back and"
-echo "  # Accessibility / microphone grants will break on the next install."
-echo "  # Only three entitlements means sync is dead — that exact set is what the"
-echo "  # hand-maintained MarmotIM.entitlements produces. See step 4b."
-echo ""
-echo "Deliberately NOT suggesting 'log stream' here: on this machine bare 'log' is"
-echo "shadowed by a zsh function that errors out, and MarmotIM's NSLog payloads render"
-echo "as <private> in the unified log regardless — an empty result would look like a"
-echo "failed install when nothing is wrong. If you want the log anyway, use the"
-echo "absolute path: /usr/bin/log stream --predicate 'process == \"MarmotIM\"' --info"
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+# Microphone: an existing grant survives this reinstall (measured — spike Q4).
+#   Only if it was previously DENIED will no prompt ever appear again; that
+#   case is fixed in 系统设置 → 隐私与安全性 → 麦克风, not by reinstalling.
+#
+# Schema migrations (v7 / v8) run automatically on first launch; no action needed.
+# iCloud sync state markers auto-create on first sync after install.
+#
+# To verify what actually landed in /Library/Input Methods:
+#   codesign -dv --entitlements - '/Library/Input Methods/MarmotIM.app'
+#   # expect: TeamIdentifier=6R7CZ58K47, flags=0x10000(runtime), and SIX entitlements:
+#   #   com.apple.application-identifier        <- no iCloud Drive without it
+#   #   com.apple.developer.team-identifier
+#   #   com.apple.developer.icloud-container-identifiers
+#   #   com.apple.developer.ubiquity-container-identifiers
+#   #   com.apple.security.device.audio-input   <- microphone under hardened runtime
+#   #   com.apple.security.get-task-allow       <- dev build only; never notarize this
+#   # A 'not set' team identifier means the ad-hoc re-sign came back and
+#   # Accessibility / microphone grants will break on the next install.
+#   # Only three entitlements means sync is dead — that exact set is what the
+#   # hand-maintained MarmotIM.entitlements produces. See step 4b.
+#
+# Deliberately NOT suggesting 'log stream' here: on this machine bare 'log' is
+# shadowed by a zsh function that errors out, and MarmotIM's NSLog payloads render
+# as <private> in the unified log regardless — an empty result would look like a
+# failed install when nothing is wrong. If you want the log anyway, use the
+# absolute path: /usr/bin/log stream --predicate 'process == "MarmotIM"' --info
+echo "Verified: ${VERIFIED}."
 
 # Step 8: Provision the ASR server that dictation talks to.
 #
 # Everything above this line is done and cannot be undone by what follows — that
 # ordering is the mechanism by which an ASR failure "does not fail the install",
 # not merely the `if !` below.
-echo ""
-echo "======================================================================"
 ASR_STATUS="skipped"
 if [ "$WITH_ASR" -eq 0 ]; then
     # Report what IS, not what this run did.
@@ -494,19 +514,10 @@ if [ "$WITH_ASR" -eq 0 ]; then
     if [ -f "$ASR_PLIST" ]; then
         ASR_PORT="$(plutil -extract EnvironmentVariables.MARMOT_ASR_PORT raw -o - "$ASR_PLIST" 2>/dev/null || echo "")"
         if [ -n "$ASR_PORT" ] && curl -fsS --max-time 2 "http://127.0.0.1:$ASR_PORT/health" > /dev/null 2>&1; then
-            echo "Input method only — the ASR server was left alone (it is installed and answering"
-            echo "on 127.0.0.1:$ASR_PORT). Dictation keeps working; nothing to do."
             ASR_STATUS="untouched"
         else
-            echo "Input method only — the ASR server was left alone. It is installed, but it is"
-            echo "NOT answering right now, so dictation will fail until it is back."
-            echo "To bring it up:  bash scripts/install_asr.sh"
             ASR_STATUS="untouched-down"
         fi
-    else
-        echo "Input method only. Dictation needs a local ASR server, which is NOT installed."
-        echo "To add it:  bash scripts/build_and_install.sh --all"
-        echo "        or: bash scripts/install_asr.sh"
     fi
 elif [ ! -f "scripts/install_asr.sh" ]; then
     # Not fatal for the same reason as any other ASR failure: the IME is installed.
@@ -521,6 +532,8 @@ elif [ "$(id -u)" -eq 0 ]; then
     echo "         (this script sudo's only the three steps that need it)" >&2
     ASR_STATUS="failed"
 else
+    echo ""
+    echo "======================================================================"
     echo "Provisioning the ASR server (scripts/install_asr.sh)."
     echo "A first run downloads ~4 GB of model weights and can take 15-100 minutes;"
     echo "a warm run only re-checks the venv, the deps and the model and exits without"
@@ -533,20 +546,19 @@ else
     else
         ASR_STATUS="failed"
     fi
+    echo "======================================================================"
 fi
-echo "======================================================================"
 
 # Final summary. Both halves reported in one place so the operator does not have to
 # scroll back through a model download to find out whether the IME landed.
-echo ""
 echo "Input method: INSTALLED (/Library/Input Methods/MarmotIM.app)"
 case "$ASR_STATUS" in
     ok)      echo "ASR server:   RUNNING  (loopback, launchctl gui/$UID/com.marmotim.asr)" ;;
     # Three outcomes, not one: this run provisioned nothing in all three, but the state
     # it declined to touch is different in each, and so is what the operator should do.
     untouched)      echo "ASR server:   RUNNING  (untouched by this run)" ;;
-    untouched-down) echo "ASR server:   INSTALLED BUT NOT ANSWERING  (bash scripts/install_asr.sh)" ;;
-    skipped)        echo "ASR server:   NOT INSTALLED  (pass --all to provision it)" ;;
+    untouched-down) echo "ASR server:   INSTALLED BUT NOT ANSWERING  (dictation fails until: bash scripts/install_asr.sh)" ;;
+    skipped)        echo "ASR server:   NOT INSTALLED  (dictation needs it: pass --all, or bash scripts/install_asr.sh)" ;;
     failed)
         echo "ASR server:   FAILED — see the output above." >&2
         echo ""
