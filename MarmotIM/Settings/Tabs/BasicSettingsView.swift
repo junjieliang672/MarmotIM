@@ -32,6 +32,13 @@ struct BasicSettingsView: View {
                     .onChange(of: viewModel.config.numberAsInputWhenCapital) { _ in
                         viewModel.save()
                     }
+
+                    Toggle(isOn: $viewModel.config.continuousInput) {
+                        Text("连续输入：选中开头一段后，剩下的编码继续匹配")
+                    }
+                    .onChange(of: viewModel.config.continuousInput) { _ in
+                        viewModel.save()
+                    }
                 }
 
                 // Candidate section

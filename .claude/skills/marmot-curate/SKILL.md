@@ -1,6 +1,6 @@
 ---
 name: marmot-curate
-description: 整理 MarmotIM 输入法的用户词库、降权词库和相对排序。根据输入法记录的打字和选词习惯，提出加词、降权、排序规则以及移除它们的建议，由用户确认后生效。当用户说「整理词库」「整理一下我的词库」「看看有什么词该加」「词库有什么建议」或输入 /marmot-curate 时使用。
+description: 整理 MarmotIM 输入法的用户词库、英文置顶词和相对排序。根据输入法记录的打字和选词习惯，提出加词、英文置顶、排序规则以及移除它们的建议，由用户确认后生效。当用户说「整理词库」「整理一下我的词库」「看看有什么词该加」「词库有什么建议」或输入 /marmot-curate 时使用。
 ---
 
 # 整理 MarmotIM 词库
@@ -8,7 +8,7 @@ description: 整理 MarmotIM 输入法的用户词库、降权词库和相对排
 你要根据用户的打字习惯，对三个库提出建议，并在用户确认后写回：
 
 - **用户词库**：用户常打、但词库里没有的词（含英文）。
-- **降权词库**：靠学习加分排到第一、但用户总是跳过的词。降权的效果是去掉这个词的学习加分，让它回到词库原本的名次，不是把它压到最后。
+- **英文置顶词**：用户经常完整打出来的英文单词。平时英文候选固定在每页最后一位，空格上屏的是中文；进了这个名单的词，在被完整打出时排第一位，空格直接上屏它。例如名单里有 `agent`，打 `agent` 按空格得到 agent，而不是排在它前面的「阿根图」。只打了 `agen` 时不受影响。
 - **相对排序**：两个词同时出现在候选里时，固定 A 排在 B 前面。
 
 统计由工具算，判断由你做，决定由用户做。
@@ -20,7 +20,7 @@ description: 整理 MarmotIM 输入法的用户词库、降权词库和相对排
 ```
 python3 tools/marmot_curate.py status
 python3 tools/marmot_curate.py candidates user-dict
-python3 tools/marmot_curate.py candidates suppress
+python3 tools/marmot_curate.py candidates english
 python3 tools/marmot_curate.py candidates order
 python3 tools/marmot_curate.py candidates exit
 python3 tools/marmot_curate.py current
@@ -73,7 +73,7 @@ python3 tools/marmot_curate.py history
 - 看起来像错字的组合。
 - 一个候选是另一个更长候选的一部分，而且两者次数几乎相同时，只建议更完整的那个。
 
-#### 加词（`english`）
+#### 加词（`candidates user-dict` 的 `english`）
 
 候选是用户在中文模式下打出字母后直接上屏的英文。接受后，它会以「自己的小写字母」作为编码存入用户词库，在中文模式下打这串字母时作为候选出现。
 
@@ -81,13 +81,19 @@ python3 tools/marmot_curate.py history
 
 不该建议的：拼错的普通单词；只是某个编码打错后被直接上屏的字母串（比如 `uqwy` 这种看起来像五笔码的）；`forms` 里大小写很乱的。
 
-#### 降权（`suppress`）
+#### 英文置顶（`candidates english` 的 `english`）
 
-字段：`shown_first_by_learning`（靠学习加分排第一的次数）、`skipped_when_first_by_learning`（其中被跳过的次数）、`skip_rate_by_learning`、`times_picked`（这个词被选中的总次数）、`picked_instead`（用户跳过它之后选了什么）、`codes`。
+候选是用户完整打出、然后从后面的位置选出来的英文单词。字段：
+- `count` / `days`：这样选的次数，分布在多少天。
+- `picked_with`：用什么键选的（`tab` 是「上屏英文候选」键，`number` 是数字键）。
+- `shown_first_instead`：当时排在第一位的是什么。
+- `other_picks_at_this_code` / `other_picks`：同样这串字母，用户选了别的词（通常是中文）的次数和具体是哪些词。
 
-该建议的：跳过率高（大致 ≥ 0.8），而且这个词本身很少被选。典型情况是某段时间用得多，现在已经不是用户想要的首选。
+该建议的：次数多、分布在多天，而且 `other_picks_at_this_code` 是 0 或者远少于 `count`。用户打这串字母几乎总是要这个英文词。
 
-不该建议的：用户有时选它、有时选别的，取决于在写什么（看前后文）。这种情况降权会让它在需要时也排不上来。
+不该建议、而是把数字摆给用户让他决定的：`other_picks_at_this_code` 和 `count` 差不多。这串字母同时是用户常用的五笔或拼音编码（比如 `host` 四个键也是一个五笔全码），置顶之后空格不再上屏那个中文词，要按数字键选。展示时写清楚「置顶后，打这串字母想要『某词』时得按 2」。
+
+`other_picks` 里那一两次如果看起来是误选（比如 `agent` 下选了一次「阿根图」），不算撞码，照常建议。
 
 #### 相对排序（`order`）
 
@@ -104,7 +110,7 @@ python3 tools/marmot_curate.py history
 只包含以前通过这个流程接受的条目，用户手动加的不在其中。
 
 - `remove_word`：`picked_since_all_macs` 是加入之后在所有 Mac 上被选的次数。生效超过 30 天而它是 0，可以建议移除。`shown_but_skipped_this_mac` 高是另一个信号。生效时间短的不要建议。
-- `unsuppress`：降权之后用户仍然经常去后面把它选出来（`picked_since` 不少，`share_at_its_codes` 过半），建议解除降权。
+- `unpin_english`：置顶之后，用户打这串字母时多数是在选别的词（`other_picks_since` 不少，`share_at_its_code` 不到一半），建议移出英文置顶词。`other_picks` 列出他选的是什么。
 - `remove_rule`：规则建立之后，用户反过来选 b 的比例很高（`b_share_since` ≥ 0.5 而且次数不少），建议移除规则。
 
 ### 4. 向用户展示
@@ -138,18 +144,19 @@ python3 tools/marmot_curate.py history
   {"kind": "add_word", "decision": "accept", "text": "GitHub", "english": true,
    "reason": "常用产品名", "stats": {"count": 7}},
   {"kind": "add_word", "decision": "reject", "text": "的时候我", "stats": {"count": 15}},
-  {"kind": "suppress", "decision": "accept", "text": "效仿", "stats": {"count": 12}},
+  {"kind": "pin_english", "decision": "accept", "text": "agent", "stats": {"count": 12}},
   {"kind": "add_rule", "decision": "accept", "a": "交集", "b": "效仿", "stats": {"count": 22}},
   {"kind": "remove_word", "decision": "accept", "text": "某个旧词"},
-  {"kind": "unsuppress", "decision": "accept", "text": "将领"},
+  {"kind": "unpin_english", "decision": "accept", "text": "host"},
   {"kind": "remove_rule", "decision": "accept", "a": "次", "b": "交集"}
 ]
 ```
 
-- `kind`：`add_word`、`remove_word`、`suppress`、`unsuppress`、`add_rule`、`remove_rule`。
+- `kind`：`add_word`、`remove_word`、`pin_english`、`unpin_english`、`add_rule`、`remove_rule`。
 - `decision`：`accept` 或 `reject`。
 - `stats.count`：这条候选的 `count` 字段，原样带上。被拒绝的条目要等证据翻倍才会再次出现，这个数就是依据。
 - 中文加词需要 `wubi` 或 `pinyin` 至少一个（五笔 1–4 个小写字母，拼音只含小写字母）。英文加词写 `"english": true`，不需要编码，只能是纯字母。
+- `pin_english` / `unpin_english` 的 `text` 是那个英文单词，只能是纯字母，必须是英文词表里已有的词（`candidates english` 给出的都是）。
 - 用户拒绝的条目也要写进去（`reject`），这样下次不会再提。
 
 任何一条格式不对，工具会整批拒绝并指出是哪几条，修正后重试。

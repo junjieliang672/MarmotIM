@@ -4,7 +4,7 @@ import CryptoKit
 /// The kinds of user data that sync, in the order the settings page lists them.
 enum SyncPayloadKind: String, CaseIterable, Codable {
     case favorites
-    case suppressed
+    case englishFirst
     case ordering
     case learning
     case filter
@@ -12,7 +12,7 @@ enum SyncPayloadKind: String, CaseIterable, Codable {
     var title: String {
         switch self {
         case .favorites:  return "用户词"
-        case .suppressed: return "屏蔽词"
+        case .englishFirst: return "英文置顶词"
         case .ordering:   return "顺序规则"
         case .learning:   return "学习记录"
         case .filter:     return "筛选频率"

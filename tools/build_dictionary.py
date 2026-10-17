@@ -634,14 +634,14 @@ def save_metadata(entries: List[dict], output_dir: str):
         json.dump(metadata, f, indent=2)
 
 
-# Same DDL as VocabularyDatabase.performMigrations (v6 / v8). The freshly built
+# Same DDL as VocabularyDatabase.createTables. The freshly built
 # database is schema version 5 and has neither table; the app creates them on
 # launch with CREATE TABLE IF NOT EXISTS, so creating them here first is safe.
-USER_SUPPRESSED_WORDS_DDL = """
-    CREATE TABLE IF NOT EXISTS user_suppressed_words (
+USER_ENGLISH_FIRST_WORDS_DDL = """
+    CREATE TABLE IF NOT EXISTS user_english_first_words (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         text TEXT NOT NULL UNIQUE,
-        suppressed_timestamp INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
+        added_timestamp INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
         is_deleted INTEGER NOT NULL DEFAULT 0
     )
 """
@@ -674,7 +674,7 @@ def backup_user_data(db_path: str) -> Dict[str, list]:
     """
     Backup every user-owned table from the existing database.
     Returns a dict with keys: user_learning, user_favorites, filter_user_freq,
-    user_suppressed_words, user_relative_order.
+    user_english_first_words, user_relative_order.
 
     Tombstones (is_deleted = 1) are backed up too. Dropping them would bring
     deleted words back: the restored row would be active with the deletion
@@ -687,7 +687,7 @@ def backup_user_data(db_path: str) -> Dict[str, list]:
         'user_learning': [],
         'user_favorites': [],
         'filter_user_freq': [],
-        'user_suppressed_words': [],
+        'user_english_first_words': [],
         'user_relative_order': [],
         'sync_counter_state': [],
     }
@@ -732,7 +732,7 @@ def backup_user_data(db_path: str) -> Dict[str, list]:
 
     simple_tables = [
         ('filter_user_freq', "SELECT filter_type, code, word, frequency, last_used FROM filter_user_freq"),
-        ('user_suppressed_words', "SELECT text, suppressed_timestamp, is_deleted FROM user_suppressed_words"),
+        ('user_english_first_words', "SELECT text, added_timestamp, is_deleted FROM user_english_first_words"),
         ('user_relative_order',
          "SELECT word_a, word_b, created_at, updated_at, is_deleted FROM user_relative_order"),
         ('sync_counter_state', "SELECT payload, key, device_id, count FROM sync_counter_state"),
@@ -804,13 +804,13 @@ def restore_user_data(db_path: str, backup: Dict[str, list]):
         )
         print(f"  Restored {len(filter_freq)} filter_user_freq records")
 
-    if backup['user_suppressed_words']:
-        cursor.execute(USER_SUPPRESSED_WORDS_DDL)
+    if backup['user_english_first_words']:
+        cursor.execute(USER_ENGLISH_FIRST_WORDS_DDL)
         cursor.executemany(
-            "INSERT OR REPLACE INTO user_suppressed_words (text, suppressed_timestamp, is_deleted) VALUES (?, ?, ?)",
-            backup['user_suppressed_words']
+            "INSERT OR REPLACE INTO user_english_first_words (text, added_timestamp, is_deleted) VALUES (?, ?, ?)",
+            backup['user_english_first_words']
         )
-        print(f"  Restored {len(backup['user_suppressed_words'])} user_suppressed_words records")
+        print(f"  Restored {len(backup['user_english_first_words'])} user_english_first_words records")
 
     if backup['user_relative_order']:
         cursor.execute(USER_RELATIVE_ORDER_DDL)

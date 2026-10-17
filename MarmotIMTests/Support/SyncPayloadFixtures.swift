@@ -205,17 +205,17 @@ enum SyncPayloadFixtures {
         }
     }
 
-    // MARK: - user_suppressed_words
+    // MARK: - user_english_first_words
 
     @discardableResult
-    static func insertSuppressedWord(dbPath: URL,
+    static func insertEnglishFirstWord(dbPath: URL,
                                      text: String,
-                                     suppressedTimestamp: Int,
+                                     addedTimestamp: Int,
                                      isDeleted: Bool = false) -> Bool {
         return withOpenDB(dbPath, fallback: false) { db in
             let sql = """
-                INSERT OR REPLACE INTO user_suppressed_words
-                (text, suppressed_timestamp, is_deleted)
+                INSERT OR REPLACE INTO user_english_first_words
+                (text, added_timestamp, is_deleted)
                 VALUES (?, ?, ?)
             """
             var stmt: OpaquePointer?
@@ -223,16 +223,16 @@ enum SyncPayloadFixtures {
             defer { sqlite3_finalize(stmt) }
             let textNS = text as NSString
             sqlite3_bind_text(stmt, 1, textNS.utf8String, -1, nil)
-            sqlite3_bind_int(stmt, 2, Int32(suppressedTimestamp))
+            sqlite3_bind_int(stmt, 2, Int32(addedTimestamp))
             sqlite3_bind_int(stmt, 3, isDeleted ? 1 : 0)
             return sqlite3_step(stmt) == SQLITE_DONE
         }
     }
 
-    static func readSuppressedWord(dbPath: URL, text: String)
-        -> (exists: Bool, isDeleted: Bool, suppressedTimestamp: Int)? {
-        return withOpenDB(dbPath, fallback: nil) { db -> (exists: Bool, isDeleted: Bool, suppressedTimestamp: Int)? in
-            let sql = "SELECT suppressed_timestamp, is_deleted FROM user_suppressed_words WHERE text = ?"
+    static func readEnglishFirstWord(dbPath: URL, text: String)
+        -> (exists: Bool, isDeleted: Bool, addedTimestamp: Int)? {
+        return withOpenDB(dbPath, fallback: nil) { db -> (exists: Bool, isDeleted: Bool, addedTimestamp: Int)? in
+            let sql = "SELECT added_timestamp, is_deleted FROM user_english_first_words WHERE text = ?"
             var stmt: OpaquePointer?
             guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return nil }
             defer { sqlite3_finalize(stmt) }

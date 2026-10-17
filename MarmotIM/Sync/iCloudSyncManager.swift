@@ -60,7 +60,7 @@ class iCloudSyncManager {
     private let filterFreqV2FileName = "filter_user_freq_v2.json"
     private let learningFileName = "user_learning.json"
     private let filterFreqFileName = "filter_user_freq.json"
-    private let suppressedWordsFileName = "user_suppressed_words.json"
+    private let englishFirstWordsFileName = "user_english_first_words.json"
     private let relativeOrderingFileName = "user_relative_ordering.json"
 
     // MARK: - Initialization
@@ -336,7 +336,7 @@ class iCloudSyncManager {
     }
 
     /// Test-facing sync entry point. Performs one full round of sync
-    /// (learning + favorites + filter freq + suppressed words + relative
+    /// (learning + favorites + filter freq + English-first words + relative
     /// ordering) against the given documents directory and local DB file,
     /// no iCloud entitlement required.
     ///
@@ -363,7 +363,7 @@ class iCloudSyncManager {
             (learningV2FileName, syncLearningData),
             (favoritesFileName, syncFavoritesData),
             (filterFreqV2FileName, syncFilterFreqData),
-            (suppressedWordsFileName, syncSuppressedWordsData),
+            (englishFirstWordsFileName, syncEnglishFirstWordsData),
             (relativeOrderingFileName, syncRelativeOrderingData),
         ]
         var firstError: Error?
@@ -472,11 +472,11 @@ class iCloudSyncManager {
                 "\($0.key)|\($0.value.wubiCode ?? "")|\($0.value.pinyinCode ?? "")|\($0.value.addedTimestamp)|\($0.value.isDeleted)"
             }))
 
-        let suppressed = try readLocalSuppressedWords()
-        result[SyncPayloadKind.suppressed.rawValue] = PayloadSummary(
-            count: suppressed.values.filter { !$0.isDeleted }.count,
-            digest: SyncDigest.digest(suppressed.map {
-                "\($0.key)|\($0.value.suppressedTimestamp)|\($0.value.isDeleted)"
+        let englishFirst = try readLocalEnglishFirstWords()
+        result[SyncPayloadKind.englishFirst.rawValue] = PayloadSummary(
+            count: englishFirst.values.filter { !$0.isDeleted }.count,
+            digest: SyncDigest.digest(englishFirst.map {
+                "\($0.key)|\($0.value.addedTimestamp)|\($0.value.isDeleted)"
             }))
 
         // createdAt is left out: the local write keeps the earlier of the two
@@ -584,7 +584,7 @@ class iCloudSyncManager {
                                 localDeviceId: deviceId, devices: [], files: [])
         }
         let documentsURL = container.appendingPathComponent("Documents")
-        let fileNames = [favoritesFileName, suppressedWordsFileName, relativeOrderingFileName,
+        let fileNames = [favoritesFileName, englishFirstWordsFileName, relativeOrderingFileName,
                          learningV2FileName, filterFreqV2FileName, learningFileName, filterFreqFileName]
         let files = fileNames.compactMap { cloudState(of: documentsURL.appendingPathComponent($0)) }
         return SyncOverview(iCloudAvailable: true, containerFound: true,
@@ -1213,12 +1213,12 @@ class iCloudSyncManager {
         ), documentsURL: documentsURL)
     }
 
-    // MARK: - Sync Suppressed Words
+    // MARK: - Sync English-First Words
 
-    private func syncSuppressedWordsData(documentsURL: URL) throws {
-        let remoteURL = documentsURL.appendingPathComponent(suppressedWordsFileName)
+    private func syncEnglishFirstWordsData(documentsURL: URL) throws {
+        let remoteURL = documentsURL.appendingPathComponent(englishFirstWordsFileName)
 
-        let localRecords = try readLocalSuppressedWords()
+        let localRecords = try readLocalEnglishFirstWords()
 
         // Check file download status before reading
         let downloadStatus = ensureFileDownloaded(at: remoteURL)
@@ -1226,41 +1226,41 @@ class iCloudSyncManager {
         switch downloadStatus {
         case .ready:
             // Normal case: file is ready, proceed with merge
-            let remoteRecords = try readRemoteSuppressedWordsContent(from: remoteURL)
+            let remoteRecords = try readRemoteEnglishFirstWordsContent(from: remoteURL)
             let (remoteFolded, conflicts) = foldConflictVersions(
-                remoteRecords, at: remoteURL, merge: SyncMerger.mergeSuppressedWords)
-            let merged = SyncMerger.mergeSuppressedWords(local: localRecords, remote: remoteFolded)
+                remoteRecords, at: remoteURL, merge: SyncMerger.mergeEnglishFirstWords)
+            let merged = SyncMerger.mergeEnglishFirstWords(local: localRecords, remote: remoteFolded)
 
-            let changed = SyncMerger.findChangedSuppressedWords(merged: merged, original: localRecords)
+            let changed = SyncMerger.findChangedEnglishFirstWords(merged: merged, original: localRecords)
             if !changed.isEmpty {
-                try writeLocalSuppressedWords(changed)
-                NSLog("MarmotIM: Updated \(changed.count) suppressed word records")
-                // Post notification to update suppressed words cache
+                try writeLocalEnglishFirstWords(changed)
+                NSLog("MarmotIM: Updated \(changed.count) English-first word records")
+                // Post notification to update English-first words cache
                 DispatchQueue.main.async {
-                    NotificationCenter.default.post(name: .suppressedWordsDidChange, object: nil)
+                    NotificationCenter.default.post(name: .englishFirstWordsDidChange, object: nil)
                 }
             }
 
             if merged != remoteRecords || !conflicts.isEmpty {
-                try writeRemoteSuppressedWords(merged, to: remoteURL)
+                try writeRemoteEnglishFirstWords(merged, to: remoteURL)
             }
             resolveConflictVersions(conflicts, at: remoteURL)
-            markPayloadSynced(suppressedWordsFileName)
+            markPayloadSynced(englishFirstWordsFileName)
 
         case .notFound:
             // See syncLearningData for rationale (decision 012).
-            if localRecords.isEmpty && !hasPayloadEverSynced(suppressedWordsFileName) {
-                NSLog("MarmotIM: [I][sync] suppressed words file notFound first_sync=true local_empty=true action=skip reason=decision_012")
+            if localRecords.isEmpty && !hasPayloadEverSynced(englishFirstWordsFileName) {
+                NSLog("MarmotIM: [I][sync] English-first words file notFound first_sync=true local_empty=true action=skip reason=decision_012")
             } else {
-                NSLog("MarmotIM: [I][sync] suppressed words file notFound action=upload prior_sync=\(hasPayloadEverSynced(suppressedWordsFileName)) local_rows=\(localRecords.count)")
-                try writeRemoteSuppressedWords(localRecords, to: remoteURL)
-                markPayloadSynced(suppressedWordsFileName)
+                NSLog("MarmotIM: [I][sync] English-first words file notFound action=upload prior_sync=\(hasPayloadEverSynced(englishFirstWordsFileName)) local_rows=\(localRecords.count)")
+                try writeRemoteEnglishFirstWords(localRecords, to: remoteURL)
+                markPayloadSynced(englishFirstWordsFileName)
             }
 
         case .downloadFailed:
             // CRITICAL: Remote file exists but couldn't be downloaded
             // DO NOT write to remote - this would overwrite valid cloud data!
-            NSLog("MarmotIM: Skipping suppressed words sync - remote file download failed, preventing data loss")
+            NSLog("MarmotIM: Skipping English-first words sync - remote file download failed, preventing data loss")
         }
     }
 
@@ -1434,15 +1434,15 @@ class iCloudSyncManager {
         return records
     }
 
-    private func readLocalSuppressedWords() throws -> [String: SuppressedWordRecord] {
+    private func readLocalEnglishFirstWords() throws -> [String: EnglishFirstWordRecord] {
         var db: OpaquePointer?
         guard sqlite3_open_v2(activeLocalDBPath.path, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else {
             throw SyncError.databaseOpenFailed
         }
         defer { sqlite3_close(db) }
 
-        var records: [String: SuppressedWordRecord] = [:]
-        let sql = "SELECT text, suppressed_timestamp, is_deleted FROM user_suppressed_words"
+        var records: [String: EnglishFirstWordRecord] = [:]
+        let sql = "SELECT text, added_timestamp, is_deleted FROM user_english_first_words"
         var stmt: OpaquePointer?
 
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
@@ -1452,11 +1452,11 @@ class iCloudSyncManager {
 
         while sqlite3_step(stmt) == SQLITE_ROW {
             let text = String(cString: sqlite3_column_text(stmt, 0))
-            let suppressedTimestamp = Int(sqlite3_column_int(stmt, 1))
+            let addedTimestamp = Int(sqlite3_column_int(stmt, 1))
             let isDeleted = sqlite3_column_int(stmt, 2) != 0
 
-            records[text] = SuppressedWordRecord(
-                suppressedTimestamp: suppressedTimestamp,
+            records[text] = EnglishFirstWordRecord(
+                addedTimestamp: addedTimestamp,
                 isDeleted: isDeleted
             )
         }
@@ -1600,17 +1600,17 @@ class iCloudSyncManager {
         return records
     }
 
-    /// Read remote suppressed words records (caller must ensure file is downloaded first)
-    private func readRemoteSuppressedWordsContent(from url: URL) throws -> [String: SuppressedWordRecord] {
+    /// Read remote English-first words records (caller must ensure file is downloaded first)
+    private func readRemoteEnglishFirstWordsContent(from url: URL) throws -> [String: EnglishFirstWordRecord] {
         var coordinatorError: NSError?
         var readError: Error?
-        var records: [String: SuppressedWordRecord] = [:]
+        var records: [String: EnglishFirstWordRecord] = [:]
 
         let coordinator = NSFileCoordinator()
         coordinator.coordinate(readingItemAt: url, options: [], error: &coordinatorError) { coordURL in
             do {
                 let data = try Data(contentsOf: coordURL)
-                let syncFile = try JSONDecoder().decode(SyncFile<SuppressedWordRecord>.self, from: data)
+                let syncFile = try JSONDecoder().decode(SyncFile<EnglishFirstWordRecord>.self, from: data)
                 records = syncFile.records
             } catch {
                 readError = error
@@ -1655,15 +1655,15 @@ class iCloudSyncManager {
         }
     }
 
-    private func writeLocalSuppressedWords(_ records: [(String, SuppressedWordRecord)]) throws {
+    private func writeLocalEnglishFirstWords(_ records: [(String, EnglishFirstWordRecord)]) throws {
         try writeLocalRows(records, sql: """
-            INSERT OR REPLACE INTO user_suppressed_words
-            (text, suppressed_timestamp, is_deleted)
+            INSERT OR REPLACE INTO user_english_first_words
+            (text, added_timestamp, is_deleted)
             VALUES (?, ?, ?)
         """) { stmt, row in
             let (text, record) = row
             sqlite3_bind_text(stmt, 1, text, -1, SQLITE_TRANSIENT_SYNC)
-            sqlite3_bind_int(stmt, 2, Int32(record.suppressedTimestamp))
+            sqlite3_bind_int(stmt, 2, Int32(record.addedTimestamp))
             sqlite3_bind_int(stmt, 3, record.isDeleted ? 1 : 0)
             return true
         }
@@ -1739,7 +1739,7 @@ class iCloudSyncManager {
         try writeRemoteRecords(records, to: url)
     }
 
-    private func writeRemoteSuppressedWords(_ records: [String: SuppressedWordRecord], to url: URL) throws {
+    private func writeRemoteEnglishFirstWords(_ records: [String: EnglishFirstWordRecord], to url: URL) throws {
         try writeRemoteRecords(records, to: url)
     }
 
@@ -1874,8 +1874,8 @@ extension Notification.Name {
     /// waiting for the 30-minute timer.
     static let localSyncedDataDidChange = Notification.Name("MarmotIMLocalSyncedDataDidChange")
 
-    /// Posted when suppressed words are updated via sync
-    static let suppressedWordsDidChange = Notification.Name("MarmotIMSuppressedWordsDidChange")
+    /// Posted when English-first words are updated via sync
+    static let englishFirstWordsDidChange = Notification.Name("MarmotIMEnglishFirstWordsDidChange")
 
     /// Posted when relative-ordering rules are updated via sync (spec-003).
     /// Observers (AppDelegate) should call

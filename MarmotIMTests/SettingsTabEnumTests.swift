@@ -3,7 +3,7 @@ import XCTest
 
 /// Spec-003 T1 + T5 regression guard: the top-level SettingsTab enum
 /// shrinks from seven cases to five (Import/Export deleted in T1;
-/// 用户词库 / 降权词库 folded under 词库管理 in T5).
+/// 用户词库 / 英文置顶词 folded under 词库管理 in T5).
 final class SettingsTabEnumTests: XCTestCase {
 
     // I-IX-REMOVE-01: .importExport must not appear in allCases.
@@ -13,14 +13,14 @@ final class SettingsTabEnumTests: XCTestCase {
                        "导入导出 tab was removed in spec-003 T1")
     }
 
-    // 用户词库 and 降权词库 are now inside DictionaryManagementView
+    // 用户词库 and 英文置顶词 are now inside DictionaryManagementView
     // and no longer top-level tabs.
-    func testStandaloneUserDictAndSuppressedTabsRemoved() {
+    func testStandaloneUserDictAndEnglishFirstTabsRemoved() {
         let labels = Set(SettingsTab.allCases.map { $0.rawValue })
         XCTAssertFalse(labels.contains("用户词库"),
                        "用户词库 moved into DictionaryManagementView in spec-003 T5")
-        XCTAssertFalse(labels.contains("降权词库"),
-                       "降权词库 moved into DictionaryManagementView in spec-003 T5")
+        XCTAssertFalse(labels.contains("英文置顶词"),
+                       "英文置顶词 moved into DictionaryManagementView in spec-003 T5")
     }
 
     // Seven top-level tabs: 基本, 词库管理, iCloud, 标点符号, 转写, 主题, 关于.
@@ -38,6 +38,6 @@ final class SettingsTabEnumTests: XCTestCase {
     // behaviour log those stores are curated from).
     func testDictionaryManagementInnerTabs() {
         let labels = DictionaryManagementView.InnerTab.allCases.map { $0.rawValue }
-        XCTAssertEqual(labels, ["用户词库", "降权词库", "相对排序", "整理"])
+        XCTAssertEqual(labels, ["用户词库", "英文置顶词", "相对排序", "整理"])
     }
 }

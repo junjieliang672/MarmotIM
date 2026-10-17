@@ -22,7 +22,9 @@ import Foundation
 ///
 /// English scores only order English candidates among themselves. Whenever
 /// the list also holds wubi or pinyin candidates, `placeEnglishAtPageEnds`
-/// moves the English ones to the last slot of each page after ranking.
+/// moves the English ones to the last slot of each page after ranking,
+/// except an exact match on an English-first word (英文置顶词), which it
+/// moves to the first slot.
 ///
 /// ## Within-Tier Ranking (Frecency)
 ///
@@ -91,16 +93,12 @@ struct CandidateRanker {
     ///   - matches: Dictionary matches to rank
     ///   - inputCode: The input code used for matching
     ///   - engine: Dictionary engine for user learning data
-    ///   - suppressedWords: Set of words that should ignore user behavior scores (optional)
     /// - Returns: Ranked and sorted candidates
     static func rank(
         matches: [DictionaryMatch],
         inputCode: String,
-        engine: DictionaryEngine,
-        suppressedWords: Set<String>? = nil
+        engine: DictionaryEngine
     ) -> [Candidate] {
-        // Get suppressed words from engine if not provided
-        let suppressedSet = suppressedWords ?? engine.getSuppressedWords()
         // STEP 1: Deduplicate by text, preferring entries with user data
         // This fixes the bug where duplicate entries for the same word have different IDs
         var textToMatch: [String: (match: DictionaryMatch, userData: UserEntryData?)] = [:]
@@ -143,14 +141,13 @@ struct CandidateRanker {
             let tierBonus = getTierBonus(match: match, inputCode: inputCode, engine: engine)
             // Learning data is keyed by entry, not by code: picks of 次 at
             // `uqw` must not lift it over the phrases at `uqwy`
-            let isSuppressed = suppressedSet.contains(match.entry.text)
-                || isSecondaryWubi(match: match, inputCode: inputCode, engine: engine)
+            let ignoresLearning = isSecondaryWubi(match: match, inputCode: inputCode, engine: engine)
             let timestamp = userData?.lastAccessTimestamp ?? 0
             let tierOverrideBoost = effectiveTierOverrideBoost(
                 match: match,
                 inputCode: inputCode,
                 lastAccessTimestamp: timestamp,
-                isSuppressed: isSuppressed
+                ignoresLearning: ignoresLearning
             )
 
             // Calculate full score using tier-based Frecency
@@ -159,7 +156,7 @@ struct CandidateRanker {
                 userData: userData,
                 inputCode: inputCode,
                 engine: engine,
-                isSuppressed: isSuppressed
+                ignoresLearning: ignoresLearning
             )
 
             // Determine if this is a jianma (protected wubi shortcode)
@@ -179,14 +176,12 @@ struct CandidateRanker {
         // A candidate is "boosted" if:
         // 1. It has active tierOverrideBoost (> 0)
         // 2. It would NOT be #1 without the tierOverrideBoost and recency score
-        // Note: Suppressed words never have boost, so they can't be "boosted"
         if candidates.count >= 2 {
             let first = candidates[0]
             let second = candidates[1]
             let firstBoost = tierOverrideBoosts[first.entryId] ?? 0
 
-            // Only check for boost if this word is not suppressed
-            if firstBoost > 0 && !suppressedSet.contains(first.text) {
+            if firstBoost > 0 {
                 // Get the userData for first candidate to calculate actual recency
                 if let (_, userData) = textToMatch[first.text] {
                     let actualRecency = FrecencyScore.calculateRecencyScore(
@@ -310,24 +305,42 @@ struct CandidateRanker {
     /// Uppercase input produces an English-only list (DictionaryEngine.search),
     /// so it is ordered by score alone.
     ///
+    /// The exception is `first`, the user's English-first words (英文置顶词,
+    /// lowercased): an exact English match on one of them goes to the very
+    /// first slot, above jianma and learned picks, so Space commits it. With
+    /// `agent` in the list, typing `agent` gives agent 中 中 … 英; typing
+    /// `agen` does not, because there `agent` is only a completion. The
+    /// first page still holds `pageSize` candidates.
+    ///
     /// Called by the caller after `applyRelativeOrdering`, like that pass.
     static func placeEnglishAtPageEnds(
         candidates: [Candidate],
-        pageSize: Int
+        pageSize: Int,
+        first: Set<String> = []
     ) -> [Candidate] {
         guard pageSize >= 2 else { return candidates }
 
-        let english = candidates.filter { $0.codeType == .english }
-        let chinese = candidates.filter { $0.codeType != .english }
-        guard !english.isEmpty, !chinese.isEmpty else { return candidates }
+        func isFirst(_ candidate: Candidate) -> Bool {
+            candidate.codeType == .english && candidate.isFullMatch
+                && first.contains(candidate.text.lowercased())
+        }
+        let leading = first.isEmpty ? [] : candidates.filter(isFirst)
+        let rest = leading.isEmpty ? candidates : candidates.filter { !isFirst($0) }
 
-        var result: [Candidate] = []
+        let english = rest.filter { $0.codeType == .english }
+        let chinese = rest.filter { $0.codeType != .english }
+        guard !english.isEmpty, !chinese.isEmpty else { return leading + rest }
+
+        var result: [Candidate] = leading
         result.reserveCapacity(candidates.count)
         var nextEnglish = 0
         var nextChinese = 0
+        // Slots already taken on the page being filled
+        var taken = leading.count % pageSize
 
         while nextChinese < chinese.count {
-            let pageEnd = min(nextChinese + pageSize - 1, chinese.count)
+            let pageEnd = min(nextChinese + max(pageSize - 1 - taken, 0), chinese.count)
+            taken = 0
             result.append(contentsOf: chinese[nextChinese..<pageEnd])
             nextChinese = pageEnd
 
@@ -337,6 +350,90 @@ struct CandidateRanker {
             }
         }
         result.append(contentsOf: english[nextEnglish...])
+        return result
+    }
+
+    // MARK: - Continuous Input (连续输入)
+
+    /// Explicit segment boundary in the buffer: `zhege'yijg`
+    static let segmentDelimiter: Character = "'"
+
+    /// Candidates whose code is the start of the buffer, for buffers that
+    /// hold more than one word: in `zhegeyijg`, `zhege` -> 这个, then
+    /// `zhe` -> 这. Each carries `headLength`, the letters it uses up.
+    ///
+    /// Heads are looked up longest first, so a candidate covering more of
+    /// the buffer comes before one covering less. Each head is ranked as if
+    /// it had been typed on its own (jianma, secondary wubi codes and the
+    /// short-word bonus all depend on the code length), so 就是 holds the
+    /// same place under `yijg` here as when `yijg` is typed alone.
+    ///
+    /// Without a delimiter, only a buffer longer than 4 letters (any wubi
+    /// code) gets head candidates; up to 4 letters nothing changes. With
+    /// one, heads come from the letters before the first delimiter, at any
+    /// length: `wf'yi` -> 会. Those letters first get the ordinary search,
+    /// completions included, so `chaichen'` lists what `chaichen` does
+    /// (拆成 from `chaicheng`), then the shorter heads. A buffer with an
+    /// uppercase letter gets none, since it is English only.
+    ///
+    /// Callers append these after the whole-buffer candidates and drop
+    /// texts already listed there.
+    static func headCandidates(buffer: String, engine: DictionaryEngine, limit: Int = 100,
+                               englishCompletion: Bool = true) -> [Candidate] {
+        guard !buffer.contains(where: { $0.isUppercase }) else { return [] }
+
+        let isLetter: (Character) -> Bool = { $0.isASCII && $0.isLetter }
+        let letters: Substring
+        var longest: Int
+        if let delimiter = buffer.firstIndex(of: segmentDelimiter) {
+            letters = buffer[..<delimiter].prefix(while: isLetter)
+            longest = letters.count
+        } else {
+            guard buffer.count > 4 else { return [] }
+            letters = buffer.prefix(while: isLetter)
+            // The whole buffer is the ordinary search
+            longest = letters.count == buffer.count ? letters.count - 1 : letters.count
+        }
+        guard longest > 0 else { return [] }
+
+        let rules = engine.getRelativeOrderingRules()
+        var result: [Candidate] = []
+        var seen = Set<String>()
+
+        // Delimited: the segment as if typed alone, then its shorter heads
+        if buffer.contains(segmentDelimiter) {
+            let segment = String(letters)
+            let ranked = applyRelativeOrdering(
+                candidates: rank(matches: engine.search(code: segment, limit: limit,
+                                                        englishCompletion: englishCompletion),
+                                 inputCode: segment, engine: engine),
+                rules: rules
+            )
+            for var candidate in ranked where seen.insert(candidate.text).inserted {
+                candidate.headLength = longest
+                candidate.isBoosted = false
+                result.append(candidate)
+                if result.count >= limit { return result }
+            }
+            longest -= 1
+        }
+
+        for length in stride(from: longest, through: 1, by: -1) {
+            let head = String(letters.prefix(length))
+            let matches = engine.searchHead(code: head)
+            guard !matches.isEmpty else { continue }
+            let ranked = applyRelativeOrdering(
+                candidates: rank(matches: matches, inputCode: head, engine: engine),
+                rules: rules
+            )
+            for var candidate in ranked where seen.insert(candidate.text).inserted {
+                candidate.headLength = length
+                // The boost marker describes a candidate ranked first overall
+                candidate.isBoosted = false
+                result.append(candidate)
+                if result.count >= limit { return result }
+            }
+        }
         return result
     }
 
@@ -414,7 +511,7 @@ struct CandidateRanker {
 
     /// Tier override boost after applying ranking exclusions.
     ///
-    /// Returns 0 for suppressed words, for Wubi prefix matches in short
+    /// Returns 0 for secondary wubi codes, for Wubi prefix matches in short
     /// code mode (Tier 3), and for English prefix matches. The boost is keyed by entry id, not by the code it
     /// was picked with, so without this exclusion picking 交集 at `uqwy` would
     /// push it above the exact 3-key match 次 at `uqw` for ~2 hours.
@@ -422,9 +519,9 @@ struct CandidateRanker {
         match: DictionaryMatch,
         inputCode: String,
         lastAccessTimestamp: UInt32,
-        isSuppressed: Bool
+        ignoresLearning: Bool
     ) -> Double {
-        if isSuppressed { return 0 }
+        if ignoresLearning { return 0 }
         let isWubiPrefix = match.matchType == .prefix && match.codeType == .wubi
         if isWubiPrefix && inputCode.count <= 4 { return 0 }
         // Same reasoning for English completions: picking "kubernetes" must
@@ -435,12 +532,12 @@ struct CandidateRanker {
 
     /// Calculate score for a single match
     ///
-    /// For suppressed words, only word-intrinsic scores are used:
+    /// With `ignoresLearning` (secondary wubi codes), only word-intrinsic scores are used:
     /// - TierBonus: tier level from match type (kept)
     /// - BaseScore: dictionary base frequency (kept)
     /// - ShortWordBonus: shorter word preference (kept)
     ///
-    /// User behavior scores are ignored for suppressed words:
+    /// User behavior scores are then ignored:
     /// - TierOverrideBoost: recent selection boost
     /// - RecencyScore: time since last use
     /// - FrequencyScore: total usage count
@@ -449,20 +546,20 @@ struct CandidateRanker {
         userData: UserEntryData?,
         inputCode: String,
         engine: DictionaryEngine,
-        isSuppressed: Bool = false
+        ignoresLearning: Bool = false
     ) -> Double {
         let inputLength = inputCode.count
         let isFullMatch = match.matchType == .full
         let isWubiCode = match.codeType == .wubi
 
-        // 1. Tier bonus (absolute, determines tier) - KEPT for suppressed words
+        // 1. Tier bonus (absolute, determines tier)
         let tierBonus = getTierBonus(match: match, inputCode: inputCode, engine: engine)
 
-        // 2. Base score from dictionary frequency - KEPT for suppressed words
+        // 2. Base score from dictionary frequency
         let baseFrequency = match.entry.baseFrequency(for: match.codeType)
         let baseScore = FrecencyScore.calculateBaseScore(baseFrequency: baseFrequency)
 
-        // 3. Short word bonus (prefer shorter words within tier) - KEPT for suppressed words
+        // 3. Short word bonus (prefer shorter words within tier)
         var shortWordBonus: Double = 0
         let textLength = match.entry.textLength
         if isFullMatch && isWubiCode && inputLength == 4 && textLength == 2 {
@@ -474,19 +571,19 @@ struct CandidateRanker {
             shortWordBonus = Double(5 - textLength) * shortWordBonusPerChar
         }
 
-        // 4. User behavior scores - IGNORED for suppressed words
+        // 4. User behavior scores
         var tierOverrideBoost: Double = 0
         var recencyScore: Double = 0
         var frequencyScore: Double = 0
 
-        if !isSuppressed {
+        if !ignoresLearning {
             let accessCount = userData?.accessCount ?? 0
             let timestamp = userData?.lastAccessTimestamp ?? 0
             tierOverrideBoost = effectiveTierOverrideBoost(
                 match: match,
                 inputCode: inputCode,
                 lastAccessTimestamp: timestamp,
-                isSuppressed: isSuppressed
+                ignoresLearning: ignoresLearning
             )
             recencyScore = FrecencyScore.calculateRecencyScore(lastAccessTimestamp: timestamp)
             frequencyScore = FrecencyScore.calculateFrequencyScore(accessCount: accessCount)

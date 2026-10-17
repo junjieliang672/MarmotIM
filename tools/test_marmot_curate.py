@@ -43,8 +43,8 @@ class CurateTestCase(unittest.TestCase):
             CREATE TABLE user_favorites (id INTEGER PRIMARY KEY AUTOINCREMENT, text TEXT NOT NULL UNIQUE,
                                          wubi_code TEXT, pinyin_code TEXT, added_timestamp INTEGER,
                                          is_deleted INTEGER NOT NULL DEFAULT 0);
-            CREATE TABLE user_suppressed_words (id INTEGER PRIMARY KEY AUTOINCREMENT, text TEXT NOT NULL UNIQUE,
-                                                suppressed_timestamp INTEGER, is_deleted INTEGER NOT NULL DEFAULT 0);
+            CREATE TABLE user_english_first_words (id INTEGER PRIMARY KEY AUTOINCREMENT, text TEXT NOT NULL UNIQUE,
+                                                   added_timestamp INTEGER, is_deleted INTEGER NOT NULL DEFAULT 0);
             CREATE TABLE user_relative_order (id INTEGER PRIMARY KEY AUTOINCREMENT, word_a TEXT, word_b TEXT,
                                               created_at INTEGER, updated_at INTEGER,
                                               is_deleted INTEGER NOT NULL DEFAULT 0);
@@ -213,40 +213,59 @@ class UserDictCandidates(CurateTestCase):
         self.assertNotIn('contexts', out['phrases'][0])
 
 
-class SuppressCandidates(CurateTestCase):
+class EnglishFirstCandidates(CurateTestCase):
 
-    def test_word_first_by_learning_but_skipped(self):
+    def english(self, word, ts, rank=6, trigger='tab', first='阿根图'):
+        """`word` typed in full and picked from slot `rank`, with `first` in slot 0"""
+        shown = [(first,), (word,)] if rank else [(word,)]
+        self.add('select', ts, text=word, code=word, code_type='english', rank=rank, trigger=trigger, page=0,
+                 candidates=shown)
+
+    def test_word_picked_from_the_page_end(self):
+        for day in range(2):
+            for n in range(2):
+                self.english('agent', self.now - day * DAY - n * 10)
+        self.select('阿根图', self.now - 500, code='agent', candidates=[('阿根图',), ('agent',)])
+        _, out = self.run_cli('candidates', 'english')
+
+        item = next(c for c in out['english'] if c['text'] == 'agent')
+        self.assertEqual(item['count'], 4)
+        self.assertEqual(item['days'], 2)
+        self.assertEqual(item['picked_with'], {'tab': 4})
+        self.assertEqual(item['shown_first_instead'], {'阿根图': 4})
+        self.assertEqual(item['other_picks_at_this_code'], 1)
+        self.assertEqual(item['other_picks'], {'阿根图': 1})
+
+    def test_word_already_first_is_not_a_candidate(self):
+        for day in range(2):
+            for n in range(2):
+                self.english('kubernetes', self.now - day * DAY - n * 10, rank=0, trigger='space')
+        _, out = self.run_cli('candidates', 'english')
+        self.assertEqual(out['english'], [], 'nothing was in the way')
+
+    def test_completion_is_not_a_candidate(self):
+        # Typed `agen`, picked the completion `agent`: listing it would change nothing
+        for day in range(2):
+            for n in range(2):
+                self.add('select', self.now - day * DAY - n * 10, text='agent', code='agen', code_type='english',
+                         rank=6, trigger='tab', page=0, candidates=[('阿根',), ('agent',)])
+        _, out = self.run_cli('candidates', 'english')
+        self.assertEqual(out['english'], [])
+
+    def test_english_picks_are_not_ordering_candidates(self):
         for day in range(3):
             for n in range(3):
-                # 效仿 leads through learning boosts; the user reaches past it for 交集
-                self.select('交集', self.now - day * DAY - n * 10, code='uqwy',
-                            candidates=[('效仿', True), ('交集',)])
-            self.select('效仿', self.now - day * DAY - 500, code='uqwy', candidates=[('效仿', True), ('交集',)])
-        _, out = self.run_cli('candidates', 'suppress')
+                self.english('agent', self.now - day * DAY - n * 10)
+        _, out = self.run_cli('candidates', 'order')
+        self.assertEqual(out['order'], [], 'a rule cannot move an English candidate')
 
-        item = next(c for c in out['suppress'] if c['text'] == '效仿')
-        self.assertEqual(item['shown_first_by_learning'], 12)
-        self.assertEqual(item['skipped_when_first_by_learning'], 9)
-        self.assertEqual(item['skip_rate_by_learning'], 0.75)
-        self.assertEqual(item['times_picked'], 3)
-        self.assertEqual(item['picked_instead'], {'交集': 9})
-
-    def test_word_first_on_its_own_merit_is_not_a_candidate(self):
-        for day in range(3):
-            for n in range(3):
-                self.select('交集', self.now - day * DAY - n * 10, code='uqwy',
-                            candidates=[('效仿', False), ('交集',)])
-        _, out = self.run_cli('candidates', 'suppress')
-        self.assertEqual(out['suppress'], [], 'suppression only removes learning boosts')
-
-    def test_already_suppressed_words_are_skipped(self):
-        self.dictionary("INSERT INTO user_suppressed_words (text, suppressed_timestamp) VALUES ('效仿', 1)")
-        for day in range(3):
-            for n in range(3):
-                self.select('交集', self.now - day * DAY - n * 10, code='uqwy',
-                            candidates=[('效仿', True), ('交集',)])
-        _, out = self.run_cli('candidates', 'suppress')
-        self.assertEqual(out['suppress'], [])
+    def test_already_listed_words_are_skipped(self):
+        self.dictionary("INSERT INTO user_english_first_words (text, added_timestamp) VALUES ('agent', 1)")
+        for day in range(2):
+            for n in range(2):
+                self.english('agent', self.now - day * DAY - n * 10)
+        _, out = self.run_cli('candidates', 'english')
+        self.assertEqual(out['english'], [])
 
 
 class OrderCandidates(CurateTestCase):
@@ -325,10 +344,11 @@ class Decisions(CurateTestCase):
             {'kind': 'add_word', 'decision': 'accept', 'text': '输入法', 'wubi': 'TOOLONG'},
             {'kind': 'add_rule', 'decision': 'accept', 'a': '交集', 'b': '交集'},
             {'kind': 'bogus', 'decision': 'accept', 'text': 'x'},
-            {'kind': 'suppress', 'decision': 'maybe', 'text': '效仿'},
+            {'kind': 'pin_english', 'decision': 'maybe', 'text': 'agent'},
+            {'kind': 'pin_english', 'decision': 'accept', 'text': '效仿'},              # Not letters
         ])
         self.assertEqual(code, 1)
-        self.assertEqual(len(out['invalid']), 5)
+        self.assertEqual(len(out['invalid']), 6)
         _, history = self.run_cli('history')
         self.assertEqual(history['proposals'], [])
 
@@ -388,16 +408,20 @@ class ExitCandidates(CurateTestCase):
         _, out = self.run_cli('candidates', 'exit')
         self.assertEqual(out['exit'], [])
 
-    def test_suppressed_word_the_user_keeps_picking(self):
-        self.applied('suppress', {'text': '效仿'}, 10)
-        self.dictionary("INSERT INTO user_suppressed_words (text, suppressed_timestamp) VALUES ('效仿', 1)")
+    def test_english_first_word_the_user_keeps_passing_over(self):
+        self.applied('pin_english', {'text': 'host'}, 10)
+        self.dictionary("INSERT INTO user_english_first_words (text, added_timestamp) VALUES ('host', 1)")
         for n in range(4):
-            self.select('效仿', self.now - DAY - n * 10, code='uqwy', candidates=[('交集',), ('效仿',)])
-        self.select('交集', self.now - DAY - 100, code='uqwy', candidates=[('交集',), ('效仿',)])
+            self.add('select', self.now - DAY - n * 10, text='主机', code='host', code_type='wubi', rank=1,
+                     trigger='number', page=0, candidates=[('host',), ('主机',)])
+        self.add('select', self.now - DAY - 100, text='host', code='host', code_type='english', rank=0,
+                 trigger='space', page=0, candidates=[('host',), ('主机',)])
         _, out = self.run_cli('candidates', 'exit')
-        self.assertEqual(out['exit'][0]['kind'], 'unsuppress')
-        self.assertEqual(out['exit'][0]['picked_since'], 4)
-        self.assertEqual(out['exit'][0]['share_at_its_codes'], 0.8)
+        self.assertEqual(out['exit'][0]['kind'], 'unpin_english')
+        self.assertEqual(out['exit'][0]['picked_since'], 1)
+        self.assertEqual(out['exit'][0]['other_picks_since'], 4)
+        self.assertEqual(out['exit'][0]['other_picks'], {'主机': 4})
+        self.assertEqual(out['exit'][0]['share_at_its_code'], 0.2)
 
     def test_rule_the_user_now_contradicts(self):
         self.applied('add_rule', {'a': '交集', 'b': '效仿'}, 10)
@@ -428,11 +452,11 @@ class StatusAndCurrent(CurateTestCase):
     def test_current_lists_only_active_rows(self):
         self.dictionary("INSERT INTO user_favorites (text, wubi_code) VALUES ('涉政', 'ihgh')")
         self.dictionary("INSERT INTO user_favorites (text, wubi_code, is_deleted) VALUES ('肓扫', 'yerv', 1)")
-        self.dictionary("INSERT INTO user_suppressed_words (text, suppressed_timestamp) VALUES ('效仿', 1)")
+        self.dictionary("INSERT INTO user_english_first_words (text, added_timestamp) VALUES ('agent', 1)")
         self.dictionary("INSERT INTO user_relative_order (word_a, word_b) VALUES ('次', '交集')")
         _, out = self.run_cli('current')
         self.assertEqual([w['text'] for w in out['user_words']], ['涉政'])
-        self.assertEqual(out['suppressed'], ['效仿'])
+        self.assertEqual(out['english_first'], ['agent'])
         self.assertEqual(out['rules'], [{'a': '次', 'b': '交集'}])
 
 

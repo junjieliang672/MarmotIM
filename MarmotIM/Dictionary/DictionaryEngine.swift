@@ -73,11 +73,12 @@ class DictionaryEngine {
     /// 英文单词索引
     private var englishWordIndex = EnglishWordIndex()
 
-    /// Suppressed words cache (for efficient O(1) lookup during ranking)
-    private var suppressedWordsCache: Set<String> = []
+    /// English-first words (英文置顶词): lowercased English words that take the
+    /// first slot on an exact match instead of the last slot of the page
+    private var englishFirstWordsCache: Set<String> = []
 
-    /// Lock for suppressed words cache access
-    private let suppressedWordsLock = NSLock()
+    /// Lock for English-first words cache access
+    private let englishFirstWordsLock = NSLock()
 
     /// Relative-ordering rules cache (spec-003) — lightweight (wordA, wordB)
     /// pairs used by CandidateRanker.applyRelativeOrdering on the ranker hot
@@ -263,63 +264,39 @@ class DictionaryEngine {
         englishWordIndex.setTestWords(ranked)
     }
 
-    // MARK: - Suppressed Words Cache
-
-    /// Load suppressed words into cache from database
-    /// Called during preloading and when sync updates suppressed words
-    func loadSuppressedWordsCache() {
-        suppressedWordsLock.lock()
-        defer { suppressedWordsLock.unlock() }
-        suppressedWordsCache = Set(db.getSuppressedWords())
-        NSLog("MarmotIM: Loaded \(suppressedWordsCache.count) suppressed words into cache")
+    /// Whether the English word list has this word (case-insensitive)
+    func hasEnglishWord(_ word: String) -> Bool {
+        return englishWordIndex.contains(word)
     }
 
-    /// Get the current set of suppressed words (for ranking)
-    func getSuppressedWords() -> Set<String> {
-        suppressedWordsLock.lock()
-        defer { suppressedWordsLock.unlock() }
-        return suppressedWordsCache
+    // MARK: - English-First Words Cache
+
+    /// Load English-first words into cache from database
+    /// Called during preloading and when sync updates English-first words
+    func loadEnglishFirstWordsCache() {
+        englishFirstWordsLock.lock()
+        defer { englishFirstWordsLock.unlock() }
+        englishFirstWordsCache = Set(db.getEnglishFirstWords())
+        NSLog("MarmotIM: Loaded \(englishFirstWordsCache.count) English-first words into cache")
     }
 
-    /// Update suppressed words cache (called when user adds/removes words)
-    func updateSuppressedWordsCache() {
-        loadSuppressedWordsCache()
+    /// Get the current set of English-first words (lowercased)
+    func getEnglishFirstWords() -> Set<String> {
+        englishFirstWordsLock.lock()
+        defer { englishFirstWordsLock.unlock() }
+        return englishFirstWordsCache
     }
 
-    /// Check if a word is suppressed
-    func isWordSuppressed(_ text: String) -> Bool {
-        suppressedWordsLock.lock()
-        defer { suppressedWordsLock.unlock() }
-        return suppressedWordsCache.contains(text)
-    }
-
-    /// Add a word to suppressed list and update cache
-    func suppressWord(text: String) -> Bool {
-        if db.suppressWord(text: text) {
-            suppressedWordsLock.lock()
-            suppressedWordsCache.insert(text)
-            suppressedWordsLock.unlock()
-            return true
-        }
-        return false
-    }
-
-    /// Remove a word from suppressed list and update cache
-    func unsuppressWord(text: String) -> Bool {
-        if db.unsuppressWord(text: text) {
-            suppressedWordsLock.lock()
-            suppressedWordsCache.remove(text)
-            suppressedWordsLock.unlock()
-            return true
-        }
-        return false
+    /// Update English-first words cache (called when user adds/removes words)
+    func updateEnglishFirstWordsCache() {
+        loadEnglishFirstWordsCache()
     }
 
     // MARK: - Relative Ordering Cache (spec-003)
 
     /// Rebuild the relative-ordering cache from VocabularyDatabase. Called at
     /// preload time and on every .relativeOrderingDidChange notification.
-    /// Mirrors the suppressed-words cache pattern above.
+    /// Mirrors the English-first-words cache pattern above.
     func loadRelativeOrderingCache() {
         let pairs = db.loadRelativeOrderingCache()
         relativeOrderingLock.lock()
@@ -699,6 +676,31 @@ class DictionaryEngine {
         }
 
         return nil
+    }
+
+    /// Entries whose wubi or pinyin code is exactly `code`, all as full
+    /// matches. Used for the head of a longer buffer in continuous input
+    /// (CandidateRanker.headCandidates): in `zhegeyijg`, `zhege` -> 这个.
+    func searchHead(code rawCode: String) -> [DictionaryMatch] {
+        let code = rawCode.lowercased()
+        guard !code.isEmpty, isPreloaded else { return [] }
+
+        var infos: [(entryId: UInt32, codeType: InputCodeType)] = []
+        var seen = Set<UInt32>()
+        let results = userTierIndex.exactMatch(code: code).map { ($0.entryIds, $0.codeType) }
+            + hotTierIndex.exactMatch(code: code).map { ($0.entryIds, $0.codeType) }
+        for (ids, codeType) in results {
+            for id in ids where seen.insert(id).inserted {
+                infos.append((id, codeType))
+            }
+        }
+
+        let entries = getEntries(ids: infos.map { $0.entryId })
+        return infos.compactMap { info in
+            entries[info.entryId].map {
+                DictionaryMatch(entry: $0, matchedCode: code, matchType: .full, codeType: info.codeType)
+            }
+        }
     }
 
     /// Get multiple entries by IDs (batch fetch for efficiency)

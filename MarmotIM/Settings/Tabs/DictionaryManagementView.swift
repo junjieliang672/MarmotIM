@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// Parent view for 词库管理 (Dictionary Management). Wraps the three
-/// existing dictionary-related tabs — 用户词库 / 降权词库 / 相对排序 —
+/// existing dictionary-related tabs — 用户词库 / 英文置顶词 / 相对排序 —
 /// behind a segmented `Picker` so the outer Settings window shrinks
 /// to five top-level tabs (spec-003, T5).
 ///
@@ -14,7 +14,7 @@ struct DictionaryManagementView: View {
 
     enum InnerTab: String, CaseIterable, Identifiable {
         case userDict      = "用户词库"
-        case suppressed    = "降权词库"
+        case englishFirst  = "英文置顶词"
         case relativeOrder = "相对排序"
         case curation      = "整理"
 
@@ -42,8 +42,8 @@ struct DictionaryManagementView: View {
                 switch innerTab {
                 case .userDict:
                     UserDictView(viewModel: viewModel)
-                case .suppressed:
-                    SuppressedWordsView(viewModel: viewModel)
+                case .englishFirst:
+                    EnglishFirstWordsView(viewModel: viewModel)
                 case .relativeOrder:
                     RelativeOrderingView(viewModel: viewModel)
                 case .curation:

@@ -26,7 +26,7 @@ from build_dictionary import (
     build_reverse_lookup_tables,
     backup_user_data,
     restore_user_data,
-    USER_SUPPRESSED_WORDS_DDL,
+    USER_ENGLISH_FIRST_WORDS_DDL,
     USER_RELATIVE_ORDER_DDL,
     SYNC_COUNTER_STATE_DDL,
     SOURCE_WUBI,
@@ -438,7 +438,7 @@ class TestUserDataBackupRestore(unittest.TestCase):
         conn.execute("CREATE TABLE filter_user_freq (filter_type TEXT, code TEXT, word TEXT, "
                      "frequency INTEGER, last_used REAL, PRIMARY KEY (filter_type, code, word))")
         if with_user_tables:
-            conn.execute(USER_SUPPRESSED_WORDS_DDL)
+            conn.execute(USER_ENGLISH_FIRST_WORDS_DDL)
             conn.execute(USER_RELATIVE_ORDER_DDL)
             conn.execute(SYNC_COUNTER_STATE_DDL)
         conn.commit()
@@ -455,7 +455,7 @@ class TestUserDataBackupRestore(unittest.TestCase):
                         "VALUES ('肓扫', 'yerv', NULL, 1776474967, 1)")
             old.execute("INSERT INTO user_favorites (text, wubi_code, pinyin_code, added_timestamp, is_deleted) "
                         "VALUES ('涉政', 'ihgh', 'shezheng', 1768337938, 0)")
-            old.execute("INSERT INTO user_suppressed_words (text, suppressed_timestamp, is_deleted) "
+            old.execute("INSERT INTO user_english_first_words (text, added_timestamp, is_deleted) "
                         "VALUES ('交集', 1790000000, 0), ('将领', 1790000100, 1)")
             old.execute("INSERT INTO user_relative_order (word_a, word_b, created_at, updated_at, is_deleted) "
                         "VALUES ('次', '交集', 1790000000, 1790000200, 1)")
@@ -464,7 +464,7 @@ class TestUserDataBackupRestore(unittest.TestCase):
             old.commit()
             old.close()
 
-            # Fresh build: schema 5, no suppressed-words / relative-order tables
+            # Fresh build: schema 5, no English-first-words / relative-order tables
             self._make_db(new_path, with_user_tables=False).close()
 
             restore_user_data(new_path, backup_user_data(old_path))
@@ -476,7 +476,7 @@ class TestUserDataBackupRestore(unittest.TestCase):
             self.assertEqual(
                 new.execute("SELECT is_deleted FROM user_favorites WHERE text='涉政'").fetchone(), (0,))
             self.assertEqual(
-                sorted(new.execute("SELECT text, is_deleted FROM user_suppressed_words").fetchall()),
+                sorted(new.execute("SELECT text, is_deleted FROM user_english_first_words").fetchall()),
                 [('交集', 0), ('将领', 1)])
             self.assertEqual(
                 new.execute("SELECT word_a, word_b, updated_at, is_deleted FROM user_relative_order").fetchall(),

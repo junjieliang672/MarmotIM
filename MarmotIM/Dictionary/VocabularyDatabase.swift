@@ -18,7 +18,7 @@ final class VocabularyDatabase {
     /// Database schema version for migrations
     /// Version 4: Add is_deleted column to user_favorites
     /// Version 5: Add reverse lookup tables (char_to_wubi, char_to_pinyin, polyphone_words)
-    /// Version 6: Add user_suppressed_words table for suppressed word ranking
+    /// Version 6: Add user_suppressed_words table (retired in version 10)
     /// Version 7: Drop FOREIGN KEY(entry_id) from user_learning.
     ///            Bundled dictionary.db historically shipped with a
     ///            "FOREIGN KEY (entry_id) REFERENCES entries(id) ON DELETE CASCADE"
@@ -36,7 +36,10 @@ final class VocabularyDatabase {
     ///            UNIQUE(text, wubi_code, pinyin_code) let one word hold several
     ///            rows (SQLite treats NULLs as distinct), so a synced tombstone
     ///            landed in a new row while the old active row kept the word alive.
-    private static let schemaVersion = 9
+    /// Version 10: Replace user_suppressed_words with user_english_first_words:
+    ///            English words that take the first slot on an exact match
+    ///            instead of the last slot of the page.
+    private static let schemaVersion = 10
 
     // MARK: - Initialization
 
@@ -386,6 +389,18 @@ final class VocabularyDatabase {
         """)
         executeSQL("CREATE INDEX IF NOT EXISTS idx_relorder_a ON user_relative_order(word_a, is_deleted)")
         executeSQL("CREATE INDEX IF NOT EXISTS idx_relorder_b ON user_relative_order(word_b, is_deleted)")
+
+        // English-first words (schema v10): lowercased English words that
+        // rank first on an exact match. Tombstones via is_deleted for iCloud
+        // sync parity.
+        executeSQL("""
+            CREATE TABLE IF NOT EXISTS user_english_first_words (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                text TEXT NOT NULL UNIQUE,
+                added_timestamp INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
+                is_deleted INTEGER NOT NULL DEFAULT 0
+            )
+        """)
 
         // Per-device counts as of the last iCloud sync, for the v2 counter
         // payloads (user_learning, filter_user_freq). See CounterRecord.
@@ -1305,20 +1320,21 @@ final class VocabularyDatabase {
         return results
     }
 
-    // MARK: - User Suppressed Words (降权词库)
+    // MARK: - English-First Words (英文置顶词)
 
-    /// Add a word to the suppressed words list
-    /// - Parameter text: The word to suppress
+    /// Add a word to the English-first words list
+    /// - Parameter text: The word to add
     /// - Returns: True if successful
-    func suppressWord(text: String) -> Bool {
+    func addEnglishFirstWord(text: String) -> Bool {
+        let text = text.lowercased()
         lock.lock()
         defer { lock.unlock() }
 
         let sql = """
-            INSERT INTO user_suppressed_words (text, suppressed_timestamp, is_deleted)
+            INSERT INTO user_english_first_words (text, added_timestamp, is_deleted)
             VALUES (?, strftime('%s', 'now'), 0)
             ON CONFLICT(text) DO UPDATE SET
-                suppressed_timestamp = strftime('%s', 'now'),
+                added_timestamp = strftime('%s', 'now'),
                 is_deleted = 0
         """
 
@@ -1332,21 +1348,22 @@ final class VocabularyDatabase {
 
         let result = sqlite3_step(statement) == SQLITE_DONE
         if result {
-            NSLog("MarmotIM: suppressWord - added '%@' to suppressed words", text)
+            NSLog("MarmotIM: addEnglishFirstWord - added '%@' to English-first words", text)
         }
         return notifyIfSucceeded(result)
     }
 
-    /// Remove a word from the suppressed words list (soft delete)
-    /// - Parameter text: The word to unsuppress
+    /// Remove a word from the English-first words list (soft delete)
+    /// - Parameter text: The word to remove
     /// - Returns: True if successful
-    func unsuppressWord(text: String) -> Bool {
+    func removeEnglishFirstWord(text: String) -> Bool {
+        let text = text.lowercased()
         lock.lock()
         defer { lock.unlock() }
 
         let sql = """
-            UPDATE user_suppressed_words
-            SET is_deleted = 1, suppressed_timestamp = strftime('%s', 'now')
+            UPDATE user_english_first_words
+            SET is_deleted = 1, added_timestamp = strftime('%s', 'now')
             WHERE text = ?
         """
 
@@ -1360,19 +1377,19 @@ final class VocabularyDatabase {
 
         let result = sqlite3_step(statement) == SQLITE_DONE
         if result {
-            NSLog("MarmotIM: unsuppressWord - removed '%@' from suppressed words", text)
+            NSLog("MarmotIM: removeEnglishFirstWord - removed '%@' from English-first words", text)
         }
         return notifyIfSucceeded(result)
     }
 
-    /// Get all active suppressed words (not deleted)
-    /// - Returns: Array of suppressed word texts
-    func getSuppressedWords() -> [String] {
+    /// Get all active English-first words (not deleted)
+    /// - Returns: Array of English-first word texts
+    func getEnglishFirstWords() -> [String] {
         lock.lock()
         defer { lock.unlock() }
 
         var results: [String] = []
-        let sql = "SELECT text FROM user_suppressed_words WHERE is_deleted = 0"
+        let sql = "SELECT text FROM user_english_first_words WHERE is_deleted = 0"
         var statement: OpaquePointer?
 
         guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
@@ -1389,14 +1406,15 @@ final class VocabularyDatabase {
         return results
     }
 
-    /// Check if a word is suppressed
+    /// Check if a word is in the list
     /// - Parameter text: The word to check
-    /// - Returns: True if the word is in the suppressed list
-    func isWordSuppressed(text: String) -> Bool {
+    /// - Returns: True if the word is in the English-first list
+    func isEnglishFirstWord(text: String) -> Bool {
+        let text = text.lowercased()
         lock.lock()
         defer { lock.unlock() }
 
-        let sql = "SELECT 1 FROM user_suppressed_words WHERE text = ? AND is_deleted = 0 LIMIT 1"
+        let sql = "SELECT 1 FROM user_english_first_words WHERE text = ? AND is_deleted = 0 LIMIT 1"
         var statement: OpaquePointer?
 
         guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
@@ -1409,14 +1427,14 @@ final class VocabularyDatabase {
         return sqlite3_step(statement) == SQLITE_ROW
     }
 
-    /// Get all suppressed words with details (for UI display)
+    /// Get all English-first words with details (for UI display)
     /// - Returns: Array of tuples containing id, text, and timestamp
-    func getSuppressedWordsWithDetails() -> [(id: Int, text: String, timestamp: Int)] {
+    func getEnglishFirstWordsWithDetails() -> [(id: Int, text: String, timestamp: Int)] {
         lock.lock()
         defer { lock.unlock() }
 
         var results: [(Int, String, Int)] = []
-        let sql = "SELECT id, text, suppressed_timestamp FROM user_suppressed_words WHERE is_deleted = 0 ORDER BY suppressed_timestamp DESC"
+        let sql = "SELECT id, text, added_timestamp FROM user_english_first_words WHERE is_deleted = 0 ORDER BY added_timestamp DESC"
         var statement: OpaquePointer?
 
         guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
@@ -1435,72 +1453,15 @@ final class VocabularyDatabase {
         return results
     }
 
-    /// Remove a suppressed word by ID (soft delete)
-    /// - Parameter id: The ID of the suppressed word to remove
+    /// Remove an English-first word by ID (soft delete)
+    /// - Parameter id: The ID of the English-first word to remove
     /// - Returns: True if successful
-    func unsuppressWordById(_ id: Int) -> Bool {
+    func removeEnglishFirstWordById(_ id: Int) -> Bool {
         lock.lock()
         defer { lock.unlock() }
 
-        let sql = "UPDATE user_suppressed_words SET is_deleted = 1, suppressed_timestamp = strftime('%s', 'now') WHERE id = \(id)"
+        let sql = "UPDATE user_english_first_words SET is_deleted = 1, added_timestamp = strftime('%s', 'now') WHERE id = \(id)"
         return notifyIfSucceeded(executeSQL(sql))
-    }
-
-    /// Get all suppressed words including deleted ones (for sync)
-    /// - Returns: Array of tuples containing text, timestamp, and isDeleted flag
-    func getAllSuppressedWordsForSync() -> [(text: String, timestamp: Int, isDeleted: Bool)] {
-        lock.lock()
-        defer { lock.unlock() }
-
-        var results: [(String, Int, Bool)] = []
-        let sql = "SELECT text, suppressed_timestamp, is_deleted FROM user_suppressed_words"
-        var statement: OpaquePointer?
-
-        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
-            return []
-        }
-        defer { sqlite3_finalize(statement) }
-
-        while sqlite3_step(statement) == SQLITE_ROW {
-            let textPtr = sqlite3_column_text(statement, 0)
-            let text = textPtr != nil ? String(cString: textPtr!) : ""
-            let timestamp = Int(sqlite3_column_int(statement, 1))
-            let isDeleted = sqlite3_column_int(statement, 2) != 0
-            results.append((text, timestamp, isDeleted))
-        }
-
-        return results
-    }
-
-    /// Upsert suppressed word (for sync)
-    /// - Parameters:
-    ///   - text: The word
-    ///   - timestamp: The suppressed timestamp
-    ///   - isDeleted: Whether the word is deleted
-    /// - Returns: True if successful
-    func upsertSuppressedWord(text: String, timestamp: Int, isDeleted: Bool) -> Bool {
-        lock.lock()
-        defer { lock.unlock() }
-
-        let sql = """
-            INSERT INTO user_suppressed_words (text, suppressed_timestamp, is_deleted)
-            VALUES (?, ?, ?)
-            ON CONFLICT(text) DO UPDATE SET
-                suppressed_timestamp = excluded.suppressed_timestamp,
-                is_deleted = excluded.is_deleted
-        """
-
-        var statement: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
-            return false
-        }
-        defer { sqlite3_finalize(statement) }
-
-        sqlite3_bind_text(statement, 1, text, -1, SQLITE_TRANSIENT)
-        sqlite3_bind_int(statement, 2, Int32(timestamp))
-        sqlite3_bind_int(statement, 3, isDeleted ? 1 : 0)
-
-        return sqlite3_step(statement) == SQLITE_DONE
     }
 
     // MARK: - Relative Ordering Rules (spec-003)
@@ -1818,19 +1779,7 @@ final class VocabularyDatabase {
             """)
         }
 
-        // Version 6: Add user_suppressed_words table for suppressed word ranking
-        if currentVersion < 6 {
-            NSLog("MarmotIM: Migrating to version 6 (add user_suppressed_words table)...")
-            executeSQL("""
-                CREATE TABLE IF NOT EXISTS user_suppressed_words (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    text TEXT NOT NULL UNIQUE,
-                    suppressed_timestamp INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
-                    is_deleted INTEGER NOT NULL DEFAULT 0
-                )
-            """)
-            executeSQL("CREATE INDEX IF NOT EXISTS idx_suppressed_text ON user_suppressed_words(text)")
-        }
+        // Version 6 added user_suppressed_words; version 10 drops it.
 
         // Version 7: Drop FOREIGN KEY from user_learning.
         // Historical bundled databases shipped user_learning with
@@ -1940,6 +1889,14 @@ final class VocabularyDatabase {
             executeSQL("ALTER TABLE user_favorites_new RENAME TO user_favorites")
             executeSQL("CREATE INDEX IF NOT EXISTS idx_user_favorites_text ON user_favorites(text)")
             executeSQL("COMMIT")
+        }
+
+        // Version 10: user_suppressed_words is retired. Its replacement,
+        // user_english_first_words, is created by createTables(). The two
+        // lists mean different things, so no rows are carried over.
+        if currentVersion < 10 {
+            NSLog("MarmotIM: [I][dict] migrating to version 10 drop=user_suppressed_words")
+            executeSQL("DROP TABLE IF EXISTS user_suppressed_words")
         }
 
         setSchemaVersion(targetVersion)

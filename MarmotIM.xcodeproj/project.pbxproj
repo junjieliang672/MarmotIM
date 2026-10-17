@@ -22,7 +22,7 @@
 		BASICSETTINGS_SWIFT /* BasicSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BASICSETTINGS_SWIFT_REF /* BasicSettingsView.swift */; };
 		CANDIDATEWIN_SWIFT /* CandidateWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = CANDIDATEWIN_SWIFT_REF /* CandidateWindow.swift */; };
 		CD79C8E494C4295842A8153C /* UserTierIndex.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2E829BD9C75CF11CD1945BC6 /* UserTierIndex.swift */; };
-		D1E9902BFDE961700B841B88 /* SuppressedWordsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 30978ACAE0C248DBDF722697 /* SuppressedWordsView.swift */; };
+		D1E9902BFDE961700B841B88 /* EnglishFirstWordsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 30978ACAE0C248DBDF722697 /* EnglishFirstWordsView.swift */; };
 		DICTENGINE_SWIFT /* DictionaryEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = DICTENGINE_SWIFT_REF /* DictionaryEngine.swift */; };
 		DICTENTRY_SWIFT /* DictionaryEntry.swift in Sources */ = {isa = PBXBuildFile; fileRef = DICTENTRY_SWIFT_REF /* DictionaryEntry.swift */; };
 		DICTMGMT_SWIFT /* DictionaryManagementView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DICTMGMT_SWIFT_REF /* DictionaryManagementView.swift */; };
@@ -71,7 +71,7 @@
 /* Begin PBXFileReference section */
 		1610DB0D2564315AA141A20A /* LRUCache.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = LRUCache.swift; sourceTree = "<group>"; };
 		2E829BD9C75CF11CD1945BC6 /* UserTierIndex.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = UserTierIndex.swift; sourceTree = "<group>"; };
-		30978ACAE0C248DBDF722697 /* SuppressedWordsView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SuppressedWordsView.swift; sourceTree = "<group>"; };
+		30978ACAE0C248DBDF722697 /* EnglishFirstWordsView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = EnglishFirstWordsView.swift; sourceTree = "<group>"; };
 		65A3A4EBE7E620D359EA4DA0 /* HotTierIndex.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = HotTierIndex.swift; sourceTree = "<group>"; };
 		82937A1A9F7D91EE509602A3 /* VisualEffectView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = VisualEffectView.swift; sourceTree = "<group>"; };
 		8614B2A644D450D6AF22833E /* MarmotLogoView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MarmotLogoView.swift; sourceTree = "<group>"; };
@@ -252,7 +252,7 @@
 				PUNCTUATION_SWIFT_REF /* PunctuationView.swift */,
 				THEMESETTINGS_SWIFT_REF /* ThemeSettingsView.swift */,
 				ABOUTVIEW_SWIFT_REF /* AboutView.swift */,
-				30978ACAE0C248DBDF722697 /* SuppressedWordsView.swift */,
+				30978ACAE0C248DBDF722697 /* EnglishFirstWordsView.swift */,
 				RELORDERVIEW_SWIFT_REF /* RelativeOrderingView.swift */,
 				ICLOUDSETTINGSVIEW_SWIFT_REF /* ICloudSettingsView.swift */,
 				CURATIONSETTINGSVIEW_SWIFT_REF /* CurationSettingsView.swift */,
@@ -434,7 +434,7 @@
 				B5A0FC3FC4AF28737AB0B27D /* LRUCache.swift in Sources */,
 				F5FE4749BE7140CABCCD842A /* HotTierIndex.swift in Sources */,
 				CD79C8E494C4295842A8153C /* UserTierIndex.swift in Sources */,
-				D1E9902BFDE961700B841B88 /* SuppressedWordsView.swift in Sources */,
+				D1E9902BFDE961700B841B88 /* EnglishFirstWordsView.swift in Sources */,
 				TRANSCRIBETYPES_SWIFT /* TranscribeTypes.swift in Sources */,
 				AUDIORECORDER_SWIFT /* AudioRecorder.swift in Sources */,
 				TRANSCRIBEHOTKEY_SWIFT /* TranscribeHotKey.swift in Sources */,

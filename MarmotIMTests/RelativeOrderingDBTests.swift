@@ -165,12 +165,12 @@ final class RelativeOrderingDBTests: XCTestCase {
 
     // I-RO-DB-05: schema migration idempotent — reopening an existing DB does nothing
     func testSchemaMigrationIdempotent() {
-        XCTAssertEqual(db.getSchemaVersion(), 9, "fresh makeForTests DB must be at v9")
+        XCTAssertEqual(db.getSchemaVersion(), 10, "fresh makeForTests DB must be at v10")
 
-        // Re-open a second instance on the same path: version stays 9.
+        // Re-open a second instance on the same path: version stays 10.
         let dbPath = tempDir.appendingPathComponent("test.db")
         let db2 = VocabularyDatabase.makeForTests(path: dbPath)
-        XCTAssertEqual(db2.getSchemaVersion(), 9)
+        XCTAssertEqual(db2.getSchemaVersion(), 10)
     }
 
     // loadRelativeOrderingCache returns lightweight pairs

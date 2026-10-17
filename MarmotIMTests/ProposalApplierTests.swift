@@ -67,8 +67,8 @@ final class ProposalApplierTests: XCTestCase {
                 return nil
             },
             removeWord: { [unowned self] text in self.calls.append("remove \(text)"); return nil },
-            suppress: { [unowned self] text in self.calls.append("suppress \(text)"); return nil },
-            unsuppress: { [unowned self] text in self.calls.append("unsuppress \(text)"); return nil },
+            pinEnglish: { [unowned self] text in self.calls.append("pin \(text)"); return nil },
+            unpinEnglish: { [unowned self] text in self.calls.append("unpin \(text)"); return nil },
             addRule: { [unowned self] a, b in self.calls.append("rule \(a)>\(b)"); return ruleError },
             removeRule: { [unowned self] a, b in self.calls.append("unrule \(a)>\(b)"); return nil }
         )
@@ -78,8 +78,8 @@ final class ProposalApplierTests: XCTestCase {
         createTable()
         add(kind: "add_word", payload: #"{"text":"输入法","wubi":"ltif","pinyin":"shurufa"}"#)
         add(kind: "remove_word", payload: #"{"text":"旧词"}"#)
-        add(kind: "suppress", payload: #"{"text":"效仿"}"#)
-        add(kind: "unsuppress", payload: #"{"text":"将领"}"#)
+        add(kind: "pin_english", payload: #"{"text":"agent"}"#)
+        add(kind: "unpin_english", payload: #"{"text":"host"}"#)
         add(kind: "add_rule", payload: #"{"a":"交集","b":"效仿"}"#)
         add(kind: "remove_rule", payload: #"{"a":"次","b":"交集"}"#)
 
@@ -87,7 +87,7 @@ final class ProposalApplierTests: XCTestCase {
 
         XCTAssertEqual(result.applied, 6)
         XCTAssertEqual(result.failed, 0)
-        XCTAssertEqual(calls, ["add 输入法 ltif shurufa", "remove 旧词", "suppress 效仿", "unsuppress 将领",
+        XCTAssertEqual(calls, ["add 输入法 ltif shurufa", "remove 旧词", "pin agent", "unpin host",
                                "rule 交集>效仿", "unrule 次>交集"])
         XCTAssertTrue(statuses().allSatisfy { $0[0] == "applied" && $0[1] == nil && $0[2] == "1" })
     }
@@ -104,7 +104,7 @@ final class ProposalApplierTests: XCTestCase {
     func testFailureIsRecordedWithItsReasonAndOthersStillApply() {
         createTable()
         add(kind: "add_rule", payload: #"{"a":"丁","b":"丙"}"#)
-        add(kind: "suppress", payload: #"{"text":"效仿"}"#)
+        add(kind: "pin_english", payload: #"{"text":"agent"}"#)
 
         let result = ProposalApplier(path: path, actions: actions(ruleError: "会和现有规则形成环：丙 → 戊 → 丁 → 丙"))
             .applyPending()
@@ -119,18 +119,18 @@ final class ProposalApplierTests: XCTestCase {
 
     func testRejectedAndAlreadyAppliedRowsAreLeftAlone() {
         createTable()
-        add(kind: "suppress", payload: #"{"text":"效仿"}"#, status: "rejected")
-        add(kind: "suppress", payload: #"{"text":"将领"}"#, status: "applied")
+        add(kind: "pin_english", payload: #"{"text":"agent"}"#, status: "rejected")
+        add(kind: "pin_english", payload: #"{"text":"host"}"#, status: "applied")
 
         let applier = ProposalApplier(path: path, actions: actions())
         XCTAssertEqual(applier.applyPending().applied, 0)
         XCTAssertEqual(calls, [])
 
         // Applying twice never repeats a decision
-        add(kind: "suppress", payload: #"{"text":"资信"}"#)
+        add(kind: "pin_english", payload: #"{"text":"session"}"#)
         applier.applyPending()
         applier.applyPending()
-        XCTAssertEqual(calls, ["suppress 资信"])
+        XCTAssertEqual(calls, ["pin session"])
     }
 
     func testUnknownKindAndMissingFieldsFailWithoutCallingAnything() {

@@ -188,9 +188,9 @@ final class DictionaryPreloadService {
         engine.loadUserLearningData(userLearning)
         updateProgress(0.88)
 
-        // Load suppressed words cache
-        NSLog("MarmotIM: Loading suppressed words cache...")
-        engine.loadSuppressedWordsCache()
+        // Load English-first words cache
+        NSLog("MarmotIM: Loading English-first words cache...")
+        engine.loadEnglishFirstWordsCache()
         updateProgress(0.9)
 
         // Load relative-ordering rules cache (spec-003)

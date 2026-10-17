@@ -45,8 +45,8 @@ final class SyncCrossPayloadDualDeviceTests: XCTestCase {
             filterType: "e", code: "all", word: "🤞",
             frequency: 1, lastUsed: 1
         )
-        // user_suppressed_words
-        XCTAssertTrue(harness.device1.suppressWord(text: "blacklistword"))
+        // user_english_first_words
+        XCTAssertTrue(harness.device1.addEnglishFirstWord(text: "blacklistword"))
         // user_relative_order
         _ = harness.device1.addRelativeOrderingRule(wordA: "Top", wordB: "Bottom")
 
@@ -61,7 +61,7 @@ final class SyncCrossPayloadDualDeviceTests: XCTestCase {
             dbPath: harness.device2DBPath,
             filterType: "e", code: "all", word: "🤞"
         )?.frequency, 1)
-        XCTAssertTrue(harness.device2.isWordSuppressed(text: "blacklistword"))
+        XCTAssertTrue(harness.device2.isEnglishFirstWord(text: "blacklistword"))
         let ruleCount = harness.device2.listRelativeOrderingRules().count
         XCTAssertEqual(ruleCount, 1)
     }
@@ -88,7 +88,7 @@ final class SyncCrossPayloadDualDeviceTests: XCTestCase {
             "user_learning_v2.json",
             "user_favorites.json",
             "filter_user_freq_v2.json",
-            "user_suppressed_words.json",
+            "user_english_first_words.json",
             "user_relative_ordering.json"
         ]
 

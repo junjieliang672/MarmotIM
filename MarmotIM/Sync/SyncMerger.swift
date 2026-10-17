@@ -1,13 +1,13 @@
 import Foundation
 
 /// Record-level merging for the last-writer-wins payloads (favorites,
-/// suppressed words, relative ordering). Counter payloads (learning, filter
+/// English-first words, relative ordering). Counter payloads (learning, filter
 /// frequency) merge through CounterSync.
 struct SyncMerger {
 
     // MARK: - Last-Writer-Wins
 
-    /// Last-writer-wins for tombstoned records (favorites, suppressed words,
+    /// Last-writer-wins for tombstoned records (favorites, English-first words,
     /// relative ordering). Newer timestamp wins; on an exact tie the deletion
     /// wins. Both devices evaluate the same rule on the same pair, so they
     /// converge regardless of which side is "local". Timestamps are in
@@ -90,25 +90,25 @@ struct SyncMerger {
         return changed
     }
 
-    // MARK: - User Suppressed Words Merge
+    // MARK: - User English-First Words Merge
 
-    /// Merge user_suppressed_words records
-    /// Conflict resolution: keep record with newer suppressedTimestamp
+    /// Merge user_english_first_words records
+    /// Conflict resolution: keep record with newer addedTimestamp
     /// Tombstones are kept and propagated; ties go to the deletion (`remoteWins`)
     /// - Parameters:
     ///   - local: Local records (key: text)
     ///   - remote: Remote records from iCloud
     /// - Returns: Merged records
-    static func mergeSuppressedWords(
-        local: [String: SuppressedWordRecord],
-        remote: [String: SuppressedWordRecord]
-    ) -> [String: SuppressedWordRecord] {
+    static func mergeEnglishFirstWords(
+        local: [String: EnglishFirstWordRecord],
+        remote: [String: EnglishFirstWordRecord]
+    ) -> [String: EnglishFirstWordRecord] {
         var result = local
 
         for (key, remoteRecord) in remote {
             if let localRecord = result[key] {
-                if remoteWins(remoteTimestamp: remoteRecord.suppressedTimestamp, remoteDeleted: remoteRecord.isDeleted,
-                              localTimestamp: localRecord.suppressedTimestamp, localDeleted: localRecord.isDeleted) {
+                if remoteWins(remoteTimestamp: remoteRecord.addedTimestamp, remoteDeleted: remoteRecord.isDeleted,
+                              localTimestamp: localRecord.addedTimestamp, localDeleted: localRecord.isDeleted) {
                     result[key] = remoteRecord
                 }
             } else {
@@ -120,15 +120,15 @@ struct SyncMerger {
         return result
     }
 
-    static func findChangedSuppressedWords(
-        merged: [String: SuppressedWordRecord],
-        original: [String: SuppressedWordRecord]
-    ) -> [(String, SuppressedWordRecord)] {
-        var changed: [(String, SuppressedWordRecord)] = []
+    static func findChangedEnglishFirstWords(
+        merged: [String: EnglishFirstWordRecord],
+        original: [String: EnglishFirstWordRecord]
+    ) -> [(String, EnglishFirstWordRecord)] {
+        var changed: [(String, EnglishFirstWordRecord)] = []
 
         for (key, record) in merged {
             if let orig = original[key] {
-                if record.suppressedTimestamp != orig.suppressedTimestamp ||
+                if record.addedTimestamp != orig.addedTimestamp ||
                    record.isDeleted != orig.isDeleted {
                     changed.append((key, record))
                 }
@@ -299,7 +299,7 @@ struct SyncMerger {
         return nil
     }
 
-    /// Mirror of findChangedSuppressedWords for relative-ordering rules.
+    /// Mirror of findChangedEnglishFirstWords for relative-ordering rules.
     static func findChangedRelativeOrdering(
         merged: [String: RelativeOrderingRecord],
         original: [String: RelativeOrderingRecord]

@@ -86,9 +86,9 @@ final class TranscribeDegradedModeTests: XCTestCase {
     /// 一个都不变，只有名次变。用来证明比对器不是只盯着计数器。
     ///
     /// 试过但**没能**造成差异、因而没有留用的第三种扰动，记在这里免得下一个人重走：
-    /// 给 `rank` 传屏蔽词集合。屏蔽只清掉 tierOverride / recency / frequency 三项，
-    /// 而本流水记分数的那一段恰好在任何 `recordSelection` 之前（那时这三项本就是 0），
-    /// 记名次的那一段又不记分数 —— 于是屏蔽在这份流水里天然不可见。
+    /// 给 `rank` 传屏蔽词集合（这个参数已随降权词库一起移除）。屏蔽只清掉 tierOverride /
+    /// recency / frequency 三项，而本流水记分数的那一段恰好在任何 `recordSelection` 之前
+    /// （那时这三项本就是 0），记名次的那一段又不记分数 —— 于是屏蔽在这份流水里天然不可见。
     func testTranscriptComparatorCatchesAViolation() throws {
         let control = try runTypingSession()
 

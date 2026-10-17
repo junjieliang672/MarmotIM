@@ -162,11 +162,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             object: nil
         )
 
-        // Suppressed words changed notification (from iCloud sync)
+        // English-first words changed notification (from iCloud sync)
         NotificationCenter.default.addObserver(
             self,
-            selector: #selector(handleSuppressedWordsChanged),
-            name: .suppressedWordsDidChange,
+            selector: #selector(handleEnglishFirstWordsChanged),
+            name: .englishFirstWordsDidChange,
             object: nil
         )
 
@@ -272,9 +272,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    @objc private func handleSuppressedWordsChanged() {
-        NSLog("MarmotIM: Suppressed words changed, refreshing cache")
-        dictionaryEngine?.updateSuppressedWordsCache()
+    @objc private func handleEnglishFirstWordsChanged() {
+        NSLog("MarmotIM: English-first words changed, refreshing cache")
+        dictionaryEngine?.updateEnglishFirstWordsCache()
     }
 
     @objc private func handleRelativeOrderingChanged() {

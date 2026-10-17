@@ -1028,8 +1028,9 @@ final class CandidateRankerTests: XCTestCase {
         return (0..<count).map { candidate(UInt32(100 + $0), "字\($0)", codeType) }
     }
 
-    private func place(_ list: [Candidate], pageSize: Int = 7) -> [String] {
-        return CandidateRanker.placeEnglishAtPageEnds(candidates: list, pageSize: pageSize).map { $0.text }
+    private func place(_ list: [Candidate], pageSize: Int = 7, first: Set<String> = []) -> [String] {
+        return CandidateRanker.placeEnglishAtPageEnds(candidates: list, pageSize: pageSize, first: first)
+            .map { $0.text }
     }
 
     /// Test 10.1: one English candidate per page, in the last slot
@@ -1103,6 +1104,43 @@ final class CandidateRankerTests: XCTestCase {
     func testPageEnds_PageSizeOne_Unchanged() {
         let list = [candidate(1, "the", .english)] + chineseCandidates(3)
         XCTAssertEqual(place(list, pageSize: 1), list.map { $0.text })
+    }
+
+    /// Test 10.8: an English-first word typed in full takes the first slot;
+    /// the page still holds `pageSize` candidates and other English stays last
+    func testPageEnds_EnglishFirstWord_TakesFirstSlot() {
+        let list = chineseCandidates(8, .pinyin)
+            + [candidate(1, "agent", .english), candidate(2, "agents", .english, full: false)]
+
+        XCTAssertEqual(place(list, first: ["agent"]),
+                       ["agent", "字0", "字1", "字2", "字3", "字4", "agents",
+                        "字5", "字6", "字7"])
+    }
+
+    /// Test 10.9: only an exact match counts. Typing `agen` leaves `agent`,
+    /// a completion, in the last slot
+    func testPageEnds_EnglishFirstWord_CompletionStaysLast() {
+        let list = chineseCandidates(3, .pinyin) + [candidate(1, "agent", .english, full: false)]
+        XCTAssertEqual(place(list, first: ["agent"]), ["字0", "字1", "字2", "agent"])
+    }
+
+    /// Test 10.10: English words outside the list keep the last slot
+    func testPageEnds_EnglishFirstWord_OthersUnaffected() {
+        let list = chineseCandidates(3) + [candidate(1, "host", .english)]
+        XCTAssertEqual(place(list, first: ["agent"]), ["字0", "字1", "字2", "host"])
+    }
+
+    /// Test 10.11: first even when wubi candidates rank above it, with no
+    /// other English in the list, and whatever case it is displayed in
+    func testPageEnds_EnglishFirstWord_AboveHigherRankedWubi() {
+        let list = chineseCandidates(2) + [candidate(1, "Host", .english)]
+        XCTAssertEqual(place(list, first: ["host"]), ["Host", "字0", "字1"])
+    }
+
+    /// Test 10.12: a same-text Chinese-side candidate is not moved
+    func testPageEnds_EnglishFirstWord_OnlyEnglishCandidates() {
+        let list = [candidate(1, "字", .wubi), candidate(2, "host", .pinyin)]
+        XCTAssertEqual(place(list, first: ["host"]), ["字", "host"])
     }
 
     // MARK: - Part 11: English Search

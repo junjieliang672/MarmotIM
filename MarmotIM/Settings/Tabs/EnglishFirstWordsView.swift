@@ -1,17 +1,17 @@
 import SwiftUI
 
-/// Suppressed word entry (from user_suppressed_words table)
-struct SuppressedWordEntry: Identifiable {
+/// English-first word entry (from user_english_first_words table)
+struct EnglishFirstWordEntry: Identifiable {
     let id: Int
     let text: String
     let timestamp: Int
 }
 
-/// Suppressed words management view
-/// Shows words that have their user behavior scores suppressed during ranking
-struct SuppressedWordsView: View {
+/// English-first words management view
+/// English words that take the first candidate slot when typed in full
+struct EnglishFirstWordsView: View {
     @ObservedObject var viewModel: SettingsViewModel
-    @State private var suppressedWords: [SuppressedWordEntry] = []
+    @State private var englishFirstWords: [EnglishFirstWordEntry] = []
     @State private var isLoading: Bool = true
     @State private var searchText: String = ""
     @State private var selectedIds: Set<Int> = []
@@ -19,12 +19,12 @@ struct SuppressedWordsView: View {
     @State private var showStatus: Bool = false
     @State private var newWord: String = ""
 
-    private var filteredEntries: [SuppressedWordEntry] {
+    private var filteredEntries: [EnglishFirstWordEntry] {
         if searchText.isEmpty {
-            return suppressedWords
+            return englishFirstWords
         }
         let query = searchText.lowercased()
-        return suppressedWords.filter { entry in
+        return englishFirstWords.filter { entry in
             entry.text.lowercased().contains(query)
         }
     }
@@ -34,7 +34,7 @@ struct SuppressedWordsView: View {
             // Description
             HStack {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("降权词在候选列表中只使用基础词频排序，不受使用频率、最近选择等因素影响。")
+                    Text("名单里的英文词，在你完整打出它时排第一，不再固定在每页最后一位。")
                         .font(.callout)
                         .foregroundColor(.secondary)
                 }
@@ -72,16 +72,16 @@ struct SuppressedWordsView: View {
                         ProgressView()
                         Spacer()
                     }
-                } else if suppressedWords.isEmpty {
+                } else if englishFirstWords.isEmpty {
                     VStack {
                         Spacer()
                         VStack(spacing: 8) {
-                            Image(systemName: "arrow.down.circle")
+                            Image(systemName: "arrow.up.to.line")
                                 .font(.system(size: 36))
                                 .foregroundColor(.secondary)
-                            Text("暂无降权词")
+                            Text("暂无英文置顶词")
                                 .foregroundColor(.secondary)
-                            Text("添加词条后，该词将只使用基础词频排序")
+                            Text("例如加入 agent 后，打 agent 按空格直接上屏 agent")
                                 .font(.caption)
                                 .foregroundColor(.secondary)
                         }
@@ -101,7 +101,7 @@ struct SuppressedWordsView: View {
                     }
                 } else {
                     List(filteredEntries, id: \.id, selection: $selectedIds) { entry in
-                        SuppressedWordRow(entry: entry)
+                        EnglishFirstWordRow(entry: entry)
                             .tag(entry.id)
                     }
                     .listStyle(.inset(alternatesRowBackgrounds: true))
@@ -113,7 +113,7 @@ struct SuppressedWordsView: View {
 
             // Bottom toolbar - Add word input
             HStack(spacing: 8) {
-                TextField("输入要降权的词...", text: $newWord)
+                TextField("输入英文单词...", text: $newWord)
                     .textFieldStyle(.roundedBorder)
                     .frame(maxWidth: 200)
                     .onSubmit {
@@ -146,7 +146,7 @@ struct SuppressedWordsView: View {
                         .padding(.trailing, 8)
                 }
 
-                Text("共 \(suppressedWords.count) 个词条")
+                Text("共 \(englishFirstWords.count) 个词条")
                     .font(.caption)
                     .foregroundColor(.secondary)
             }
@@ -155,43 +155,49 @@ struct SuppressedWordsView: View {
             .background(Color(NSColor.windowBackgroundColor))
         }
         .onAppear {
-            loadSuppressedWords()
+            loadEnglishFirstWords()
         }
     }
 
     // MARK: - Actions
 
-    private func loadSuppressedWords() {
+    private func loadEnglishFirstWords() {
         isLoading = true
         DispatchQueue.global(qos: .userInitiated).async {
-            let words = VocabularyDatabase.shared.getSuppressedWordsWithDetails()
-            let entries = words.map { SuppressedWordEntry(id: $0.id, text: $0.text, timestamp: $0.timestamp) }
+            let words = VocabularyDatabase.shared.getEnglishFirstWordsWithDetails()
+            let entries = words.map { EnglishFirstWordEntry(id: $0.id, text: $0.text, timestamp: $0.timestamp) }
             DispatchQueue.main.async {
-                self.suppressedWords = entries
+                self.englishFirstWords = entries
                 self.isLoading = false
             }
         }
     }
 
     private func addWord() {
-        let word = newWord.trimmingCharacters(in: .whitespaces)
+        let word = newWord.trimmingCharacters(in: .whitespaces).lowercased()
         guard !word.isEmpty else { return }
 
         // Check if already exists
-        if suppressedWords.contains(where: { $0.text == word }) {
+        if englishFirstWords.contains(where: { $0.text == word }) {
             showStatusMessage("该词条已存在")
             return
         }
 
+        // Without an English candidate the entry would never take effect
+        if let engine = AppDelegate.shared?.dictionaryEngine, !engine.hasEnglishWord(word) {
+            showStatusMessage("英文词表里没有这个词")
+            return
+        }
+
         let db = VocabularyDatabase.shared
-        if db.suppressWord(text: word) {
+        if db.addEnglishFirstWord(text: word) {
             showStatusMessage("已添加 \"\(word)\"")
             newWord = ""
-            loadSuppressedWords()
+            loadEnglishFirstWords()
 
             // Update engine cache if available
             if let engine = AppDelegate.shared?.dictionaryEngine {
-                engine.updateSuppressedWordsCache()
+                engine.updateEnglishFirstWordsCache()
             }
         } else {
             showStatusMessage("添加失败")
@@ -205,20 +211,20 @@ struct SuppressedWordsView: View {
         let db = VocabularyDatabase.shared
 
         for id in selectedIds {
-            if db.unsuppressWordById(id) {
+            if db.removeEnglishFirstWordById(id) {
                 deletedCount += 1
             }
         }
 
         selectedIds.removeAll()
-        loadSuppressedWords()
+        loadEnglishFirstWords()
 
         if deletedCount > 0 {
             showStatusMessage("已删除 \(deletedCount) 个词条")
 
             // Update engine cache if available
             if let engine = AppDelegate.shared?.dictionaryEngine {
-                engine.updateSuppressedWordsCache()
+                engine.updateEnglishFirstWordsCache()
             }
         }
     }
@@ -236,10 +242,10 @@ struct SuppressedWordsView: View {
     }
 }
 
-// MARK: - Suppressed Word Row
+// MARK: - English-First Word Row
 
-struct SuppressedWordRow: View {
-    let entry: SuppressedWordEntry
+struct EnglishFirstWordRow: View {
+    let entry: EnglishFirstWordEntry
 
     var body: some View {
         HStack(spacing: 12) {
@@ -266,9 +272,9 @@ struct SuppressedWordRow: View {
 // MARK: - Preview
 
 #if DEBUG
-struct SuppressedWordsView_Previews: PreviewProvider {
+struct EnglishFirstWordsView_Previews: PreviewProvider {
     static var previews: some View {
-        SuppressedWordsView(viewModel: SettingsViewModel())
+        EnglishFirstWordsView(viewModel: SettingsViewModel())
             .frame(width: 500, height: 400)
     }
 }

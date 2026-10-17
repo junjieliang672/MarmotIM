@@ -94,6 +94,21 @@ final class UserTierIndex {
         return results
     }
 
+    /// Entries whose code is exactly `code`, in both tries
+    func exactMatch(code: String) -> [SearchResult] {
+        guard !code.isEmpty else { return [] }
+        var results: [SearchResult] = []
+        let wubiIds = wubiTrie.exactMatch(code: code)
+        if !wubiIds.isEmpty {
+            results.append(SearchResult(code: code, entryIds: wubiIds, codeType: .wubi))
+        }
+        let pinyinIds = pinyinTrie.exactMatch(code: code)
+        if !pinyinIds.isEmpty {
+            results.append(SearchResult(code: code, entryIds: pinyinIds, codeType: .pinyin))
+        }
+        return results
+    }
+
     /// Clear all user entries
     func clear() {
         lock.lock()

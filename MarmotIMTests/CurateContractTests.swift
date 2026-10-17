@@ -64,6 +64,12 @@ final class CurateContractTests: XCTestCase {
                                          candidates: [BehaviorCandidate(t: "去", b: true, j: false),
                                                       BehaviorCandidate(t: "法", b: false, j: false)]))
                 log.record(BehaviorEvent(kind: .boundary, timestamp: t + 2, app: "com.apple.TextEdit", trigger: "punct"))
+                // `agent` typed in full, picked with Tab from the last slot
+                log.record(BehaviorEvent(kind: .select, timestamp: t + 3, app: "com.apple.TextEdit", code: "agent",
+                                         codeType: InputCodeType.english.behaviorLabel, text: "agent", rank: 6,
+                                         trigger: "tab", page: 0,
+                                         candidates: [BehaviorCandidate(t: "阿根图", b: false, j: false),
+                                                      BehaviorCandidate(t: "agent", b: false, j: false)]))
             }
         }
         // After the last run: these kinds end a run of consecutive commits,
@@ -74,9 +80,9 @@ final class CurateContractTests: XCTestCase {
         log.waitUntilIdle()
 
         let status = try runTool(["status"])
-        XCTAssertEqual(status["events"] as? Int, 30)
+        XCTAssertEqual(status["events"] as? Int, 39)
         XCTAssertEqual(status["by_kind"] as? [String: Int],
-                       ["select": 18, "break": 9, "raw": 1, "abandon": 1, "delete": 1])
+                       ["select": 27, "break": 9, "raw": 1, "abandon": 1, "delete": 1])
 
         let userDict = try runTool(["candidates", "user-dict"])
         let phrases = try XCTUnwrap(userDict["phrases"] as? [[String: Any]])
@@ -84,10 +90,11 @@ final class CurateContractTests: XCTestCase {
         XCTAssertEqual(phrase["count"] as? Int, 9)
         XCTAssertEqual(phrase["typed_as"] as? [String], ["输入", "法"])
 
-        // 去 was ranked first by learning and skipped every time
-        let suppress = try runTool(["candidates", "suppress"])
-        let skipped = try XCTUnwrap((suppress["suppress"] as? [[String: Any]])?.first { $0["text"] as? String == "去" })
-        XCTAssertEqual(skipped["skipped_when_first_by_learning"] as? Int, 9)
+        // agent was picked from the page end every time, behind 阿根图
+        let english = try runTool(["candidates", "english"])
+        let pinned = try XCTUnwrap((english["english"] as? [[String: Any]])?.first { $0["text"] as? String == "agent" })
+        XCTAssertEqual(pinned["count"] as? Int, 9)
+        XCTAssertEqual(pinned["shown_first_instead"] as? [String: Int], ["阿根图": 9])
 
         let order = try runTool(["candidates", "order"])
         let pair = try XCTUnwrap((order["order"] as? [[String: Any]])?.first)
@@ -103,10 +110,10 @@ final class CurateContractTests: XCTestCase {
             ["kind": "add_word", "decision": "accept", "text": "输入法", "wubi": "ltif", "pinyin": "shurufa",
              "stats": ["count": 9]],
             ["kind": "add_word", "decision": "accept", "text": "GitHub", "english": true],
-            ["kind": "suppress", "decision": "accept", "text": "去"],
+            ["kind": "pin_english", "decision": "accept", "text": "agent"],
             ["kind": "add_rule", "decision": "accept", "a": "法", "b": "去"],
             ["kind": "add_rule", "decision": "accept", "a": "丁", "b": "丙"],
-            ["kind": "unsuppress", "decision": "reject", "text": "将领"],
+            ["kind": "unpin_english", "decision": "reject", "text": "host"],
         ]
         let file = dir.appendingPathComponent("decisions.json")
         try JSONSerialization.data(withJSONObject: decisions).write(to: file)
@@ -118,8 +125,8 @@ final class CurateContractTests: XCTestCase {
         let actions = ProposalActions(
             addWord: { text, wubi, pinyin in calls.append("add \(text) \(wubi ?? "-") \(pinyin ?? "-")"); return nil },
             removeWord: { text in calls.append("remove \(text)"); return nil },
-            suppress: { text in calls.append("suppress \(text)"); return nil },
-            unsuppress: { text in calls.append("unsuppress \(text)"); return nil },
+            pinEnglish: { text in calls.append("pin \(text)"); return nil },
+            unpinEnglish: { text in calls.append("unpin \(text)"); return nil },
             addRule: { a, b in
                 calls.append("rule \(a)>\(b)")
                 return a == "丁" ? "会和现有规则形成环" : nil
@@ -130,7 +137,7 @@ final class CurateContractTests: XCTestCase {
 
         XCTAssertEqual(result.applied, 4)
         XCTAssertEqual(result.failed, 1)
-        XCTAssertEqual(calls, ["add 输入法 ltif shurufa", "add GitHub - github", "suppress 去", "rule 法>去", "rule 丁>丙"],
+        XCTAssertEqual(calls, ["add 输入法 ltif shurufa", "add GitHub - github", "pin agent", "rule 法>去", "rule 丁>丙"],
                        "the rejected decision is never applied")
 
         let history = try runTool(["history"])

@@ -33,7 +33,7 @@ final class SyncDeviceStatusTests: XCTestCase {
                                                pinyinCode: "shezheng", addedTimestamp: 100)
         SyncPayloadFixtures.insertUserFavorite(dbPath: harness.device2DBPath, text: "肓扫", wubiCode: "yerv",
                                                pinyinCode: nil, addedTimestamp: 200, isDeleted: true)
-        SyncPayloadFixtures.insertSuppressedWord(dbPath: harness.device2DBPath, text: "交集", suppressedTimestamp: 300)
+        SyncPayloadFixtures.insertEnglishFirstWord(dbPath: harness.device2DBPath, text: "交集", addedTimestamp: 300)
         SyncPayloadFixtures.insertUserLearning(dbPath: harness.device1DBPath, entryId: 0xABCD, accessCount: 4,
                                                lastAccessTimestamp: 1_700_000_000, totalScore: 0)
     }
@@ -51,7 +51,7 @@ final class SyncDeviceStatusTests: XCTestCase {
         XCTAssertTrue(all.allSatisfy { $0.lastSyncOK })
         // Tombstones are not counted as words
         XCTAssertEqual(all[0].summary(.favorites)?.count, 1)
-        XCTAssertEqual(all[0].summary(.suppressed)?.count, 1)
+        XCTAssertEqual(all[0].summary(.englishFirst)?.count, 1)
         XCTAssertEqual(all[0].summary(.learning)?.count, 1)
     }
 

@@ -79,11 +79,11 @@ final class SyncFailureInjectionTests: XCTestCase {
         XCTAssertThrowsError(try harness.runSyncCycle(device: 2))
     }
 
-    func testFSync01_corruptJSON_suppressedWords_throws() throws {
-        XCTAssertTrue(harness.device1.suppressWord(text: "corrupt1"))
+    func testFSync01_corruptJSON_englishFirstWords_throws() throws {
+        XCTAssertTrue(harness.device1.addEnglishFirstWord(text: "corrupt1"))
         try harness.runSyncCycle(device: 1)
         try SyncPayloadFixtures.corruptJSONFile(
-            at: harness.iCloudDocuments.appendingPathComponent("user_suppressed_words.json")
+            at: harness.iCloudDocuments.appendingPathComponent("user_english_first_words.json")
         )
         XCTAssertThrowsError(try harness.runSyncCycle(device: 2))
     }

@@ -36,7 +36,7 @@ struct CurationSettingsView: View {
                 ))
                 .toggleStyle(.switch)
 
-                Text("记录每次选词时打的码、候选和选了哪一个，用来整理用户词库、降权词库和相对排序。"
+                Text("记录每次选词时打的码、候选和选了哪一个，用来整理用户词库、英文置顶词和相对排序。"
                      + "记录只保存在这台 Mac 上，不会同步。"
                      + "让 Claude 整理词库时，汇总后的统计结果和少量前后文会发送给 Claude。")
                     .font(.caption)
@@ -71,7 +71,7 @@ struct CurationSettingsView: View {
             }
             Button("取消", role: .cancel) {}
         } message: {
-            Text("只删除打字记录。用户词库、降权词库、相对排序和学习记录都不受影响。")
+            Text("只删除打字记录。用户词库、英文置顶词、相对排序和学习记录都不受影响。")
         }
     }
 

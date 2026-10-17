@@ -8,7 +8,7 @@ done by whoever reads that JSON (the marmot-curate Claude skill); this tool
 only counts, and records what the user decided.
 
     marmot_curate.py status
-    marmot_curate.py candidates user-dict|suppress|order|exit
+    marmot_curate.py candidates user-dict|english|order|exit
     marmot_curate.py current
     marmot_curate.py decide --file decisions.json
     marmot_curate.py history
@@ -38,7 +38,7 @@ REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # Darwin notification the input method listens for (ProposalApplier.swift)
 DECIDED_NOTIFICATION = 'com.marmotim.curate.decided'
 
-KINDS = ('add_word', 'remove_word', 'suppress', 'unsuppress', 'add_rule', 'remove_rule')
+KINDS = ('add_word', 'remove_word', 'pin_english', 'unpin_english', 'add_rule', 'remove_rule')
 
 PROPOSALS_DDL = """
     CREATE TABLE IF NOT EXISTS proposals (
@@ -133,7 +133,7 @@ def texts_in_dictionary(dict_conn: Optional[sqlite3.Connection], texts: Iterable
 
 
 def current_stores(dict_conn: Optional[sqlite3.Connection]) -> dict:
-    stores = {'user_words': [], 'suppressed': [], 'rules': []}
+    stores = {'user_words': [], 'english_first': [], 'rules': []}
     if dict_conn is None:
         return stores
     if table_exists(dict_conn, 'user_favorites'):
@@ -141,9 +141,9 @@ def current_stores(dict_conn: Optional[sqlite3.Connection]) -> dict:
             {'text': r['text'], 'wubi': r['wubi_code'], 'pinyin': r['pinyin_code']}
             for r in dict_conn.execute(
                 "SELECT text, wubi_code, pinyin_code FROM user_favorites WHERE is_deleted = 0 ORDER BY text")]
-    if table_exists(dict_conn, 'user_suppressed_words'):
-        stores['suppressed'] = [r['text'] for r in dict_conn.execute(
-            "SELECT text FROM user_suppressed_words WHERE is_deleted = 0 ORDER BY text")]
+    if table_exists(dict_conn, 'user_english_first_words'):
+        stores['english_first'] = [r['text'] for r in dict_conn.execute(
+            "SELECT text FROM user_english_first_words WHERE is_deleted = 0 ORDER BY text")]
     if table_exists(dict_conn, 'user_relative_order'):
         stores['rules'] = [{'a': r['word_a'], 'b': r['word_b']} for r in dict_conn.execute(
             "SELECT word_a, word_b FROM user_relative_order WHERE is_deleted = 0 ORDER BY word_a, word_b")]
@@ -409,68 +409,64 @@ def user_dict_candidates(events, dict_conn, proposals, args) -> dict:
 
 
 # --------------------------------------------------------------------------
-# Candidates: suppression
+# Candidates: English-first words
 # --------------------------------------------------------------------------
 
-def suppress_candidates(events, dict_conn, proposals, args) -> dict:
-    suppressed = set(current_stores(dict_conn)['suppressed'])
+def is_exact_english_pick(event: dict) -> bool:
+    """The user typed an English word in full and picked its English candidate."""
+    return (event['kind'] == 'select' and event['code_type'] == 'english'
+            and (event['text'] or '').lower() == (event['code'] or '').lower())
+
+
+def english_first_candidates(events, dict_conn, proposals, args) -> dict:
+    """English words the user types in full and then has to reach for: beside
+    Chinese candidates an English one sits in the last slot of the page, so it
+    takes Tab or a number key, and Space commits a Chinese word instead."""
+    listed = set(current_stores(dict_conn)['english_first'])
     rejected = rejected_counts(proposals)
 
-    stats = defaultdict(lambda: {'top': 0, 'boosted_top': 0, 'skipped': 0, 'boosted_skipped': 0,
-                                 'days': set(), 'codes': Counter(), 'instead': Counter(), 'contexts': []})
-    picks = Counter()
-    previous = None
+    stats = defaultdict(lambda: {'count': 0, 'days': set(), 'triggers': Counter(), 'first': Counter()})
+    others_at_code: Dict[str, Counter] = defaultdict(Counter)
     for event in events:
         if event['kind'] != 'select':
-            previous = None if event['kind'] == 'break' else previous
             continue
-        picks[event['text']] += 1
-        shown = event['candidates']
-        if shown:
-            top = shown[0]
-            entry = stats[top['t']]
-            entry['top'] += 1
-            entry['codes'][event['code']] += 1
-            boosted = bool(top.get('b'))
-            if boosted:
-                entry['boosted_top'] += 1
-                entry['days'].add(day_of(event['ts']))
-            if event['text'] != top['t']:
-                entry['skipped'] += 1
-                entry['instead'][event['text']] += 1
-                if boosted:
-                    entry['boosted_skipped'] += 1
-                if len(entry['contexts']) < 3 and previous:
-                    entry['contexts'].append(f"{previous}【选了 {event['text']}，跳过 {top['t']}】")
-        previous = event['text']
+        code = (event['code'] or '').lower()
+        if not is_exact_english_pick(event):
+            others_at_code[code][event['text']] += 1
+            continue
+        # Already first: no Chinese candidate was in the way
+        if not event['rank']:
+            continue
+        entry = stats[code]
+        entry['count'] += 1
+        entry['days'].add(day_of(event['ts']))
+        entry['triggers'][event['trigger']] += 1
+        if event['candidates']:
+            entry['first'][event['candidates'][0]['t']] += 1
 
     result = []
-    for text, entry in stats.items():
-        if text in suppressed:
+    for word, entry in stats.items():
+        if word in listed or looks_secret(word):
             continue
-        if entry['boosted_top'] < args.min_count or len(entry['days']) < args.min_days:
+        if entry['count'] < args.min_count_english or len(entry['days']) < args.min_days:
             continue
-        if still_rejected(rejected, 'suppress', text, entry['boosted_top']):
+        if still_rejected(rejected, 'pin_english', word, entry['count']):
             continue
-        item = {
-            'text': text,
+        others = others_at_code[word]
+        result.append({
+            'text': word,
             # Evidence count used for the "rejected until doubled" rule
-            'count': entry['boosted_top'],
-            'shown_first': entry['top'],
-            'shown_first_by_learning': entry['boosted_top'],
-            'skipped_when_first': entry['skipped'],
-            'skipped_when_first_by_learning': entry['boosted_skipped'],
-            'skip_rate_by_learning': round(entry['boosted_skipped'] / entry['boosted_top'], 2),
-            'times_picked': picks[text],
+            'count': entry['count'],
             'days': len(entry['days']),
-            'codes': dict(entry['codes'].most_common(5)),
-            'picked_instead': dict(entry['instead'].most_common(5)),
-        }
-        if not args.no_context:
-            item['contexts'] = entry['contexts']
-        result.append(item)
-    result.sort(key=lambda c: (-c['skipped_when_first_by_learning'], c['text']))
-    return {'suppress': result[:args.limit]}
+            'picked_with': dict(entry['triggers']),
+            'shown_first_instead': dict(entry['first'].most_common(5)),
+            # The same letters typed to get something else. Once the word is
+            # listed, Space no longer commits these.
+            'other_picks_at_this_code': sum(others.values()),
+            'other_picks': dict(others.most_common(5)),
+        })
+    result.sort(key=lambda c: (-c['count'], c['text']))
+    return {'english': result[:args.limit]}
 
 
 # --------------------------------------------------------------------------
@@ -511,7 +507,9 @@ def order_candidates(events, dict_conn, proposals, args) -> dict:
         shown = event['candidates']
         chosen = event['text']
         position = {c['t']: i for i, c in enumerate(shown)}
-        if chosen in position:
+        # An English candidate's slot is fixed by placeEnglishAtPageEnds, after
+        # ordering rules run; a rule could not move it (see `candidates english`)
+        if chosen in position and event['code_type'] != 'english':
             for other in shown:
                 if other['t'] == chosen:
                     continue
@@ -595,7 +593,7 @@ def exit_candidates(events, dict_conn, proposals, args) -> dict:
     now = time.time()
     result = []
     for item in proposals:
-        if item['status'] != 'applied' or item['kind'] not in ('add_word', 'suppress', 'add_rule'):
+        if item['status'] != 'applied' or item['kind'] not in ('add_word', 'pin_english', 'add_rule'):
             continue
         applied_at = item['applied_at'] or item['decided_at']
         since = [e for e in events if e['ts'] >= applied_at and e['kind'] == 'select']
@@ -617,18 +615,19 @@ def exit_candidates(events, dict_conn, proposals, args) -> dict:
                 'picked_since_this_mac': picked,
                 'shown_but_skipped_this_mac': shown - picked,
             })
-        elif item['kind'] == 'suppress':
-            text = payload['text']
-            if text not in stores['suppressed']:
+        elif item['kind'] == 'pin_english':
+            text = payload['text'].lower()
+            if text not in stores['english_first']:
                 continue
-            picked = [e for e in since if e['text'] == text]
-            codes = {e['code'] for e in picked}
-            at_codes = sum(1 for e in since if e['code'] in codes)
+            at_code = [e for e in since if (e['code'] or '').lower() == text]
+            picked = sum(1 for e in at_code if is_exact_english_pick(e))
+            others = Counter(e['text'] for e in at_code if not is_exact_english_pick(e))
             result.append({
-                'kind': 'unsuppress', 'text': text, 'days_in_effect': days_in_effect,
-                'picked_since': len(picked),
-                'selections_at_its_codes': at_codes,
-                'share_at_its_codes': round(len(picked) / at_codes, 2) if at_codes else None,
+                'kind': 'unpin_english', 'text': text, 'days_in_effect': days_in_effect,
+                'picked_since': picked,
+                'other_picks_since': sum(others.values()),
+                'other_picks': dict(others.most_common(5)),
+                'share_at_its_code': round(picked / len(at_code), 2) if at_code else None,
             })
         else:
             a, b = payload['a'], payload['b']
@@ -680,7 +679,7 @@ def cmd_candidates(args) -> dict:
     dictionary = open_dictionary(args.dictionary_db)
     events = load_events(behavior, time.time() - args.days * 86400)
     proposals = load_proposals(behavior)
-    compute = {'user-dict': user_dict_candidates, 'suppress': suppress_candidates,
+    compute = {'user-dict': user_dict_candidates, 'english': english_first_candidates,
                'order': order_candidates, 'exit': exit_candidates}[args.what]
     result = compute(events, dictionary, proposals, args)
     close(behavior, dictionary)
@@ -713,6 +712,8 @@ def validate_decision(item: dict) -> Optional[str]:
             return 'a rule needs two different words: a and b'
     elif not item.get('text'):
         return 'text is required'
+    if kind == 'pin_english' and not ENGLISH_WORD.match(item['text']):
+        return 'an English-first word must be letters only'
     if kind == 'add_word' and item['decision'] == 'accept':
         wubi, pinyin = item.get('wubi'), item.get('pinyin')
         if item.get('english'):
@@ -802,7 +803,7 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser('status', help='How much has been recorded')
 
     candidates = sub.add_parser('candidates', help='Candidates with their statistics')
-    candidates.add_argument('what', choices=['user-dict', 'suppress', 'order', 'exit'])
+    candidates.add_argument('what', choices=['user-dict', 'english', 'order', 'exit'])
     candidates.add_argument('--days', type=int, default=30, help='Window of events to use (default 30)')
     candidates.add_argument('--limit', type=int, default=50, help='At most this many per list (default 50)')
     candidates.add_argument('--no-context', action='store_true', help='Leave out the surrounding-text samples')

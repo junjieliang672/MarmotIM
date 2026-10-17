@@ -63,21 +63,21 @@ struct FilterFreqRecord: Codable {
     }
 }
 
-/// Record for user_suppressed_words table sync
+/// Record for user_english_first_words table sync
 /// Key format: word text (e.g., "wget", "usr")
-struct SuppressedWordRecord: Codable {
-    var suppressedTimestamp: Int
+struct EnglishFirstWordRecord: Codable {
+    var addedTimestamp: Int
     var isDeleted: Bool
 
-    init(suppressedTimestamp: Int, isDeleted: Bool = false) {
-        self.suppressedTimestamp = suppressedTimestamp
+    init(addedTimestamp: Int, isDeleted: Bool = false) {
+        self.addedTimestamp = addedTimestamp
         self.isDeleted = isDeleted
     }
 
     // Custom decoding to handle legacy JSON that doesn't have isDeleted
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        suppressedTimestamp = try container.decode(Int.self, forKey: .suppressedTimestamp)
+        addedTimestamp = try container.decode(Int.self, forKey: .addedTimestamp)
         // Default to false if missing (backward compatibility)
         isDeleted = try container.decodeIfPresent(Bool.self, forKey: .isDeleted) ?? false
     }
@@ -98,7 +98,7 @@ struct RelativeOrderingRecord: Codable {
     }
 
     // Custom decoding: legacy JSON without isDeleted defaults to false
-    // (mirrors SuppressedWordRecord / FavoriteRecord back-compat pattern).
+    // (mirrors EnglishFirstWordRecord / FavoriteRecord back-compat pattern).
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         createdAt = try container.decode(Int.self, forKey: .createdAt)
@@ -162,5 +162,5 @@ extension FilterFreqRecord {
 extension LearningRecord: Equatable {}
 extension FavoriteRecord: Equatable {}
 extension FilterFreqRecord: Equatable {}
-extension SuppressedWordRecord: Equatable {}
+extension EnglishFirstWordRecord: Equatable {}
 extension RelativeOrderingRecord: Equatable {}

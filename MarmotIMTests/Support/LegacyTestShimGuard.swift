@@ -80,7 +80,7 @@ final class LegacyTestShimGuard: XCTestCase {
         let expected: Set<String> = [
             "entries", "pinyin_index", "wubi_index",
             "user_learning", "user_favorites",
-            "user_suppressed_words", "filter_user_freq",
+            "user_english_first_words", "filter_user_freq",
             "user_relative_order"
         ]
 

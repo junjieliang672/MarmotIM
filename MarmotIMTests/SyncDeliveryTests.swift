@@ -66,7 +66,7 @@ final class SyncDeliveryTests: XCTestCase {
     }
 
     /// A corrupt user_learning_v2.json used to abort syncOnce before favorites,
-    /// filter freq, suppressed words and ordering ran.
+    /// filter freq, English-first words and ordering ran.
     func testCorruptPayloadDoesNotBlockOtherPayloads() throws {
         SyncPayloadFixtures.insertUserLearning(dbPath: harness.device1DBPath, entryId: 0xBEEF,
                                                accessCount: 1, lastAccessTimestamp: 1, totalScore: 1)
@@ -76,17 +76,17 @@ final class SyncDeliveryTests: XCTestCase {
 
         SyncPayloadFixtures.insertUserFavorite(dbPath: harness.device2DBPath, text: "涉政",
                                                wubiCode: "ihgh", pinyinCode: "shezheng", addedTimestamp: 300)
-        SyncPayloadFixtures.insertSuppressedWord(dbPath: harness.device2DBPath, text: "交集",
-                                                 suppressedTimestamp: 300)
+        SyncPayloadFixtures.insertEnglishFirstWord(dbPath: harness.device2DBPath, text: "交集",
+                                                 addedTimestamp: 300)
 
         XCTAssertThrowsError(try harness.runSyncCycle(device: 2), "the failure is still reported")
 
         let favorites = try SyncPayloadFixtures.readRemoteSyncFile(at: favoritesCloudURL, type: FavoriteRecord.self)
         XCTAssertNotNil(favorites.records["涉政"], "favorites synced despite the learning failure")
-        let suppressed = try SyncPayloadFixtures.readRemoteSyncFile(
-            at: harness.iCloudDocuments.appendingPathComponent("user_suppressed_words.json"),
-            type: SuppressedWordRecord.self)
-        XCTAssertNotNil(suppressed.records["交集"])
+        let englishFirst = try SyncPayloadFixtures.readRemoteSyncFile(
+            at: harness.iCloudDocuments.appendingPathComponent("user_english_first_words.json"),
+            type: EnglishFirstWordRecord.self)
+        XCTAssertNotNil(englishFirst.records["交集"])
     }
 
     /// Every rewrite fires NSMetadataQuery on both Macs and starts another

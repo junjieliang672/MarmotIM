@@ -9,8 +9,8 @@ private let SQLITE_TRANSIENT_PROPOSAL = unsafeBitCast(-1, to: sqlite3_destructor
 struct ProposalActions {
     var addWord: (_ text: String, _ wubi: String?, _ pinyin: String?) -> String?
     var removeWord: (_ text: String) -> String?
-    var suppress: (_ text: String) -> String?
-    var unsuppress: (_ text: String) -> String?
+    var pinEnglish: (_ text: String) -> String?
+    var unpinEnglish: (_ text: String) -> String?
     var addRule: (_ a: String, _ b: String) -> String?
     var removeRule: (_ a: String, _ b: String) -> String?
 }
@@ -115,12 +115,12 @@ final class ProposalApplier {
         case "remove_word":
             guard let text = text else { return "缺少词条" }
             return actions.removeWord(text)
-        case "suppress":
+        case "pin_english":
             guard let text = text else { return "缺少词条" }
-            return actions.suppress(text)
-        case "unsuppress":
+            return actions.pinEnglish(text)
+        case "unpin_english":
             guard let text = text else { return "缺少词条" }
-            return actions.unsuppress(text)
+            return actions.unpinEnglish(text)
         case "add_rule":
             guard let a = a, let b = b else { return "规则缺少两个词" }
             return actions.addRule(a, b)
@@ -166,14 +166,15 @@ extension ProposalActions {
                 _ = engine.removeDualEntry(text: text, wubiCode: favorite.wubiCode, pinyinCode: favorite.pinyinCode)
                 return nil
             },
-            suppress: { text in
-                guard db.suppressWord(text: text) else { return "降权失败" }
-                engine.updateSuppressedWordsCache()
+            pinEnglish: { text in
+                guard engine.hasEnglishWord(text) else { return "英文词表里没有这个词" }
+                guard db.addEnglishFirstWord(text: text) else { return "加入英文置顶词失败" }
+                engine.updateEnglishFirstWordsCache()
                 return nil
             },
-            unsuppress: { text in
-                guard db.unsuppressWord(text: text) else { return "解除降权失败" }
-                engine.updateSuppressedWordsCache()
+            unpinEnglish: { text in
+                guard db.removeEnglishFirstWord(text: text) else { return "移出英文置顶词失败" }
+                engine.updateEnglishFirstWordsCache()
                 return nil
             },
             addRule: { a, b in
