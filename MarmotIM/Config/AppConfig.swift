@@ -473,11 +473,6 @@ struct AppConfig: Codable {
     /// without leaving Chinese mode
     var punctuationAfterDigitStaysASCII: Bool = true
 
-    /// Continuous input (连续输入): beyond 4 letters, candidates also cover
-    /// just the start of the buffer, and picking one keeps the rest of the
-    /// letters composing: `zhegeyijg` -> 这个, then `yijg` -> 就是
-    var continuousInput: Bool = true
-
     // MARK: - Theme Settings (主题)
 
     /// Theme mode (system/light/dark)
@@ -529,7 +524,6 @@ struct AppConfig: Codable {
         customPunctuation: [String: String],
         autoPairPunctuation: Bool,
         punctuationAfterDigitStaysASCII: Bool = true,
-        continuousInput: Bool = true,
         themeMode: ThemeMode,
         candidateWindowStyle: CandidateWindowStyle,
         rankingWeights: RankingWeights,
@@ -551,7 +545,6 @@ struct AppConfig: Codable {
         self.customPunctuation = customPunctuation
         self.autoPairPunctuation = autoPairPunctuation
         self.punctuationAfterDigitStaysASCII = punctuationAfterDigitStaysASCII
-        self.continuousInput = continuousInput
         self.themeMode = themeMode
         self.candidateWindowStyle = candidateWindowStyle
         self.rankingWeights = rankingWeights
@@ -621,7 +614,6 @@ struct AppConfig: Codable {
         customPunctuation = (try? container.decode([String: String].self, forKey: .customPunctuation)) ?? d.customPunctuation
         autoPairPunctuation = (try? container.decode(Bool.self, forKey: .autoPairPunctuation)) ?? d.autoPairPunctuation
         punctuationAfterDigitStaysASCII = (try? container.decode(Bool.self, forKey: .punctuationAfterDigitStaysASCII)) ?? d.punctuationAfterDigitStaysASCII
-        continuousInput = (try? container.decode(Bool.self, forKey: .continuousInput)) ?? d.continuousInput
         themeMode = (try? container.decode(ThemeMode.self, forKey: .themeMode)) ?? d.themeMode
         candidateWindowStyle = (try? container.decode(CandidateWindowStyle.self, forKey: .candidateWindowStyle)) ?? d.candidateWindowStyle
         rankingWeights = (try? container.decode(RankingWeights.self, forKey: .rankingWeights)) ?? d.rankingWeights
@@ -754,7 +746,6 @@ extension AppConfig {
         case customPunctuation
         case autoPairPunctuation
         case punctuationAfterDigitStaysASCII
-        case continuousInput
         case themeMode
         case candidateWindowStyle
         case rankingWeights

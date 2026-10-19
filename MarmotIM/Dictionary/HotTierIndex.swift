@@ -116,21 +116,6 @@ struct HotTierIndex {
         return results
     }
 
-    /// Entries whose code is exactly `code`, in both indexes
-    func exactMatch(code: String) -> [SearchResult] {
-        guard isPreloaded, !code.isEmpty else { return [] }
-        var results: [SearchResult] = []
-        let wubiIds = wubiIndex.exactMatch(code: code)
-        if !wubiIds.isEmpty {
-            results.append(SearchResult(code: code, entryIds: wubiIds, codeType: .wubi))
-        }
-        let pinyinIds = pinyinIndex.exactMatch(code: code)
-        if !pinyinIds.isEmpty {
-            results.append(SearchResult(code: code, entryIds: pinyinIds, codeType: .pinyin))
-        }
-        return results
-    }
-
     /// Check if a code exists in either index
     func contains(code: String, codeType: InputCodeType) -> Bool {
         switch codeType {

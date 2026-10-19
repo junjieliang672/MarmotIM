@@ -13,17 +13,6 @@ final class UserTierIndexTests: XCTestCase {
         XCTAssertEqual(results[0].entryIds, [1])
     }
 
-    func testExactMatch() {
-        let index = UserTierIndex()
-        index.insert(code: "zhe", entryId: 1, codeType: .pinyin)
-        index.insert(code: "zhege", entryId: 2, codeType: .pinyin)
-
-        let results = index.exactMatch(code: "zhe")
-        XCTAssertEqual(results.count, 1)
-        XCTAssertEqual(results[0].entryIds, [1])
-        XCTAssertTrue(index.exactMatch(code: "zheg").isEmpty)
-    }
-
     func testRemove() {
         let index = UserTierIndex()
 

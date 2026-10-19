@@ -91,10 +91,6 @@ class InputController: IMKInputController {
     /// Backspaces straight after a commit, for the behaviour log (整理词库)
     private var correctionTracker = CommitCorrectionTracker()
 
-    /// Continuous input: words already picked from the start of the buffer.
-    /// `inputBuffer` holds only the letters after them.
-    private var composition = CompositionSegments()
-
     /// The longest code typed in this composition before the user started
     /// deleting it, with how many candidates it had. If they then delete
     /// everything, this is the code they gave up on; the buffer itself is
@@ -161,19 +157,6 @@ class InputController: IMKInputController {
         ActiveInputControllerRegistry.shared.activated(self)
     }
 
-    /// The client asks for the composition to be finished, e.g. the user
-    /// clicked elsewhere in the text. Words already picked in continuous
-    /// input are committed; leftover letters are dropped, as before.
-    override func commitComposition(_ sender: Any!) {
-        guard filterMode == .none, !composition.isEmpty else {
-            super.commitComposition(sender)
-            return
-        }
-        commitPickedSegments(client: sender)
-        reset()
-        hideCandidateWindow()
-    }
-
     override func deactivateServer(_ sender: Any!) {
         NSLog("MarmotIM: deactivateServer()")
         super.deactivateServer(sender)
@@ -205,14 +188,17 @@ class InputController: IMKInputController {
         let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
         let characters = event.characters ?? ""
 
-        // Cmd+Backspace and Option+Backspace while composing act on the
-        // composition, as they would on a line of text. Passed through, they
-        // reached the app with the marked text still there: some apps deleted
-        // nothing, some part of it, and the input method still thought it was
-        // composing.
-        if keyCode == 51, isComposing,
-           modifiers.contains(.command) || modifiers.contains(.option) {
-            return handleModifiedBackspace(deleteAll: modifiers.contains(.command), client: sender)
+        // Cmd+Backspace while composing deletes the app's text, as it does
+        // without a composition; the composition stays. Passed through with the
+        // marked text still there, some apps deleted nothing, some part of it,
+        // and the input method still thought it was composing.
+        if keyCode == 51, isComposing, modifiers.contains(.command) {
+            return passCommandBackspaceToApp(client: sender)
+        }
+
+        // Option+Backspace while composing deletes the letters typed so far
+        if keyCode == 51, isComposing, modifiers.contains(.option) {
+            return handleOptionBackspace(client: sender)
         }
 
         // Pass through other Command key shortcuts (Cmd+C, Cmd+V, Cmd+A, etc.)
@@ -327,7 +313,7 @@ class InputController: IMKInputController {
                 return true
             }
         case 41: // ; key
-            if isComposing && filterMode == .none && inputBuffer.count == 1 && composition.isEmpty {
+            if isComposing && filterMode == .none && inputBuffer.count == 1 {
                 let prefix = inputBuffer.lowercased()
                 if let mode = FilterMode(rawValue: prefix), mode != .none {
                     NSLog("MarmotIM: Entering filter mode via semicolon: \(mode.displayLabel)")
@@ -345,16 +331,6 @@ class InputController: IMKInputController {
             break
         }
 
-        // Picked words and no letters left (all deleted): a digit or
-        // punctuation key commits them, then goes on as it would with nothing
-        // composing
-        if filterMode == .none, inputBuffer.isEmpty, !composition.isEmpty,
-           let char = characters.first, !(char.isLetter && char.isASCII) {
-            commitPickedSegments(client: sender)
-            reset()
-            hideCandidateWindow()
-        }
-
         // Handle number keys for candidate selection (1-9)
         // Works in both normal mode (inputBuffer not empty) and filter mode
         if let char = characters.first, char.isNumber, (!inputBuffer.isEmpty || filterMode != .none) {
@@ -362,7 +338,6 @@ class InputController: IMKInputController {
             let config = AppDelegate.config
             if config.numberAsInputWhenCapital && inputBuffer.contains(where: { $0.isUppercase }) {
                 inputBuffer.append(char)
-                composition.edited()
                 updateMarkedText(client: sender)
                 searchCandidates()
                 showCandidateWindow(client: sender)
@@ -385,7 +360,6 @@ class InputController: IMKInputController {
             if isComposing {
                 // Append punctuation to input buffer (e.g., "ab" + "_" → "ab_")
                 inputBuffer.append(String(char))
-                composition.edited()
                 updateMarkedText(client: sender)
                 searchCandidates()
                 showCandidateWindow(client: sender)
@@ -487,7 +461,6 @@ class InputController: IMKInputController {
         // This allows users to type "This" and see "This" in the buffer
         inputBuffer.append(char)
         isComposing = true
-        composition.edited()
 
         // Update marked text (shows original case)
         updateMarkedText(client: sender)
@@ -558,10 +531,8 @@ class InputController: IMKInputController {
             return selectCandidate(at: 0, trigger: "space", client: sender)
         }
 
-        // No candidates - clear input without committing (unlike Enter which
-        // respects settings). Words already picked are kept.
+        // No candidates - clear input without committing (unlike Enter which respects settings)
         logAbandon(trigger: "empty", client: sender)
-        commitPickedSegments(client: sender)
         reset()
         hideCandidateWindow()
         if let client = sender as? IMKTextInput {
@@ -588,7 +559,6 @@ class InputController: IMKInputController {
             // Clear the input code without outputting
             NSLog("MarmotIM: handleReturn - clearing code")
             logAbandon(trigger: "enter", client: sender)
-            commitPickedSegments(client: sender)
             reset()
             hideCandidateWindow()
             if let client = sender as? IMKTextInput {
@@ -598,7 +568,7 @@ class InputController: IMKInputController {
             // Commit the raw input buffer (preserving original case)
             NSLog("MarmotIM: handleReturn - outputting code: '%@'", inputBuffer)
             logRawCommit(trigger: "enter", client: sender)
-            commitText(takePickedSegments(client: sender) + inputBuffer, client: sender)
+            commitText(inputBuffer, client: sender)
             reset()
         }
         return true
@@ -651,20 +621,7 @@ class InputController: IMKInputController {
         }
 
         // Normal mode backspace
-        guard !inputBuffer.isEmpty || !composition.isEmpty else { return false }
-
-        // Straight after a pick, or with no letters left: take the last pick
-        // back, so `这个yijg` returns to `zhegeyijg`
-        if composition.justPicked || inputBuffer.isEmpty,
-           let restored = composition.reopenLast(buffer: inputBuffer) {
-            inputBuffer = restored
-            longestDeletedCode = nil
-            updateMarkedText(client: sender)
-            searchCandidates()
-            showCandidateWindow(client: sender)
-            return true
-        }
-        composition.edited()
+        guard !inputBuffer.isEmpty else { return false }
 
         // The buffer only shrinks through here, so its longest state is
         // whatever it was at the first backspace of a run
@@ -675,15 +632,7 @@ class InputController: IMKInputController {
         // Remove last character
         inputBuffer.removeLast()
 
-        if inputBuffer.isEmpty && !composition.isEmpty {
-            // The letters after the picked words are gone; the words stay,
-            // and the next Backspace takes the last one back
-            allCandidates = []
-            currentCandidates = []
-            longestDeletedCode = nil
-            hideCandidateWindow()
-            updateMarkedText(client: sender)
-        } else if inputBuffer.isEmpty {
+        if inputBuffer.isEmpty {
             // Deleted the whole code: given up on, same as Escape
             if let abandoned = longestDeletedCode {
                 logBehavior(BehaviorEvent(kind: .abandon, code: abandoned.code, trigger: "backspace",
@@ -704,17 +653,37 @@ class InputController: IMKInputController {
         return true
     }
 
-    /// Cmd+Backspace (`deleteAll`) and Option+Backspace while composing.
+    /// Cmd+Backspace while composing: the app deletes its text before the
+    /// caret, and the composition is left as it was. `你好|` + `zhege` in
+    /// the input area: Cmd+Backspace -> the line holds nothing but `zhege`.
     ///
-    /// Cmd+Backspace deletes to the start of the line in macOS. The caret is
-    /// always at the end of the composition, so it clears all of it, picked
-    /// words included. Option+Backspace deletes a word: the letters after the
-    /// picked words if there are any, otherwise the last picked word.
-    /// `这个就是wfc`: Option -> `这个就是` -> `这个` -> nothing.
-    private func handleModifiedBackspace(deleteAll: Bool, client sender: Any!) -> Bool {
+    /// The marked text is taken out first, so the app sees a plain caret and
+    /// does what it does without a composition, then put back. The app waits
+    /// for this method's answer and handles the key right after, so the
+    /// marked text sent back a moment later arrives once the deletion is done.
+    private func passCommandBackspaceToApp(client sender: Any!) -> Bool {
+        guard let client = sender as? IMKTextInput else { return false }
+        hideCandidateWindow()
+        client.setMarkedText(
+            "",
+            selectionRange: NSRange(location: 0, length: 0),
+            replacementRange: NSRange(location: NSNotFound, length: 0))
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.03) { [weak self] in
+            // A key typed in between redrew the input area already
+            guard let self, self.isComposing else { return }
+            self.updateMarkedText(client: client)
+            self.showCandidateWindow(client: client)
+        }
+        return false
+    }
+
+    /// Option+Backspace while composing deletes a word. The caret is always
+    /// at the end of the letters, which are one word, so all of them go.
+    private func handleOptionBackspace(client sender: Any!) -> Bool {
         if filterMode != .none {
             // The filter keyword is one word
-            if deleteAll || filterBuffer.isEmpty {
+            if filterBuffer.isEmpty {
                 exitFilterMode(commit: false, client: sender)
             } else {
                 filterBuffer = ""
@@ -726,34 +695,13 @@ class InputController: IMKInputController {
             return true
         }
 
-        if deleteAll {
-            logAbandon(trigger: "cmd-backspace", client: sender)
-            composition.clear()
-        } else if !inputBuffer.isEmpty {
-            logAbandon(trigger: "option-backspace", client: sender)
-            inputBuffer = ""
-        } else {
-            // Not logged: a picked word is only logged once it is committed
-            composition.removeLast()
-        }
-
-        if deleteAll || (inputBuffer.isEmpty && composition.isEmpty) {
-            reset()
-            hideCandidateWindow()
-            (sender as? IMKTextInput)?.setMarkedText(
-                "",
-                selectionRange: NSRange(location: 0, length: 0),
-                replacementRange: NSRange(location: NSNotFound, length: 0))
-        } else {
-            // Picked words remain and no letters: no candidates, and the next
-            // Backspace takes the last word back, as after plain Backspace
-            composition.edited()
-            allCandidates = []
-            currentCandidates = []
-            longestDeletedCode = nil
-            hideCandidateWindow()
-            updateMarkedText(client: sender)
-        }
+        logAbandon(trigger: "option-backspace", client: sender)
+        reset()
+        hideCandidateWindow()
+        (sender as? IMKTextInput)?.setMarkedText(
+            "",
+            selectionRange: NSRange(location: 0, length: 0),
+            replacementRange: NSRange(location: NSNotFound, length: 0))
         return true
     }
 
@@ -1095,9 +1043,9 @@ class InputController: IMKInputController {
     private func endComposition(commitCode: Bool, trigger: String, client sender: Any!) {
         guard isComposing || !inputBuffer.isEmpty || filterMode != .none else { return }
 
-        if commitCode, !inputBuffer.isEmpty || !composition.isEmpty {
+        if commitCode, !inputBuffer.isEmpty {
             logRawCommit(trigger: trigger, client: sender)
-            commitText(takePickedSegments(client: sender) + inputBuffer, client: sender)
+            commitText(inputBuffer, client: sender)
         }
         reset()
         hideCandidateWindow()
@@ -1228,21 +1176,11 @@ class InputController: IMKInputController {
             rules: engine.getRelativeOrderingRules()
         )
 
-        // Continuous input: then words that cover only the start of the
-        // buffer, longest first (`zhegeyijg` -> 这个, 这)
-        var combined = ordered
-        if AppDelegate.config.continuousInput && filterMode == .none {
-            let listed = Set(ordered.map { $0.text })
-            combined += CandidateRanker.headCandidates(buffer: searchCode, engine: engine,
-                                                       englishCompletion: AppDelegate.config.englishCompletion)
-                .filter { !listed.contains($0.text) }
-        }
-
         // Beside wubi or pinyin candidates, English ones take only the
         // last slot of each page, except an exact match on an English-first
         // word, which takes the first.
         allCandidates = CandidateRanker.placeEnglishAtPageEnds(
-            candidates: combined,
+            candidates: ordered,
             pageSize: pageSize,
             first: engine.getEnglishFirstWords()
         )
@@ -1261,43 +1199,19 @@ class InputController: IMKInputController {
         let candidate = currentCandidates[index]
 
         // Behaviour log. Filter modes (emoji, symbols, fuzzy pinyin) are not
-        // dictionary lookups and are left out. The code is the letters this
-        // pick used: the head for a continuous-input pick.
-        var event: BehaviorEvent?
+        // dictionary lookups and are left out.
         if filterMode == .none {
             let shown = allCandidates.prefix((currentPage + 1) * pageSize)
-            let code = candidate.headLength.map { String(inputBuffer.prefix($0)) } ?? inputBuffer
-            event = BehaviorEvent(
+            logBehavior(BehaviorEvent(
                 kind: .select,
-                code: code.lowercased(),
+                code: inputBuffer.lowercased(),
                 codeType: candidate.codeType.behaviorLabel,
                 text: candidate.text,
                 rank: currentPage * pageSize + index,
                 trigger: trigger,
                 page: currentPage,
                 candidates: shown.map { BehaviorCandidate(t: $0.text, b: $0.isBoosted, j: $0.isJianma) }
-            )
-        }
-
-        // Continuous input: a word covering only the start of the buffer
-        // joins the marked text and the rest is searched again
-        if let head = candidate.headLength, filterMode == .none {
-            let split = CompositionSegments.split(inputBuffer, afterHead: head)
-            if !split.rest.isEmpty {
-                composition.pick(CompositionSegments.Segment(
-                    text: candidate.text, consumed: split.consumed, candidate: candidate, event: event))
-                inputBuffer = split.rest
-                longestDeletedCode = nil
-                updateMarkedText(client: sender)
-                searchCandidates()
-                showCandidateWindow(client: sender)
-                return true
-            }
-        }
-
-        let picked = takePickedSegments(client: sender)
-        if let event = event {
-            logBehavior(event, client: sender)
+            ), client: sender)
         }
         NSLog("MarmotIM: selectCandidate - text='%@', entryId=%u, baseFreq=%u, inputCode='%@'",
               candidate.text, candidate.entryId, candidate.baseFrequency, inputBuffer)
@@ -1309,7 +1223,7 @@ class InputController: IMKInputController {
         } else {
             outputText = candidate.text
         }
-        commitText(picked + outputText, client: sender)
+        commitText(outputText, client: sender)
 
         // If in filter mode, exit after selection
         if filterMode != .none {
@@ -1338,32 +1252,6 @@ class InputController: IMKInputController {
     }
 
     // MARK: - Text Commit
-
-    /// The words picked so far in continuous input, now on their way to the
-    /// app: their selections are logged and learned from, and the segments
-    /// cleared. Returns their text for the caller to commit.
-    private func takePickedSegments(client sender: Any!) -> String {
-        guard !composition.isEmpty else { return "" }
-        let text = composition.text
-        let engine = AppDelegate.shared?.dictionaryEngine
-        for segment in composition.segments {
-            if let event = segment.event {
-                logBehavior(event, client: sender)
-            }
-            engine?.recordSelection(entryId: segment.candidate.entryId,
-                                    baseFrequency: segment.candidate.baseFrequency)
-        }
-        composition.clear()
-        return text
-    }
-
-    /// Commits the words picked so far, if any
-    private func commitPickedSegments(client sender: Any!) {
-        let text = takePickedSegments(client: sender)
-        if !text.isEmpty {
-            commitText(text, client: sender)
-        }
-    }
 
     private func commitText(_ text: String, client sender: Any!) {
         if let client = sender as? IMKTextInput {
@@ -1419,7 +1307,7 @@ class InputController: IMKInputController {
             // Set inputBuffer as marked text so the client knows there's composing text
             // This fixes backspace issues in Chrome/Electron where empty marked text
             // causes backspace to delete both the composing character and committed text
-            displayText = composition.text + inputBuffer
+            displayText = inputBuffer
         }
 
         client.setMarkedText(
@@ -1572,7 +1460,6 @@ class InputController: IMKInputController {
         currentPage = 0
         isComposing = false
         longestDeletedCode = nil
-        composition.clear()
         // Reset filter mode state
         filterMode = .none
         filterBuffer = ""
@@ -1792,8 +1679,6 @@ class InputController: IMKInputController {
         // 带 .command 的 keyDown 一律 return false，所以组字状态确实会原封不动留到这里。
         if isComposing || !inputBuffer.isEmpty || filterMode != .none {
             NSLog("MarmotIM: insertTranscribedText - 丢弃未完成的编码 '%@' 后再上屏", inputBuffer)
-            // 已经选好的词（连续输入）是用户定下的字，不是编码，先上屏
-            commitPickedSegments(client: target)
             reset()
             hideCandidateWindow()
             target.setMarkedText("",
@@ -2023,77 +1908,5 @@ enum PagingRules {
     /// the app behind the composition.
     static func canTurnPage(forward: Bool, currentPage: Int, totalPages: Int) -> Bool {
         forward ? currentPage < totalPages - 1 : currentPage > 0
-    }
-}
-
-// MARK: - 连续输入
-
-/// Continuous input (连续输入): the words picked from the start of the buffer
-/// so far. `zhegeyijg`, pick 这个: the segment holds 这个 and the buffer is
-/// left with `yijg`. The picked text stays in the marked text, ahead of the
-/// remaining letters, until the whole buffer is used up and everything is
-/// committed at once. Free of the input controller so it can be tested.
-struct CompositionSegments {
-
-    struct Segment {
-        /// What it commits
-        let text: String
-        /// The letters it used, plus the delimiter after them if it took one
-        let consumed: String
-        /// Learned from when the composition is committed
-        let candidate: Candidate
-        /// Logged when the composition is committed, so a pick that is
-        /// taken back with Backspace leaves no trace
-        let event: BehaviorEvent?
-    }
-
-    private(set) var segments: [Segment] = []
-
-    /// True from a pick until the next letter is typed or deleted. Backspace
-    /// in that window takes the pick back instead of deleting a letter.
-    private(set) var justPicked = false
-
-    var isEmpty: Bool { segments.isEmpty }
-
-    /// The picked words, in order
-    var text: String { segments.map { $0.text }.joined() }
-
-    /// Splits `buffer` after a head of `length` letters. A delimiter right
-    /// after the head goes with it: `zhege'yijg` at 5 -> (`zhege'`, `yijg`).
-    static func split(_ buffer: String, afterHead length: Int) -> (consumed: String, rest: String) {
-        var end = buffer.index(buffer.startIndex, offsetBy: min(max(length, 0), buffer.count))
-        if end < buffer.endIndex, buffer[end] == CandidateRanker.segmentDelimiter {
-            end = buffer.index(after: end)
-        }
-        return (String(buffer[..<end]), String(buffer[end...]))
-    }
-
-    mutating func pick(_ segment: Segment) {
-        segments.append(segment)
-        justPicked = true
-    }
-
-    /// Takes the last pick back: its letters go in front of `buffer`. nil when
-    /// nothing has been picked. Several Backspaces in a row take back several.
-    mutating func reopenLast(buffer: String) -> String? {
-        guard let last = segments.popLast() else { return nil }
-        justPicked = !segments.isEmpty
-        return last.consumed + buffer
-    }
-
-    /// Drops the last pick without restoring its letters (Option+Backspace)
-    mutating func removeLast() {
-        _ = segments.popLast()
-        justPicked = false
-    }
-
-    /// A letter was typed or deleted
-    mutating func edited() {
-        justPicked = false
-    }
-
-    mutating func clear() {
-        segments = []
-        justPicked = false
     }
 }

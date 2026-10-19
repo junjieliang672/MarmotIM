@@ -678,31 +678,6 @@ class DictionaryEngine {
         return nil
     }
 
-    /// Entries whose wubi or pinyin code is exactly `code`, all as full
-    /// matches. Used for the head of a longer buffer in continuous input
-    /// (CandidateRanker.headCandidates): in `zhegeyijg`, `zhege` -> 这个.
-    func searchHead(code rawCode: String) -> [DictionaryMatch] {
-        let code = rawCode.lowercased()
-        guard !code.isEmpty, isPreloaded else { return [] }
-
-        var infos: [(entryId: UInt32, codeType: InputCodeType)] = []
-        var seen = Set<UInt32>()
-        let results = userTierIndex.exactMatch(code: code).map { ($0.entryIds, $0.codeType) }
-            + hotTierIndex.exactMatch(code: code).map { ($0.entryIds, $0.codeType) }
-        for (ids, codeType) in results {
-            for id in ids where seen.insert(id).inserted {
-                infos.append((id, codeType))
-            }
-        }
-
-        let entries = getEntries(ids: infos.map { $0.entryId })
-        return infos.compactMap { info in
-            entries[info.entryId].map {
-                DictionaryMatch(entry: $0, matchedCode: code, matchType: .full, codeType: info.codeType)
-            }
-        }
-    }
-
     /// Get multiple entries by IDs (batch fetch for efficiency)
     func getEntries(ids: [UInt32]) -> [UInt32: DictionaryEntry] {
         var results: [UInt32: DictionaryEntry] = [:]

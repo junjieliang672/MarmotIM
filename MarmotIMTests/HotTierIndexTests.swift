@@ -25,19 +25,6 @@ final class HotTierIndexTests: XCTestCase {
         XCTAssertTrue(results.contains { $0.code == "q" && $0.codeType == .wubi })
     }
 
-    func testExactMatchIgnoresLongerCodes() {
-        var index = HotTierIndex()
-        index.loadPinyinIndexes([("zhe", 1), ("zhege", 2)])
-        index.loadWubiIndexes([("zhe", 3)])
-        index.finalizePreload()
-
-        let results = index.exactMatch(code: "zhe")
-        XCTAssertEqual(results.count, 2)
-        XCTAssertEqual(results.first { $0.codeType == .pinyin }?.entryIds, [1])
-        XCTAssertEqual(results.first { $0.codeType == .wubi }?.entryIds, [3])
-        XCTAssertTrue(index.exactMatch(code: "zheg").isEmpty)
-    }
-
     func testSearchReturnsCorrectCodeType() {
         var index = HotTierIndex()
 

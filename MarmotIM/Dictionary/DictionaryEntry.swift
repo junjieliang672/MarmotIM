@@ -120,11 +120,6 @@ struct Candidate: Identifiable {
     /// (would not be #1 without recent user selection)
     var isBoosted: Bool
 
-    /// Continuous input: how many letters at the start of the buffer this
-    /// candidate covers (`zhege` of `zhegeyijg` -> 5). nil when it matches
-    /// the whole buffer, as every candidate did before continuous input.
-    var headLength: Int? = nil
-
     var id: UInt32 { entryId }
 
     /// Get base frequency for the current code type
